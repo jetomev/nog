@@ -1,6 +1,6 @@
 [package]
 name = "nog"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 
 [[bin]]
@@ -11,3 +11,6 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+flate2 = "1"
+tar = "0.4"
+zstd = "0.13"

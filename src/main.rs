@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod pacman;
+mod sync_db;
 mod tiers;
 
 use clap::{Parser, Subcommand};
@@ -47,11 +48,15 @@ enum Commands {
         #[arg(long)]
         promote: bool,
     },
+    /// Internal: dump the build date for a package from the sync DB
+    #[command(name = "_debug-dates", hide = true)]
+    DebugDates {
+        package: String,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
-
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
@@ -59,5 +64,37 @@ fn main() {
         Commands::Search { query } => commands::search(&query),
         Commands::Pin { package, tier } => commands::pin(&package, tier),
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
+        Commands::DebugDates { package } => debug_dates(&package),
+    }
+}
+
+fn debug_dates(package: &str) {
+    let dates = sync_db::load_build_dates();
+    match dates.get(package) {
+        Some(ts) => {
+            println!("package:    {}", package);
+            println!("build_date: {} (Unix timestamp)", ts);
+            // Use the system `date` command for a human-readable rendering —
+            // this mirrors what `date -d @<ts>` would show, and avoids pulling
+            // in a chrono/time dependency just for debug output.
+            let readable = std::process::Command::new("date")
+                .arg("-d")
+                .arg(format!("@{}", ts))
+                .output();
+            match readable {
+                Ok(out) if out.status.success() => {
+                    print!("readable:   {}", String::from_utf8_lossy(&out.stdout));
+                }
+                _ => {
+                    println!("readable:   (could not invoke `date`)");
+                }
+            }
+            println!("total packages indexed: {}", dates.len());
+        }
+        None => {
+            eprintln!("nog: no sync-DB entry for '{}'", package);
+            eprintln!("total packages indexed: {}", dates.len());
+            std::process::exit(1);
+        }
     }
 }
