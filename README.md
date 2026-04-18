@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.8.0](https://img.shields.io/badge/Version-0.8.0-purple.svg)
+![Version: 0.9.0](https://img.shields.io/badge/Version-0.9.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -35,14 +35,15 @@ nog was born from a simple frustration: why does Arch give you everything except
 ## Features
 
 - 🎚 **Three-tier package classification** — every package is Tier 1, Tier 2, or Tier 3
-- 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine *(evaluation logic in place; wired into `nog update` in Phase 3)*
-- 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held from automatic updates
-- ⏸ **Tier 2 awareness** — desktop environment and key applications flagged during installs
+- 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine
+- 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held for 30 days by default; expert mode swaps to manual-only promotion
+- 📦 **Status-grouped update output** — every `nog update` groups pending upgrades into **Ready / Held / Unknown** with Catppuccin Mocha tier colors
+- ❓ **Interactive Unknown handling** — packages with no sync-DB build date (AUR-only, locally-built, disabled-repo) are prompted case-by-case
 - ⚡ **Tier 3 fast track** — everything else flows through pacman on a short hold
 - 🎨 **Color-coded search** — every `nog search` result tagged with its tier
 - 📌 **Persistent tier pinning** — `nog pin <pkg> --tier=<N>` writes to `/etc/nog/tier-pins.toml`
-- 🔓 **Manual Tier 1 promotion** — explicit opt-in with `nog unlock --promote`
-- 🛡 **Pacman-native** — uses `pacman --ignore` for Tier 1 holds, no patching or shadowing
+- 🔓 **Promote escape hatch** — `nog unlock <pkg> --promote` force-upgrades a held Tier 1 package now
+- 🛡 **Pacman-native** — uses `pacman --ignore` for holds, no patching or shadowing
 - 📖 **Man page included** — `man nog` for full reference
 
 ---
@@ -51,11 +52,13 @@ nog was born from a simple frustration: why does Arch give you everything except
 
 Every package nog manages falls into one of three tiers. Tier assignments live in `/etc/nog/tier-pins.toml` and can be adjusted at any time with `nog pin`. Hold durations live in `/etc/nog/nog.conf`.
 
-### Tier 1 — 30-Day Hold
-The most critical packages on your system. Updates are held for **30 days** after upstream publish date — a full month of community testing before an update reaches your machine.
+### Tier 1 — 30-Day Hold (auto-release by default)
+The most critical packages on your system. Updates are held for **30 days** after upstream publish date — a full month of community testing before an update reaches your machine. Once the hold expires, the update flows through `nog update` like any other package.
 
 **Default Tier 1 packages:**
 `linux`, `linux-zen`, `linux-lts`, `linux-hardened`, `systemd`, `systemd-libs`, `glibc`, `grub`, `efibootmgr`, `mkinitcpio`, `pacman`, `mesa`
+
+> **Expert mode.** Set `manual_signoff = true` under `[tier1]` in `tier-pins.toml` to switch Tier 1 off the auto-release and require explicit `nog unlock <pkg> --promote` for every kernel/glibc/systemd update. Recommended only if you want to personally eyeball every critical upgrade.
 
 ### Tier 2 — 15-Day Hold
 Key desktop applications and system services. Updates are held for **15 days** — enough time for major regressions to surface, not so long that you fall behind.
@@ -65,8 +68,6 @@ Key desktop applications and system services. Updates are held for **15 days** �
 
 ### Tier 3 — 7-Day Hold
 Everything else. Updates are held for **7 days** — a short safety buffer without meaningful delay.
-
-> **Note:** hold windows are evaluated as of v0.8.0. The wiring that applies these holds during `nog update` is in progress (Phase 3).
 
 ---
 
@@ -144,12 +145,17 @@ nog --help
 
 When you run `sudo nog update`, nog:
 
-1. Loads `/etc/nog/tier-pins.toml` and identifies all Tier 1 packages
-2. Displays them clearly as `[HELD]` — they will not be touched
-3. Passes the upgrade to `pacman -Syu` with Tier 1 packages excluded via `--ignore`
-4. Tier 2 and Tier 3 packages update normally
+1. Calls `checkupdates` (pacman-contrib) to get the list of pending upgrades — no sync-DB side effects
+2. Classifies each pending package and evaluates its hold window using the sync-DB build date
+3. Groups the result into three buckets:
+   - **Ready to install** — hold expired, safe to upgrade
+   - **Held** — either still inside the hold window, or Tier 1 under `manual_signoff = true`
+   - **Unknown** — no build date in any enabled sync DB (AUR-only, locally-built, or disabled repo)
+4. For each **Unknown** package, prompts `update anyway? [y/N]`
+5. Hands off to `pacman -Syu --ignore=<held + skipped-unknowns>` so pacman only touches the Ready set
+6. If everything is held, exits cleanly without invoking pacman
 
-> Phase 3 (in progress) will expand this to evaluate every package against its tier's hold window and display a status-grouped output showing what's held and what's ready to install.
+All classification happens before pacman runs, so you always see the plan before the transaction.
 
 ### Example: `nog search`
 
@@ -165,17 +171,29 @@ extra/htop 3.4.1-1 [installed] [Tier 3 — 7d hold]
 ### Example: `nog update`
 
 ```
-nog: checking tier holds before update...
+nog: checking for pending updates...
 
-  Tier 1 packages (held):
-    [HELD] linux
-    [HELD] linux-zen
-    [HELD] systemd
-    [HELD] glibc
+Ready to install (2):
+  libmpc          1.4.0-1  -> 1.4.1-1   [Tier 3 · 24 days past window]
+  lib32-libngtcp2 1.22.0-1 -> 1.22.1-1  [Tier 3 · 14 days past window]
 
-nog: running update (Tier 1 packages excluded)...
+Held (2):
+  linux           6.19.10-1 -> 6.19.11-1 [Tier 1 · 22 days remaining]
+  firefox         138.0-1   -> 138.0.2-1 [Tier 2 · 11 days remaining]
+
+Unknown (1):
+  my-local-pkg    0.9-1 -> 1.0-1 [Tier 3 · no build date in sync DB]
+
+nog: 1 package(s) have no build date in any sync DB.
+      This usually means an AUR-only, locally-built, or disabled-repo package.
+
+  my-local-pkg (Tier 3 0.9-1 -> 1.0-1) — update anyway? [y/N] n
+
+nog: handing off to pacman...
 :: Starting full system upgrade...
 ```
+
+(Package names are tier-colored — Tier 1 red, Tier 2 yellow, Tier 3 green — using the Catppuccin Mocha palette.)
 
 ---
 
@@ -195,7 +213,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "0.8.0"
+version = "0.9.0"
 log_level = "info"
 
 [paths]
@@ -215,7 +233,9 @@ The tier assignment file — who goes in Tier 1, Tier 2, or Tier 3. Anything not
 
 ```toml
 [tier1]
-manual_signoff = true
+# false (default): Tier 1 auto-updates after the 30-day hold window.
+# true (expert):   Tier 1 stays wholesale held until `nog unlock <pkg> --promote`.
+manual_signoff = false
 packages = [
     "linux",
     "linux-zen",
@@ -238,6 +258,8 @@ packages = [
 manual_signoff = false
 # everything not listed above falls here automatically
 ```
+
+The `manual_signoff` field is only meaningful on `[tier1]`. Tier 2 and Tier 3 do not consult it.
 
 ---
 
@@ -272,8 +294,10 @@ nog is built around one principle: **never surprise the user with a kernel updat
 Every system action goes through three layers of protection:
 
 1. **Classification** — every package is assigned a tier before any operation
-2. **Transparency** — holds and their remaining duration are always reported before a change is made
-3. **Pacman-native enforcement** — Tier 1 holds use pacman's own `--ignore` mechanism, so there is no way for nog to silently bypass them
+2. **Transparency** — holds, their remaining duration, and their reason are always reported before a change is made
+3. **Pacman-native enforcement** — holds use pacman's own `--ignore` mechanism, so there is no way for nog to silently bypass them
+
+Explicit commands (`install`, `remove`, `pin`) execute the user's intent without gating — tier protection lives in the passive path (`update`). Installing `linux-lts` is always allowed; what's governed is when the *next* kernel update lands on your machine.
 
 nog does not replace pacman. It does not patch pacman. It does not shadow pacman commands. It is a small, readable wrapper — you can read the entire source in an afternoon.
 
@@ -281,27 +305,28 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 
 ## Roadmap
 
-### v0.8.0 — Current
+### v0.9.0 — Current
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
 - [x] `nog search` with color-coded tier annotations
 - [x] System-wide install at `/usr/bin/nog`
-- [x] `nog update` with Tier 1 excluded via `pacman --ignore`
 - [x] `nog pin` with persistent tier changes to `tier-pins.toml`
 - [x] AUR package
 - [x] Man page
 - [x] **Phase 1 — sync DB reader** — reads every enabled pacman sync database (gzip + zstd), extracts build dates for all packages across all repos
-- [x] **Phase 2 — hold evaluation logic** — pure function returning Expired / Holding / Unknown for any package; 6 unit tests; 30/15/7 day windows now live in `nog.conf`
+- [x] **Phase 2 — hold evaluation logic** — pure function returning Expired / Holding / Unknown for any package; 6 unit tests; 30/15/7 day windows live in `nog.conf`
+- [x] **Phase 3 — wired into `nog update`** — `checkupdates` integration, status-grouped output (Ready / Held / Unknown) with Catppuccin Mocha tier colors, interactive y/N prompt for Unknowns, `manual_signoff` honored as Tier 1 expert-mode toggle, Tier 1 install block removed
 
 ### v1.0 — In Progress
 - [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
 - [x] ~~Phase 2 — hold evaluation logic~~ ✅
-- [ ] **Phase 3 — wire into `nog update`** — status-grouped output (Held / Ready to install) with Catppuccin tier colors; interactive qualification for Unknown packages
+- [x] ~~Phase 3 — wire into `nog update`~~ ✅
 - [ ] **Phase 4 — AUR helper detection** — auto-detect `yay` or `paru`; classify and hold AUR packages using the detected helper
 - [ ] **Phase 5 — polish** — updated man page, updated help text, terminal screenshots, CHANGELOG finalization
 
 ### Future
+- [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
 - [ ] Chaotic-AUR binary package (submit once v1.0 is stable)
 - [ ] `nog history` — log of all tier changes and package actions
 - [ ] `nog status` — dashboard showing what's held, what's ready, what's overdue
@@ -311,6 +336,18 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 ---
 
 ## Changelog
+
+### v0.9.0 — April 18, 2026
+**Phase 3 — wired into `nog update` (the tier system goes live)**
+- 🔌 `nog update` now calls `checkupdates` (pacman-contrib) to list pending upgrades *without* the `-Sy` side effect, then classifies every pending package against its tier's hold window
+- 📊 **Status-grouped output**: three labelled buckets — `Ready to install`, `Held`, `Unknown` — each showing package name, version bump, tier, and either "N days past window", "N days remaining", or "no build date in sync DB"
+- 🎨 Tier-colored output using the **Catppuccin Mocha** palette (Tier 1 red `#F38BA8`, Tier 2 yellow `#F9E2AF`, Tier 3 green `#A6E3A1`) — muted subtext color `#A6ADC8` for version/metadata
+- ❓ Interactive `[y/N]` prompt per Unknown package (AUR-only, locally-built, or disabled-repo); EOF / non-TTY stdin auto-skips remaining Unknowns with a warning instead of hanging
+- 🎚 **Tier 1 policy change, novice-friendly default:** `manual_signoff` now defaults to `false` — Tier 1 auto-updates once the 30-day hold expires. Expert users can set `manual_signoff = true` to restore always-held-until-promoted behavior
+- 🔓 `nog unlock <pkg> --promote` kept as the expert-mode escape hatch: force-upgrade a held Tier 1 package right now, bypassing the hold and `manual_signoff`
+- 🗑 **Tier 1 install block removed** — `nog install linux-lts` now proceeds normally; tier classification is shown as informational output only. Explicit user commands execute user intent; tier protection lives in the passive update path
+- 🧹 `nog unlock` without `--promote` now honestly reports it has no session state to toggle, and points the user at `--promote` for the real action
+- ⚠ Warnings reduced to 7 — previously-unused `is_manual_signoff` method is now live; the orphaned `tier1_packages()` helper was removed
 
 ### v0.8.0 — April 18, 2026
 **Phase 2 — Hold evaluation logic (the date-math engine)**
