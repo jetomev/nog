@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-purple.svg)
+![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -57,7 +57,7 @@ The most critical packages on your system. These are **never updated automatical
 `linux`, `linux-zen`, `linux-lts`, `linux-hardened`, `systemd`, `systemd-libs`, `glibc`, `grub`, `efibootmgr`, `mkinitcpio`, `pacman`, `mesa`
 
 ### Tier 2 — 10-Day Hold (Notification)
-Key desktop applications and system services. In v0.6.0 these pass through to pacman but are flagged during install so you know what's changing.
+Key desktop applications and system services. In v0.7.0 these pass through to pacman but are flagged during install so you know what's changing.
 
 **Default Tier 2 packages:**
 `plasma-meta`, `plasma-desktop`, `sddm`, `pipewire`, `pipewire-pulse`, `wireplumber`, `networkmanager`, `firefox`, `dolphin`, `konsole`, `kate`, `grubforge`, `alacritty`, `fish`, `alacrittyforge`
@@ -190,7 +190,7 @@ General nog settings — version, logging, paths, and the hold durations for eac
 
 ```toml
 [general]
-version = "0.6.0"
+version = "0.7.0"
 log_level = "info"
 
 [paths]
@@ -250,6 +250,7 @@ nog/
 |   |   |-- mod.rs             # All subcommand implementations
 |   |-- tiers.rs               # Tier classification engine
 |   |-- pacman.rs              # pacman subprocess wrapper
+|   |-- sync_db.rs             # pacman sync-DB reader (build-date lookup)
 |   |-- config.rs              # Config loader
 |-- config/
 |   |-- nog.conf               # Default nog configuration
@@ -277,7 +278,7 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 
 ## Roadmap
 
-### v0.6.0 — Current
+### v0.7.0 — Current
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
@@ -287,16 +288,14 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 - [x] `nog pin` with persistent tier changes to `tier-pins.toml`
 - [x] AUR package
 - [x] Man page
+- [x] **Phase 1 — sync DB reader** — reads every enabled pacman sync database (gzip and zstd), extracts build dates for all packages across all repos
 
-### v1.0 — Planned
-- [ ] **Date-based hold system** — 30/15/7 day automatic holds replacing manual sign-off
-- [ ] **Build date query** — read package release dates from pacman sync database
-- [ ] **Selective update logic** — only pass packages whose hold has expired to pacman
-- [ ] **AUR helper detection** — auto-detect `yay` or `paru` for AUR package queries
-- [ ] **AUR package support** — classify and hold AUR packages using the detected helper
-- [ ] **Chaotic-AUR verified** — confirm binary repo works natively (no special handling required)
-- [ ] **Updated man page** — reflect new tier model and AUR support
-- [ ] **Terminal screenshots** — add visual examples for all major commands
+### v1.0 — In Progress
+- [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
+- [ ] **Phase 2 — date comparison logic** — expired/held evaluation per tier
+- [ ] **Phase 3 — wire into `nog update`** — status-grouped output (Held / Ready to install) with Catppuccin tier colors
+- [ ] **Phase 4 — AUR helper detection** — auto-detect `yay` or `paru`; classify and hold AUR packages using the detected helper
+- [ ] **Phase 5 — polish** — updated man page, updated help text, terminal screenshots, CHANGELOG finalization
 
 ### Future
 - [ ] Chaotic-AUR binary package (submit once v1.0 is stable)
@@ -308,6 +307,18 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 ---
 
 ## Changelog
+
+### v0.7.0 — April 18, 2026
+**Phase 1 — Sync DB reader (foundation for date-based holds)**
+- 🧱 New `sync_db` module reads every enabled pacman sync database and builds a map of package → build-date Unix timestamp
+- 🗜 Auto-detects **gzip** (core, extra, multilib) and **zstd** (Chaotic-AUR and similar) compression via magic-byte sniffing
+- 📋 Respects `pacman.conf` repo priority — first repo wins on name collisions, matching pacman's own resolution
+- 🛡 Graceful fallback when `pacman.conf` is unreadable — scans the sync directory directly
+- 📦 Indexes **18,000+** packages across all enabled repos on a standard Arch install
+- 🧪 Verified against `pacman -Si` output for official and Chaotic-AUR packages — exact timestamp match
+- ➕ Dependencies added: `flate2`, `tar`, `zstd`
+- 🔢 Version bumped to 0.7.0 to mark v1.0 development in progress
+- ℹ This phase adds no user-visible commands. It is infrastructure for Phase 2 and onward.
 
 ### v0.6.0 — April 7, 2026
 **AUR package + man page**
