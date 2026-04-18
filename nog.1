@@ -1,0 +1,153 @@
+.\" nog.1 — nog man page
+.\" GNU GPL v3 — see LICENSE
+.TH NOG 1 "April 2026" "nog v0.6.0" "User Commands"
+.
+.SH NAME
+nog \- tier-aware package manager for KognogOS
+.
+.SH SYNOPSIS
+.B nog
+.I <command>
+.RI [ options ]
+.RI [ packages ]
+.
+.SH DESCRIPTION
+.B nog
+is the package manager for KognogOS. It wraps
+.BR pacman (8)
+with a three-tier update management system, giving every package on the
+system a protection level based on how critical it is.
+.PP
+Tier 1 packages — the kernel, bootloader, and core libraries — are never
+updated automatically and require explicit sign-off. Tier 2 packages are
+held for 10 days after a new version is published. Tier 3 packages update
+freely on the next
+.BR "nog update" .
+.PP
+.B nog
+requires root privileges for install, remove, update, and unlock operations.
+It can be run without root to search or view tier information.
+.
+.SH COMMANDS
+.TP
+.B nog install \fIpackage\fR [\fIpackage\fR...]
+Install one or more packages. Tier 1 packages are blocked — use
+.B nog unlock
+first. Tier 2 packages proceed with a hold notice. Tier 3 packages install immediately.
+.TP
+.B nog remove \fIpackage\fR [\fIpackage\fR...]
+Remove one or more packages via
+.BR pacman (8).
+.TP
+.B nog update
+Synchronize package databases and upgrade all packages. Tier 1 packages
+are automatically excluded via
+.BR pacman 's
+.B --ignore
+flag — they will not be touched under any circumstances.
+.TP
+.B nog search \fIquery\fR
+Search for packages matching
+.IR query .
+Results are annotated with tier information:
+.RS
+.IP \(bu 2
+.B [Tier 1 — manual sign-off]
+shown in red
+.IP \(bu 2
+.B [Tier 2 — 10d hold]
+shown in yellow
+.IP \(bu 2
+.B [Tier 3 — fast-track]
+shown in green
+.RE
+.TP
+.B nog pin \fIpackage\fR \fB--tier=\fR\fI<1|2|3>\fR
+Pin a package to a specific tier. The change is written immediately to
+.IR /etc/nog/tier-pins.toml
+and survives reboots.
+.TP
+.B nog unlock \fIpackage\fR [\fB--promote\fR]
+Unlock a Tier 1 package for manual upgrade. Without
+.BR --promote ,
+prints a confirmation message only. With
+.BR --promote ,
+calls
+.BR pacman (8)
+to install or upgrade the package immediately.
+.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Print help information.
+.TP
+.B \-V, \-\-version
+Print version information.
+.
+.SH FILES
+.TP
+.I /etc/nog/nog.conf
+Main nog configuration file. Defines paths, hold windows, and repo locations.
+.TP
+.I /etc/nog/tier-pins.toml
+Tier assignments for all managed packages. Edited directly by
+.B nog pin
+or manually by the system administrator.
+.TP
+.I /usr/bin/nog
+The nog binary.
+.
+.SH TIER SYSTEM
+.SS Tier 1 — Manual Sign-Off Required
+Packages that are never auto-updated. Includes:
+.BR linux ", " linux-zen ", " linux-lts ", " systemd ", " glibc ", "
+.BR grub ", " efibootmgr ", " mkinitcpio ", " pacman ", " mesa .
+.SS Tier 2 — 10-Day Hold
+Key desktop applications held for 10 days after release. Includes:
+.BR plasma-desktop ", " sddm ", " pipewire ", " networkmanager ", "
+.BR firefox ", " dolphin ", " konsole ", " kate ", " grubforge .
+.SS Tier 3 — Fast Track
+Everything else. A minimal 3-day hold applies, then updates flow through
+automatically on the next
+.BR "nog update" .
+.
+.SH EXAMPLES
+.TP
+Install a package:
+.B sudo nog install htop
+.TP
+Update the system (Tier 1 excluded):
+.B sudo nog update
+.TP
+Search with tier annotations:
+.B nog search firefox
+.TP
+Pin a package to Tier 2:
+.B sudo nog pin htop --tier=2
+.TP
+Unlock and upgrade a Tier 1 package:
+.B sudo nog unlock linux-zen --promote
+.
+.SH SEE ALSO
+.BR pacman (8),
+.BR grubforge (1),
+.BR makepkg (8)
+.
+.SH AUTHORS
+.B jetomev
+\(em idea, vision, direction, testing
+.PP
+.B Claude (Anthropic)
+\(em co-developer, architecture, implementation
+.
+.SH LICENSE
+nog is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License v3.0 as published by the
+Free Software Foundation.
+.PP
+See
+.I /usr/share/licenses/nog/LICENSE
+or
+.UR https://www.gnu.org/licenses/gpl-3.0.html
+.UE
+for the full license text.

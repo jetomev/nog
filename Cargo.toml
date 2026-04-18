@@ -1,0 +1,13 @@
+[package]
+name = "nog"
+version = "0.6.0"
+edition = "2021"
+
+[[bin]]
+name = "nog"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

@@ -1,0 +1,42 @@
+[tier1]
+hold_days = 0
+manual_signoff = true
+packages = [
+    "linux",
+    "linux-zen",
+    "linux-lts",
+    "linux-hardened",
+    "systemd",
+    "systemd-libs",
+    "glibc",
+    "grub",
+    "efibootmgr",
+    "mkinitcpio",
+    "pacman",
+    "mesa",
+]
+
+[tier2]
+hold_days = 10
+manual_signoff = false
+packages = [
+    "plasma-meta",
+    "plasma-desktop",
+    "sddm",
+    "pipewire",
+    "pipewire-pulse",
+    "wireplumber",
+    "networkmanager",
+    "firefox",
+    "dolphin",
+    "konsole",
+    "kate",
+    "grubforge",
+    "alacritty",
+    "fish",
+    "alacrittyforge",
+]
+
+[tier3]
+hold_days = 3
+manual_signoff = false
