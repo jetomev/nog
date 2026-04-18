@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod holds;
 mod pacman;
 mod sync_db;
 mod tiers;
@@ -53,6 +54,11 @@ enum Commands {
     DebugDates {
         package: String,
     },
+    /// Internal: evaluate the hold status for a package
+    #[command(name = "_debug-hold", hide = true)]
+    DebugHold {
+        package: String,
+    },
 }
 
 fn main() {
@@ -65,6 +71,7 @@ fn main() {
         Commands::Pin { package, tier } => commands::pin(&package, tier),
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
         Commands::DebugDates { package } => debug_dates(&package),
+        Commands::DebugHold { package } => debug_hold(&package),
     }
 }
 
@@ -74,9 +81,6 @@ fn debug_dates(package: &str) {
         Some(ts) => {
             println!("package:    {}", package);
             println!("build_date: {} (Unix timestamp)", ts);
-            // Use the system `date` command for a human-readable rendering —
-            // this mirrors what `date -d @<ts>` would show, and avoids pulling
-            // in a chrono/time dependency just for debug output.
             let readable = std::process::Command::new("date")
                 .arg("-d")
                 .arg(format!("@{}", ts))
@@ -95,6 +99,58 @@ fn debug_dates(package: &str) {
             eprintln!("nog: no sync-DB entry for '{}'", package);
             eprintln!("total packages indexed: {}", dates.len());
             std::process::exit(1);
+        }
+    }
+}
+
+fn debug_hold(package: &str) {
+    let cfg = config::NogConfig::load_default();
+    let tier_manager = match tiers::TierManager::load(&cfg.paths.tier_pins) {
+        Ok(tm) => tm,
+        Err(e) => {
+            eprintln!("nog: could not load tier pins: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let tier = tier_manager.classify(package);
+    let dates = sync_db::load_build_dates();
+    let status = holds::evaluate(
+        package,
+        tier.clone(),
+        &dates,
+        &cfg.holds,
+        std::time::SystemTime::now(),
+    );
+
+    println!("package:   {}", package);
+    println!("tier:      {}", tier);
+    println!("window:    {} days", match tier {
+        tiers::Tier::One => cfg.holds.tier1_days,
+        tiers::Tier::Two => cfg.holds.tier2_days,
+        tiers::Tier::Three => cfg.holds.tier3_days,
+    });
+
+    match dates.get(package) {
+        Some(ts) => println!("built:     {} (Unix timestamp)", ts),
+        None => println!("built:     (unknown — not in any sync DB)"),
+    }
+
+    match status {
+        holds::HoldStatus::Expired { days_past_window } => {
+            println!("status:    READY TO INSTALL (hold expired {} day{} ago)",
+                days_past_window,
+                if days_past_window == 1 { "" } else { "s" },
+            );
+        }
+        holds::HoldStatus::Holding { days_remaining } => {
+            println!("status:    HELD ({} day{} remaining)",
+                days_remaining,
+                if days_remaining == 1 { "" } else { "s" },
+            );
+        }
+        holds::HoldStatus::Unknown => {
+            println!("status:    UNKNOWN (no build date available)");
         }
     }
 }

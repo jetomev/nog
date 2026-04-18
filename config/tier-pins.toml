@@ -1,5 +1,4 @@
 [tier1]
-hold_days = 0
 manual_signoff = true
 packages = [
     "linux",
@@ -17,7 +16,6 @@ packages = [
 ]
 
 [tier2]
-hold_days = 10
 manual_signoff = false
 packages = [
     "plasma-meta",
@@ -38,5 +36,5 @@ packages = [
 ]
 
 [tier3]
-hold_days = 3
 manual_signoff = false
+# everything not listed above falls here automatically

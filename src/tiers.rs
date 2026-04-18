@@ -1,10 +1,8 @@
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 struct TierConfig {
-    hold_days: u32,
     manual_signoff: bool,
     packages: Option<Vec<String>>,
 }
@@ -26,9 +24,9 @@ pub enum Tier {
 impl std::fmt::Display for Tier {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Tier::One   => write!(f, "Tier 1 (manual sign-off required)"),
-            Tier::Two   => write!(f, "Tier 2 (10-day hold)"),
-            Tier::Three => write!(f, "Tier 3 (fast-track)"),
+            Tier::One   => write!(f, "Tier 1"),
+            Tier::Two   => write!(f, "Tier 2"),
+            Tier::Three => write!(f, "Tier 3"),
         }
     }
 }
@@ -64,14 +62,6 @@ impl TierManager {
         self.classify(package) == Tier::One && self.pins.tier1.manual_signoff
     }
 
-    pub fn hold_days(&self, package: &str) -> u32 {
-        match self.classify(package) {
-            Tier::One   => self.pins.tier1.hold_days,
-            Tier::Two   => self.pins.tier2.hold_days,
-            Tier::Three => self.pins.tier3.hold_days,
-        }
-    }
-
     pub fn tier1_packages(&self) -> Vec<String> {
         self.pins.tier1.packages.clone().unwrap_or_default()
     }
@@ -92,7 +82,6 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
         .map(|l| l.to_string())
         .collect();
 
-    // Find the right tier section and add the package
     // Tier 3 is the default — just removing from other tiers is enough
     if tier == 3 {
         let new_contents = lines.join("\n") + "\n";
@@ -126,7 +115,6 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
         return Err(format!("Could not find packages list for tier {}", tier));
     }
 
-    // Write back
     let new_contents = lines.join("\n") + "\n";
     fs::write(path, new_contents)
         .map_err(|e| format!("Could not write {}: {}", path, e))?;
