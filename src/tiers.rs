@@ -61,10 +61,6 @@ impl TierManager {
     pub fn is_manual_signoff(&self, package: &str) -> bool {
         self.classify(package) == Tier::One && self.pins.tier1.manual_signoff
     }
-
-    pub fn tier1_packages(&self) -> Vec<String> {
-        self.pins.tier1.packages.clone().unwrap_or_default()
-    }
 }
 
 pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {

@@ -1,5 +1,7 @@
 [tier1]
-manual_signoff = true
+# manual_signoff = false (default): Tier 1 auto-updates after the 30-day hold window.
+# Set to true for expert mode — Tier 1 stays wholesale held until `nog unlock <pkg> --promote`.
+manual_signoff = false
 packages = [
     "linux",
     "linux-zen",

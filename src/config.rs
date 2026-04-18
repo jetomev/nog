@@ -79,9 +79,9 @@ impl NogConfig {
                 stable:  "https://repo.kognog.org/stable".to_string(),
             },
             holds: HoldsConfig {
-                tier1_days: 0,
-                tier2_days: 10,
-                tier3_days: 3,
+                tier1_days: 30,
+                tier2_days: 15,
+                tier3_days: 7,
             },
         }
     }
