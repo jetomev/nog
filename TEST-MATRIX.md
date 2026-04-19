@@ -43,7 +43,7 @@ Conventions:
 - [ ] **3.2** `$ nog install linux-lts` — Tier 1 info line printed ("critical system package, will be protected by 30-day hold on future updates"); package installs cleanly; **no block, no `unlock` requirement**
 - [ ] **3.3** `$ nog install <AUR-only-package>` (pick any from AUR that isn't in sync repos) — helper builds + installs from AUR; nog shows the tier classification (Tier 3 if not pinned)
 - [ ] **3.4** `$ nog install htop nano` — multi-package install works; tier info printed once per package; single transaction
-- [ ] **3.5** `$ nog install bogus-nonexistent-xyz` — helper reports "package not found"; nog exits with non-zero status; no phantom sudo prompt
+- [ ] **3.5** `$ nog install bogus-nonexistent-xyz` — helper reports "package not found" with a clear message; **no phantom sudo prompt**; nog doesn't falsely claim a successful install. Exit status is helper-specific (yay returns 0 with "nothing to do"; paru may return non-zero) — don't key the pass on a specific code.
 
 ---
 
@@ -161,7 +161,7 @@ Conventions:
 
 - [ ] **15.1** `$ which nog` → `/usr/bin/nog`
 - [ ] **15.2** Binary is single-file, no runtime dependencies other than dynamic libc, checkupdates, and optionally yay/paru
-- [ ] **15.3** `$ ls /etc/nog/` → exactly `nog.conf`, `tier-pins.toml`; nothing else
+- [ ] **15.3** `$ ls /etc/nog/` → `nog.conf` and `tier-pins.toml` must be present. `.pacnew`/`.pacsave` siblings (e.g., `nog.conf.pacsave`) are **expected** after any uninstall/reinstall cycle — the PKGBUILD's `backup=` directive intentionally preserves user-modified configs. The pass criterion is that no files were created by `nog` itself outside those two configs, not that the directory contains exactly two entries.
 - [ ] **15.4** nog has created no files anywhere else during normal operation (check `find / -name "nog*" -newer /etc/nog/nog.conf 2>/dev/null` if paranoid)
 
 ---
