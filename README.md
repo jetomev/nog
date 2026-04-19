@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.10.0](https://img.shields.io/badge/Version-0.10.0-purple.svg)
+![Version: 0.11.0](https://img.shields.io/badge/Version-0.11.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -38,8 +38,8 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine
 - 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held for 30 days by default; expert mode swaps to manual-only promotion
 - 📦 **Status-grouped update output** — every `nog update` groups pending upgrades into **Ready / Held / Unknown** with Catppuccin Mocha tier colors
-- 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified and bucketed alongside official repo packages, transactions are handed off to the helper for combined `-Syu`
-- ❓ **Interactive Unknown handling** — packages with no sync-DB build date (AUR-only, locally-built, disabled-repo) are prompted case-by-case
+- 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified, date-evaluated (via the helper's cached metadata), and bucketed alongside official repo packages; transactions are handed off to the helper for combined `-Syu`
+- ❓ **Interactive Unknown handling** — packages with no resolvable build date (locally-built, disabled-repo, or AUR query failure) are prompted case-by-case
 - 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman` and `sudo tee /etc/nog/tier-pins.toml`. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
 - ⚡ **Tier 3 fast track** — everything else flows through pacman on a short hold
 - 🎨 **Color-coded search** — every `nog search` result tagged with its tier
@@ -152,16 +152,17 @@ When you run `nog update`, nog:
 
 1. Calls `checkupdates` (pacman-contrib) to get the list of pending **official repo** upgrades — no sync-DB side effects
 2. If an AUR helper is configured, calls `<helper> -Qua` to append pending **AUR** upgrades to the same list
-3. Classifies each pending package and evaluates its hold window using the sync-DB build date (AUR packages have no sync-DB entry and fall into the Unknown bucket for now)
-4. Groups the result into three buckets:
+3. Loads build dates: first from every enabled pacman sync DB, then (for AUR packages not found in any sync DB) from the helper's cached metadata via `<helper> -Sai`
+4. Classifies each pending package and evaluates its hold window against the combined build-date map
+5. Groups the result into three buckets:
    - **Ready to install** — hold expired, safe to upgrade
    - **Held** — either still inside the hold window, or Tier 1 under `manual_signoff = true`
-   - **Unknown** — no build date in any enabled sync DB (AUR-only, locally-built, or disabled repo)
-5. For each **Unknown** package, prompts `update anyway? [y/N]`
-6. Hands off the transaction:
+   - **Unknown** — no resolvable build date (locally-built, disabled-repo, or helper lookup failed)
+6. For each **Unknown** package, prompts `update anyway? [y/N]`
+7. Hands off the transaction:
    - With helper: `<helper> -Syu --ignore=<held + skipped-unknowns>` — one combined upgrade for official + AUR. The helper runs as your user and sudo-s pacman internally for the pacman step.
    - Without helper: `sudo pacman -Syu --ignore=<...>` — official repos only.
-7. If everything is held, exits cleanly without invoking anything.
+8. If everything is held, exits cleanly without invoking anything.
 
 All classification happens before the transaction, so you always see the plan before anything is touched.
 
@@ -185,19 +186,20 @@ Ready to install (2):
   libmpc          1.4.0-1  -> 1.4.1-1   [Tier 3 · 24 days past window]
   lib32-libngtcp2 1.22.0-1 -> 1.22.1-1  [Tier 3 · 14 days past window]
 
-Held (2):
-  linux           6.19.10-1 -> 6.19.11-1 [Tier 1 · 22 days remaining]
-  firefox         138.0-1   -> 138.0.2-1 [Tier 2 · 11 days remaining]
+Held (3):
+  linux             6.19.10-1 -> 6.19.11-1 [Tier 1 · 22 days remaining]
+  firefox           138.0-1   -> 138.0.2-1 [Tier 2 · 11 days remaining]
+  fresh-editor-bin  0.2.24-1  -> 0.2.25-1  [Tier 3 · 6 days remaining]
 
 Unknown (1):
   my-local-pkg    0.9-1 -> 1.0-1 [Tier 3 · no build date in sync DB]
 
-nog: 1 package(s) have no build date in any sync DB.
-      This usually means an AUR-only, locally-built, or disabled-repo package.
+nog: 1 package(s) have no resolvable build date.
+      This usually means a locally-built package or an AUR query failure.
 
   my-local-pkg (Tier 3 0.9-1 -> 1.0-1) — update anyway? [y/N] n
 
-nog: handing off to pacman...
+nog: handing off to yay...
 :: Starting full system upgrade...
 ```
 
@@ -221,7 +223,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "0.10.0"
+version = "0.11.0"
 log_level = "info"
 
 [paths]
@@ -390,7 +392,7 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 
 ## Roadmap
 
-### v0.10.0 — Current
+### v0.11.0 — Current
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
@@ -403,13 +405,15 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] **Phase 2 — hold evaluation logic** — pure function returning Expired / Holding / Unknown for any package; 6 unit tests; 30/15/7 day windows live in `nog.conf`
 - [x] **Phase 3 — wired into `nog update`** — `checkupdates` integration, status-grouped output (Ready / Held / Unknown) with Catppuccin Mocha tier colors, interactive y/N prompt for Unknowns, `manual_signoff` honored as Tier 1 expert-mode toggle, Tier 1 install block removed
 - [x] **Phase 4 — AUR helper detection** — auto-detects `yay` / `paru`; AUR pending upgrades fold into the status-grouped output; transactions hand off to the helper for combined `-Syu`; one consistent no-sudo rule; `nog pin` writes via `sudo tee`; root-guard catches `sudo nog` invocations when a helper is configured
+- [x] **Phase 5a — AUR build-date resolution** — AUR pending upgrades now get real build dates via the helper's cached metadata (`<helper> -Sai`), parsed to Unix timestamps and fed into the hold evaluator; AUR packages bucket as Ready/Held based on actual dates instead of always Unknown; zero new dependencies, zero new network surface from nog itself
 
 ### v1.0 — In Progress
 - [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
 - [x] ~~Phase 2 — hold evaluation logic~~ ✅
 - [x] ~~Phase 3 — wire into `nog update`~~ ✅
 - [x] ~~Phase 4 — AUR helper detection~~ ✅
-- [ ] **Phase 5 — polish** — full man page refresh, updated help text, terminal screenshots, CHANGELOG finalization, AUR build-date lookup via AUR RPC (lets real hold windows apply to AUR packages instead of bucketing them as Unknown)
+- [x] ~~Phase 5a — AUR build-date resolution~~ ✅
+- [ ] **Phase 5b — documentation polish** — full man page rewrite (COMMANDS and TIER SYSTEM sections still reflect pre-v0.8 behavior), updated help text, terminal screenshots (asciinema or static), CHANGELOG finalization
 - [ ] **AUR v1.0 submission** — regenerate `PKGBUILD` + `.SRCINFO` pinned to the v1.0.0 GitHub tarball, push to `ssh://aur@aur.archlinux.org/nog.git`
 - [ ] **v1.0 dogfood** — full uninstall (`yay -R nog`), rebuild from the fresh PKGBUILD, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end on a real system
 
@@ -424,6 +428,16 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v0.11.0 — April 18, 2026
+**Phase 5a — AUR build-date resolution (the last Unknown falls)**
+- 📅 AUR pending upgrades now get real Unix-timestamp build dates by parsing the `Last Modified` field from the helper's cached metadata (`<helper> -Sai`) — no direct AUR RPC calls from nog
+- 🧮 The hold evaluator sees a unified build-date map (sync-DB ∪ AUR) and buckets AUR packages as **Ready** or **Held** based on their actual dates, with countdown/past-window reasons identical to official repo packages
+- 🧩 New `aur::build_dates_for(helper, packages)` — batched `-Sai` subprocess call, robust colon-split parser that tolerates variable column widths across yay/paru, Unix-timestamp conversion via `date -d`
+- 🛟 **Soft-fail discipline preserved** — if the helper is unreachable, the `Last Modified` line is missing, or `date` can't parse the string, those packages fall back to the Unknown bucket and hit the existing y/N prompt. No hard errors, no crashes, no change to current user-facing error paths
+- 🔒 **Zero new dependencies, zero new network surface from nog itself** — threat model identical to v0.10.0: nog spawns subprocesses, the helper owns all AUR network I/O
+- 🗣 Unknown-bucket message updated — "no resolvable build date" is more accurate than "no build date in any sync DB" now that lookup has multiple paths
+- ⚠ Only truly orphan packages (locally-built, disabled-repo, AUR query failure) reach the prompt now — most previous "Unknown" cases resolve automatically
 
 ### v0.10.0 — April 18, 2026
 **Phase 4 — AUR helper integration + unified no-sudo privilege model**
