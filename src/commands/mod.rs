@@ -93,7 +93,7 @@ pub fn install(packages: &[String]) {
         None    => pacman::install(packages),
     };
     if !status.success() {
-        eprintln!("nog: install exited with status {}", status);
+        eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -101,7 +101,7 @@ pub fn install(packages: &[String]) {
 pub fn remove(packages: &[String]) {
     let status = pacman::remove(packages);
     if !status.success() {
-        eprintln!("nog: pacman exited with status {}", status);
+        eprintln!("nog: pacman exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -261,7 +261,7 @@ pub fn update() {
         }
     };
     if !status.success() {
-        eprintln!("nog: upgrade exited with status {}", status);
+        eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -359,6 +359,7 @@ fn print_buckets(
 }
 
 pub fn search(query: &str) {
+    let cfg = load_config();
     let tm = load_tiers();
     let output = pacman::search_capture(query);
 
@@ -384,11 +385,25 @@ pub fn search(query: &str) {
                 .unwrap_or("");
 
             let tier = tm.classify(pkg_name);
+            // All three tier labels now read their day count from the holds
+            // config, and Tier 1 flips to "manual sign-off" text only when
+            // expert mode is enabled. This keeps the search annotation in
+            // lockstep with the actual v1.0 behavior — the old hardcoded
+            // "manual sign-off" for Tier 1 and bespoke "fast-track" for
+            // Tier 3 both misrepresented the default experience.
             let tier_tag = match tier {
-                Tier::One   => format!(" \x1b[31m[Tier 1 — manual sign-off]\x1b[0m"),
+                Tier::One => {
+                    let body = if tm.is_manual_signoff(pkg_name) {
+                        "manual sign-off".to_string()
+                    } else {
+                        format!("{}d hold", cfg.holds.tier1_days)
+                    };
+                    format!(" \x1b[31m[Tier 1 — {}]\x1b[0m", body)
+                }
                 Tier::Two   => format!(" \x1b[33m[Tier 2 — {}d hold]\x1b[0m",
-                                    load_config().holds.tier2_days),
-                Tier::Three => format!(" \x1b[32m[Tier 3 — fast-track]\x1b[0m"),
+                                    cfg.holds.tier2_days),
+                Tier::Three => format!(" \x1b[32m[Tier 3 — {}d hold]\x1b[0m",
+                                    cfg.holds.tier3_days),
             };
 
             println!("{}{}", line, tier_tag);
@@ -457,7 +472,7 @@ pub fn unlock(package: &str, promote: bool) {
         None    => pacman::install(&pkgs),
     };
     if !status.success() {
-        eprintln!("nog: upgrade exited with status {}", status);
+        eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -465,8 +480,15 @@ pub fn unlock(package: &str, promote: bool) {
 fn load_tiers() -> TierManager {
     let cfg = NogConfig::load_default();
     TierManager::load(&cfg.paths.tier_pins).unwrap_or_else(|e| {
-        eprintln!("nog warning: could not load tier-pins: {}", e);
-        panic!("nog: fatal — could not initialize tier manager");
+        // Use a clean user-facing error rather than a Rust panic — a panic
+        // emits an unhelpful backtrace hint and a "fatal" line that reads
+        // like an internal error. This path is reachable when the user has
+        // a broken install (missing tier-pins.toml, permissions issue, etc.)
+        // and they deserve a clear message plus the attempted path so they
+        // can diagnose it themselves.
+        eprintln!("nog: could not load tier-pins: {}", e);
+        eprintln!("     (tried: {})", cfg.paths.tier_pins);
+        std::process::exit(1);
     })
 }
 
