@@ -6,8 +6,8 @@
 ![Platform: Linux](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
-![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.12.0](https://img.shields.io/badge/Version-0.12.0-purple.svg)
+![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
+![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -223,7 +223,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "0.12.0"
+version = "1.0.0"
 log_level = "info"
 
 [paths]
@@ -392,7 +392,7 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 
 ## Roadmap
 
-### v0.12.0 — Current
+### v1.0.0 — Released
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
@@ -408,15 +408,18 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] **Phase 5a — AUR build-date resolution** — AUR pending upgrades now get real build dates via the helper's cached metadata (`<helper> -Sai`), parsed to Unix timestamps and fed into the hold evaluator; AUR packages bucket as Ready/Held based on actual dates instead of always Unknown; zero new dependencies, zero new network surface from nog itself
 - [x] **Phase 5b — documentation polish (docs)** — full man page rewrite (COMMANDS, TIER SYSTEM, DESCRIPTION, FILES now accurate through v0.12.0 behavior and mention AUR integration); clap help-text refresh (top-level `long_about` + per-subcommand short + long descriptions)
 
-### v1.0 — In Progress
+### v1.0 — All phases shipped
 - [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
 - [x] ~~Phase 2 — hold evaluation logic~~ ✅
 - [x] ~~Phase 3 — wire into `nog update`~~ ✅
 - [x] ~~Phase 4 — AUR helper detection~~ ✅
 - [x] ~~Phase 5a — AUR build-date resolution~~ ✅
 - [x] ~~Phase 5b — documentation polish (man + help)~~ ✅
-- [ ] **AUR v1.0 submission** — regenerate `PKGBUILD` + `.SRCINFO` pinned to the v1.0.0 GitHub tarball, push to `ssh://aur@aur.archlinux.org/nog.git`
-- [ ] **v1.0 dogfood + release kit** — full uninstall (`yay -R nog`), rebuild from the fresh PKGBUILD, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end on a real system. Capture terminal screenshots (asciinema) during the matrix run. Write the v1.0.0 CHANGELOG consolidation entry.
+
+### v1.0 release kit — In Progress
+- [x] **PKGBUILD drafted** — at repo root, pinned to v1.0.0 tarball. `sha256sums=('SKIP')`; real hash filled in at submit time via `updpkgsums`.
+- [ ] **AUR v1.0 submission** — clone `ssh://aur@aur.archlinux.org/nog.git`, copy the updated PKGBUILD, run `updpkgsums && makepkg --printsrcinfo > .SRCINFO`, commit + push
+- [ ] **v1.0 dogfood** — `yay -R nog && yay -S nog` to reinstall from fresh AUR, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end, capture asciinema screenshots, embed them in README under the Screenshots section
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
@@ -429,6 +432,35 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v1.0.0 — April 19, 2026
+**Initial stable release.**
+
+nog is now a complete tier-aware wrapper for pacman and the common AUR helpers, built and polished across six deliberate phases documented in the entries below. This release declares the core contract stable:
+
+**What nog does**
+- Classifies every package into Tier 1 (kernel / bootloader / glibc / systemd / mesa — 30-day hold), Tier 2 (DE and key applications — 15-day hold), or Tier 3 (everything else — 7-day hold)
+- Computes a full tier-aware upgrade plan before any transaction runs, grouping pending updates into **Ready**, **Held**, and **Unknown** buckets with Catppuccin Mocha tier colors
+- Resolves build dates from every enabled pacman sync database (gzip + zstd), then falls back to the configured AUR helper's cached metadata (`<helper> -Sai`) for AUR-only packages — so AUR upgrades get real hold evaluation, not always-Unknown
+- Hands off the final transaction to pacman or the helper with `--ignore=<held + skipped>` — pacman-native enforcement, no shadowing
+- Escalates to root only via `sudo pacman` for transactions and `sudo tee` for writing `/etc/nog/tier-pins.toml`. Run `nog` as your user — never with `sudo`. The one-rule privilege model is documented exhaustively in the [Privilege model](#privilege-model--what-nog-touches-and-when) section.
+
+**What nog doesn't do**
+- Does not shadow, patch, or replace pacman — every transaction goes through pacman's signature verification
+- Does not modify any system file outside `/etc/nog/tier-pins.toml`
+- Does not make direct network calls — the helper owns all AUR network I/O
+- Does not install, upgrade, or remove anything without pacman's own confirmation prompts
+- Does not gate explicit user commands — `nog install linux-lts` always proceeds; tier protection lives in the passive `update` path
+
+**Ecosystem**
+nog is the native package manager for [KognogOS](https://github.com/jetomev/KognogOS), with a TUI companion ([nogforge](https://github.com/jetomev/nogforge)) and bootloader/terminal utilities ([grubforge](https://github.com/jetomev/grubforge), [alacrittyforge](https://github.com/jetomev/alacrittyforge)).
+
+**Known limitations carried into v1.0**
+- AUR build-date resolution depends on the helper's cached metadata being fresh. If the cache is stale, hold windows are evaluated against the cached date rather than live upstream data. Running `<helper> -Sy` (or `yay -Syy`) refreshes it.
+- Tier pinning of AUR packages works, but AUR packages without a `Last Modified` field still fall into the Unknown bucket and trigger the y/N prompt.
+
+**Thanks**
+Development happened in deliberate phases (see below). Every phase closed with a tagged pre-release and a working dev build; the v1.0.0 tag is the moment the release kit (AUR submission + dogfood) begins.
 
 ### v0.12.0 — April 18, 2026
 **Phase 5b (docs) — man page and help-text accuracy pass**
