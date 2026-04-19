@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-purple.svg)
+![Version: 1.0.1](https://img.shields.io/badge/Version-1.0.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -223,7 +223,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.0"
+version = "1.0.1"
 log_level = "info"
 
 [paths]
@@ -432,6 +432,13 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v1.0.1 — April 19, 2026
+**Hotfix — AUR build failure on fresh environments**
+- 🔨 `Cargo.toml`: switch `zstd = "0.13"` to `zstd = { version = "0.13", features = ["pkg-config"] }`. The previous config relied on `zstd-sys`'s bundled static build, which failed to link under Arch's makepkg environment (LLD + `-Wl,--as-needed` + `-nodefaultlibs`) because `zstd-sys` didn't emit the static-library link directive in that toolchain config
+- 📚 Now uses system `libzstd` via dynamic linking — zero extra runtime dep (pacman already depends on libzstd, so it's always present on Arch)
+- 📄 Man page header + README badge + Cargo.toml + `nog.conf` all bumped to 1.0.1
+- ℹ No behavior changes; 6/6 hold tests still green. Caught by the v1.0 dogfood pass — exactly what a dogfood is for.
 
 ### v1.0.0 — April 19, 2026
 **Initial stable release.**
