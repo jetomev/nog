@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "April 2026" "nog v0.6.0" "User Commands"
+.TH NOG 1 "April 2026" "nog v0.10.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -25,8 +25,16 @@ freely on the next
 .BR "nog update" .
 .PP
 .B nog
-requires root privileges for install, remove, update, and unlock operations.
-It can be run without root to search or view tier information.
+should always be run as your regular user. It escalates to root only where
+genuinely required — by invoking
+.B sudo pacman
+for package transactions and
+.B sudo tee
+for writing
+.IR /etc/nog/tier-pins.toml .
+See the
+.B PRIVILEGES AND SUDO
+section below for the complete privilege model.
 .
 .SH COMMANDS
 .TP
@@ -113,20 +121,79 @@ automatically on the next
 .
 .SH EXAMPLES
 .TP
-Install a package:
-.B sudo nog install htop
+Install a package (nog prompts for sudo itself if needed):
+.B nog install htop
 .TP
-Update the system (Tier 1 excluded):
-.B sudo nog update
+Update the system:
+.B nog update
 .TP
 Search with tier annotations:
 .B nog search firefox
 .TP
 Pin a package to Tier 2:
-.B sudo nog pin htop --tier=2
+.B nog pin htop --tier=2
 .TP
-Unlock and upgrade a Tier 1 package:
-.B sudo nog unlock linux-zen --promote
+Force-upgrade a held Tier 1 package:
+.B nog unlock linux-zen --promote
+.
+.SH PRIVILEGES AND SUDO
+.B nog
+itself always runs as the invoking user; it is not designed to be run with
+.BR sudo .
+If you prefix
+.B sudo nog
+while an AUR helper is configured, nog detects the invocation (via
+.B $SUDO_USER
+or
+.BR $SUDO_UID )
+and exits with an error, because
+.BR yay (8)
+and
+.BR paru (8)
+refuse to run as root.
+.PP
+nog escalates to root in exactly two places, both as transparent
+.BR sudo (8)
+subprocess invocations:
+.TP
+.B sudo pacman -S | -R | -Syu ...
+For package transactions during
+.BR install ,
+.BR remove ,
+.BR update ,
+and
+.B "unlock --promote"
+\(em but only when no AUR helper is configured. When a helper is configured,
+nog hands the transaction to the helper (as the invoking user), and the
+helper runs its own
+.B sudo pacman
+internally for the pacman step.
+.TP
+.B sudo tee /etc/nog/tier-pins.toml
+For the single file
+.B nog
+ever writes. Used only during
+.BR "nog pin" .
+The new file contents are rebuilt in memory and piped through
+.BR tee ;
+nog itself never runs with root privileges.
+.PP
+.B nog
+never modifies any other file on your system \(em not
+.IR /etc/pacman.conf ,
+not
+.IR /etc/pacman.d/ ,
+not
+.IR /var/lib/pacman/local/ ,
+not the pacman keyring, and not
+.IR /etc/sudoers .
+It is a thin wrapper over
+.BR pacman (8),
+.BR yay (8),
+or
+.BR paru (8);
+every install, remove, and upgrade is subject to pacman's signature
+verification and conflict resolution, which nog cannot bypass.
 .
 .SH SEE ALSO
 .BR pacman (8),

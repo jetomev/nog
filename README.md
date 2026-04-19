@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.9.0](https://img.shields.io/badge/Version-0.9.0-purple.svg)
+![Version: 0.10.0](https://img.shields.io/badge/Version-0.10.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -38,7 +38,9 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine
 - 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held for 30 days by default; expert mode swaps to manual-only promotion
 - 📦 **Status-grouped update output** — every `nog update` groups pending upgrades into **Ready / Held / Unknown** with Catppuccin Mocha tier colors
+- 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified and bucketed alongside official repo packages, transactions are handed off to the helper for combined `-Syu`
 - ❓ **Interactive Unknown handling** — packages with no sync-DB build date (AUR-only, locally-built, disabled-repo) are prompted case-by-case
+- 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman` and `sudo tee /etc/nog/tier-pins.toml`. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
 - ⚡ **Tier 3 fast track** — everything else flows through pacman on a short hold
 - 🎨 **Color-coded search** — every `nog search` result tagged with its tier
 - 📌 **Persistent tier pinning** — `nog pin <pkg> --tier=<N>` writes to `/etc/nog/tier-pins.toml`
@@ -75,6 +77,7 @@ Everything else. Updates are held for **7 days** — a short safety buffer witho
 
 - Arch Linux (or Arch-based distribution)
 - `pacman` and `pacman-contrib`
+- `yay` or `paru` — optional; enables AUR support. nog functions without one; official repos only.
 - Rust toolchain (only for building from source)
 
 ---
@@ -115,24 +118,26 @@ sudo install -Dm644 nog.1 /usr/share/man/man1/nog.1
 
 ## Usage
 
-```bash
-# Install a package (respects tier rules)
-sudo nog install <package>
+> Run `nog` as your regular user. nog escalates via `sudo` only where genuinely required; you'll see the prompt at that moment. See [Privilege model](#privilege-model--what-nog-touches-and-when).
 
-# Update the system (Tier 1 packages automatically held)
-sudo nog update
+```bash
+# Install a package (respects tier rules, routes to AUR helper if needed)
+nog install <package>
+
+# Update the system (tier holds applied; AUR included when a helper is configured)
+nog update
 
 # Search with tier annotations
 nog search <query>
 
 # Pin a package to a specific tier
-sudo nog pin <package> --tier=<1|2|3>
+nog pin <package> --tier=<1|2|3>
 
-# Unlock a Tier 1 package for manual upgrade
-sudo nog unlock <package> --promote
+# Force-upgrade a held Tier 1 package
+nog unlock <package> --promote
 
 # Remove a package
-sudo nog remove <package>
+nog remove <package>
 
 # Version
 nog --version
@@ -143,19 +148,22 @@ nog --help
 
 ### How `nog update` works
 
-When you run `sudo nog update`, nog:
+When you run `nog update`, nog:
 
-1. Calls `checkupdates` (pacman-contrib) to get the list of pending upgrades — no sync-DB side effects
-2. Classifies each pending package and evaluates its hold window using the sync-DB build date
-3. Groups the result into three buckets:
+1. Calls `checkupdates` (pacman-contrib) to get the list of pending **official repo** upgrades — no sync-DB side effects
+2. If an AUR helper is configured, calls `<helper> -Qua` to append pending **AUR** upgrades to the same list
+3. Classifies each pending package and evaluates its hold window using the sync-DB build date (AUR packages have no sync-DB entry and fall into the Unknown bucket for now)
+4. Groups the result into three buckets:
    - **Ready to install** — hold expired, safe to upgrade
    - **Held** — either still inside the hold window, or Tier 1 under `manual_signoff = true`
    - **Unknown** — no build date in any enabled sync DB (AUR-only, locally-built, or disabled repo)
-4. For each **Unknown** package, prompts `update anyway? [y/N]`
-5. Hands off to `pacman -Syu --ignore=<held + skipped-unknowns>` so pacman only touches the Ready set
-6. If everything is held, exits cleanly without invoking pacman
+5. For each **Unknown** package, prompts `update anyway? [y/N]`
+6. Hands off the transaction:
+   - With helper: `<helper> -Syu --ignore=<held + skipped-unknowns>` — one combined upgrade for official + AUR. The helper runs as your user and sudo-s pacman internally for the pacman step.
+   - Without helper: `sudo pacman -Syu --ignore=<...>` — official repos only.
+7. If everything is held, exits cleanly without invoking anything.
 
-All classification happens before pacman runs, so you always see the plan before the transaction.
+All classification happens before the transaction, so you always see the plan before anything is touched.
 
 ### Example: `nog search`
 
@@ -213,7 +221,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "0.9.0"
+version = "0.10.0"
 log_level = "info"
 
 [paths]
@@ -225,6 +233,14 @@ log_file = "/var/log/nog.log"
 tier1_days = 30
 tier2_days = 15
 tier3_days = 7
+
+[aur]
+# AUR helper to use for AUR-only packages and AUR update detection.
+#   "auto" — prefer yay, fall back to paru, skip AUR support if neither installed
+#   "yay"  — require yay; error if not installed
+#   "paru" — require paru; error if not installed
+#   "none" — disable all AUR-aware paths (official repos only)
+helper = "auto"
 ```
 
 ### `tier-pins.toml`
@@ -273,7 +289,8 @@ nog/
 |   |-- commands/
 |   |   |-- mod.rs             # All subcommand implementations
 |   |-- tiers.rs               # Tier classification engine
-|   |-- pacman.rs              # pacman subprocess wrapper
+|   |-- pacman.rs              # pacman subprocess wrapper (invokes sudo pacman)
+|   |-- aur.rs                 # AUR helper detection (yay / paru) + delegation
 |   |-- sync_db.rs             # pacman sync-DB reader (build-date lookup)
 |   |-- holds.rs               # Hold-status evaluator (pure function)
 |   |-- config.rs              # Config loader
@@ -303,9 +320,77 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 
 ---
 
+## Privilege model — what nog touches and when
+
+nog is designed so that you **never need to invoke it with `sudo`**. It runs as your regular user and only escalates to root at the specific moments where root is genuinely required. Every elevation is visible — you will see the `sudo` password prompt when it happens.
+
+### The rule
+
+Run `nog` as your user. Never `sudo nog`.
+
+If you forget and prefix `sudo` while an AUR helper is configured, nog detects it (via `$SUDO_USER`/`$SUDO_UID`) and exits with a clear error. This is a hard stop because `yay` and `paru` both refuse to run as root. Without a helper configured, `sudo nog` still works — `sudo`-as-root is a no-op passthrough — but it isn't necessary.
+
+### When nog escalates
+
+nog invokes `sudo` in exactly two places. Both are transparent to the user (you see the prompt directly):
+
+| Operation            | Command invoked                               | When |
+|----------------------|-----------------------------------------------|------|
+| Package transactions | `sudo pacman -S \| -R \| -Syu ...`            | `install`, `remove`, `update`, `unlock --promote` — **only when no AUR helper is configured**. When a helper is configured, nog calls the helper (as your user) and the helper runs its own `sudo pacman` internally. |
+| Tier-pin writes      | `sudo tee /etc/nog/tier-pins.toml`            | Only during `nog pin`. The new file contents are rebuilt in memory and piped through `sudo tee`. nog itself never runs as root; only `tee` does. |
+
+That is the complete list. nog never invokes `sudo` anywhere else.
+
+### Files nog reads (no elevation)
+
+All of these are world-readable on a standard Arch install, so nog reads them as your user:
+
+- `/etc/nog/nog.conf` — nog main configuration
+- `/etc/nog/tier-pins.toml` — tier assignments
+- `/etc/pacman.conf` — for repo enablement and priority ordering
+- `/var/lib/pacman/sync/*.db` — sync DBs, for package build-date lookup
+
+### Files nog writes (elevated)
+
+Exactly one file is ever written by nog itself:
+
+- `/etc/nog/tier-pins.toml` — written via `sudo tee` during `nog pin`. No other persistent file is created or modified by nog.
+
+### What nog does NOT touch
+
+The entire rest of your system is out of scope:
+
+- `/etc/pacman.conf` — never modified
+- `/etc/pacman.d/**` (mirrorlists, etc.) — never modified
+- `/var/lib/pacman/local/**` — pacman's own installed-package state; nog never touches it
+- `/var/lib/pacman/sync/**` — read-only access for date lookups
+- `/var/cache/pacman/**` — never touched
+- Pacman's GPG keyring and signature verification — unmodified; every transaction runs through pacman's own checks
+- `/etc/sudoers`, PAM configuration, any other auth state — never touched
+- `/usr/bin`, `/usr/lib`, or any other system binary location — never touched directly; pacman and the helper own these paths
+
+nog does not shadow, patch, or replace `pacman`. It is purely a wrapper that calls `pacman` (or an AUR helper) as a subprocess. Every install, remove, and upgrade goes through pacman's signature verification and conflict resolution — nog cannot bypass them.
+
+### AUR helper integration
+
+When `[aur] helper` in `nog.conf` resolves to `yay` or `paru`:
+
+- nog calls `<helper> -Qua` (as your user) to list AUR pending upgrades
+- nog calls `<helper> -S ...` (as your user) for installs, or `<helper> -Syu --ignore=...` for the combined upgrade
+- The helper fetches PKGBUILDs and runs `makepkg` as your user
+- The helper runs `sudo pacman` internally when it reaches its pacman steps — that `sudo` prompt comes from the helper, not from nog
+
+nog never invokes `sudo yay` or `sudo paru`. That is a deliberate refusal — both helpers refuse to run as root precisely because `makepkg` needs to run as a non-root user.
+
+### In one paragraph
+
+nog runs as your user. It escalates exactly twice: `sudo pacman` for package transactions, and `sudo tee /etc/nog/tier-pins.toml` for the one file it ever writes. It never modifies any other file on your system, never bypasses pacman's signature verification, and never runs as root itself. If a helper is configured, transactions are handed off to `yay` or `paru` as your user, and those helpers escalate themselves.
+
+---
+
 ## Roadmap
 
-### v0.9.0 — Current
+### v0.10.0 — Current
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
@@ -317,13 +402,14 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 - [x] **Phase 1 — sync DB reader** — reads every enabled pacman sync database (gzip + zstd), extracts build dates for all packages across all repos
 - [x] **Phase 2 — hold evaluation logic** — pure function returning Expired / Holding / Unknown for any package; 6 unit tests; 30/15/7 day windows live in `nog.conf`
 - [x] **Phase 3 — wired into `nog update`** — `checkupdates` integration, status-grouped output (Ready / Held / Unknown) with Catppuccin Mocha tier colors, interactive y/N prompt for Unknowns, `manual_signoff` honored as Tier 1 expert-mode toggle, Tier 1 install block removed
+- [x] **Phase 4 — AUR helper detection** — auto-detects `yay` / `paru`; AUR pending upgrades fold into the status-grouped output; transactions hand off to the helper for combined `-Syu`; one consistent no-sudo rule; `nog pin` writes via `sudo tee`; root-guard catches `sudo nog` invocations when a helper is configured
 
 ### v1.0 — In Progress
 - [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
 - [x] ~~Phase 2 — hold evaluation logic~~ ✅
 - [x] ~~Phase 3 — wire into `nog update`~~ ✅
-- [ ] **Phase 4 — AUR helper detection** — auto-detect `yay` or `paru`; classify and hold AUR packages using the detected helper
-- [ ] **Phase 5 — polish** — updated man page, updated help text, terminal screenshots, CHANGELOG finalization
+- [x] ~~Phase 4 — AUR helper detection~~ ✅
+- [ ] **Phase 5 — polish** — full man page refresh, updated help text, terminal screenshots, CHANGELOG finalization, AUR build-date lookup via AUR RPC (lets real hold windows apply to AUR packages instead of bucketing them as Unknown)
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
@@ -336,6 +422,19 @@ nog does not replace pacman. It does not patch pacman. It does not shadow pacman
 ---
 
 ## Changelog
+
+### v0.10.0 — April 18, 2026
+**Phase 4 — AUR helper integration + unified no-sudo privilege model**
+- 🧩 New `aur` module — helper detection (`yay` → `paru` → `none`) driven by `[aur] helper` in `nog.conf`. Supports `"auto"`, `"yay"`, `"paru"`, `"none"`; hard-errors if the user requests a specific helper that isn't installed
+- 📦 `nog update` folds AUR pending upgrades (`<helper> -Qua`) into the existing status-grouped output alongside official repo packages from `checkupdates`. AUR packages bucket as Unknown for now (no sync-DB build date); the y/N prompt already handles them correctly
+- 🔄 `nog update` transaction handoff routes through the helper when configured (`<helper> -Syu --ignore=...`) for a single combined official+AUR upgrade. Without a helper, pacman handoff is unchanged
+- 📥 `nog install <pkg>` routes through the helper when configured, so AUR-only packages "just work" without a pre-check. The helper resolves sync repos before AUR automatically
+- 🔓 `nog unlock --promote` similarly routes through the helper when configured
+- 🧑 **No-sudo rule** — single consistent UX: run `nog` as your user. `pacman.rs` now invokes `sudo pacman` internally; `tiers::pin_package` writes `/etc/nog/tier-pins.toml` via `sudo tee`. `nog pin` no longer needs shell-level sudo. Fully backwards-compatible: `sudo nog <cmd>` still works for non-helper paths (sudo-as-root passes through)
+- 🛑 **Root-guard** — if nog is invoked via sudo (detected via `$SUDO_USER`/`$SUDO_UID`) *and* a helper is configured, it exits with a clear message pointing the user to drop the `sudo`. Necessary because `yay`/`paru` refuse to run as root
+- 📖 **New "Privilege model" section in README** — documents exactly where nog escalates (`sudo pacman`, `sudo tee /etc/nog/tier-pins.toml`), which files it reads without elevation, the single file it ever writes, and the comprehensive list of system files it never touches (pacman.conf, pacman.d, /var/lib/pacman/local, keyring, sudoers, etc.)
+- 📜 Man page gains a targeted **PRIVILEGES AND SUDO** section mirroring the README content; version header bumped to 0.10.0; EXAMPLES dropped their `sudo` prefixes. Full man page rewrite (command descriptions, tier metadata) deferred to Phase 5 polish
+- ℹ No regressions in existing behavior: 6/6 hold tests still green, 7 warnings (unchanged since Phase 3)
 
 ### v0.9.0 — April 18, 2026
 **Phase 3 — wired into `nog update` (the tier system goes live)**
