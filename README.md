@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg)
-![Version: 0.11.0](https://img.shields.io/badge/Version-0.11.0-purple.svg)
+![Version: 0.12.0](https://img.shields.io/badge/Version-0.12.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -223,7 +223,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "0.11.0"
+version = "0.12.0"
 log_level = "info"
 
 [paths]
@@ -392,7 +392,7 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 
 ## Roadmap
 
-### v0.11.0 — Current
+### v0.12.0 — Current
 - [x] CLI skeleton with all subcommands
 - [x] Three-tier classification engine
 - [x] Real pacman subprocess integration
@@ -406,6 +406,7 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] **Phase 3 — wired into `nog update`** — `checkupdates` integration, status-grouped output (Ready / Held / Unknown) with Catppuccin Mocha tier colors, interactive y/N prompt for Unknowns, `manual_signoff` honored as Tier 1 expert-mode toggle, Tier 1 install block removed
 - [x] **Phase 4 — AUR helper detection** — auto-detects `yay` / `paru`; AUR pending upgrades fold into the status-grouped output; transactions hand off to the helper for combined `-Syu`; one consistent no-sudo rule; `nog pin` writes via `sudo tee`; root-guard catches `sudo nog` invocations when a helper is configured
 - [x] **Phase 5a — AUR build-date resolution** — AUR pending upgrades now get real build dates via the helper's cached metadata (`<helper> -Sai`), parsed to Unix timestamps and fed into the hold evaluator; AUR packages bucket as Ready/Held based on actual dates instead of always Unknown; zero new dependencies, zero new network surface from nog itself
+- [x] **Phase 5b — documentation polish (docs)** — full man page rewrite (COMMANDS, TIER SYSTEM, DESCRIPTION, FILES now accurate through v0.12.0 behavior and mention AUR integration); clap help-text refresh (top-level `long_about` + per-subcommand short + long descriptions)
 
 ### v1.0 — In Progress
 - [x] ~~Phase 1 — sync DB reader with gzip + zstd support~~ ✅
@@ -413,9 +414,9 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] ~~Phase 3 — wire into `nog update`~~ ✅
 - [x] ~~Phase 4 — AUR helper detection~~ ✅
 - [x] ~~Phase 5a — AUR build-date resolution~~ ✅
-- [ ] **Phase 5b — documentation polish** — full man page rewrite (COMMANDS and TIER SYSTEM sections still reflect pre-v0.8 behavior), updated help text, terminal screenshots (asciinema or static), CHANGELOG finalization
+- [x] ~~Phase 5b — documentation polish (man + help)~~ ✅
 - [ ] **AUR v1.0 submission** — regenerate `PKGBUILD` + `.SRCINFO` pinned to the v1.0.0 GitHub tarball, push to `ssh://aur@aur.archlinux.org/nog.git`
-- [ ] **v1.0 dogfood** — full uninstall (`yay -R nog`), rebuild from the fresh PKGBUILD, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end on a real system
+- [ ] **v1.0 dogfood + release kit** — full uninstall (`yay -R nog`), rebuild from the fresh PKGBUILD, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end on a real system. Capture terminal screenshots (asciinema) during the matrix run. Write the v1.0.0 CHANGELOG consolidation entry.
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
@@ -428,6 +429,14 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v0.12.0 — April 18, 2026
+**Phase 5b (docs) — man page and help-text accuracy pass**
+- 📜 Full man page rewrite: **DESCRIPTION** updated (30/15/7 day windows, AUR helper mention, expert-mode pointer); **COMMANDS** updated for every subcommand's real v0.12.0 behavior (no more stale "Tier 1 blocked" on install, accurate `nog update` bucketing description, `nog unlock` new semantics); **TIER SYSTEM** rewritten with auto-release default + expert mode; **FILES** now lists sync DBs and pacman.conf as read paths and notes `sudo tee` for tier-pins writes
+- 🏷 `man nog` header bumped to `v0.12.0`
+- 💬 Clap help text refresh — top-level `long_about` now summarizes the tier system and no-sudo rule in a few sentences; every subcommand (`install`, `remove`, `update`, `search`, `pin`, `unlock`) has a short description for the command list plus a longer one shown in `<cmd> --help`
+- 🗂 Roadmap split Phase 5's polish work: screenshots + v1.0.0 CHANGELOG consolidation moved into the **v1.0 dogfood + release kit** step (more honest framing — they belong at release time, not pre-release)
+- ℹ No behavior changes; no test regressions (6/6 still green); warnings unchanged at 7
 
 ### v0.11.0 — April 18, 2026
 **Phase 5a — AUR build-date resolution (the last Unknown falls)**
