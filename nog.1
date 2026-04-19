@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "April 2026" "nog v0.10.0" "User Commands"
+.TH NOG 1 "April 2026" "nog v0.11.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -15,14 +15,21 @@ nog \- tier-aware package manager for KognogOS
 .B nog
 is the package manager for KognogOS. It wraps
 .BR pacman (8)
-with a three-tier update management system, giving every package on the
+\(em and optionally an AUR helper such as
+.BR yay (8)
+or
+.BR paru (8)
+\(em with a three-tier update management system, giving every package on the
 system a protection level based on how critical it is.
 .PP
-Tier 1 packages — the kernel, bootloader, and core libraries — are never
-updated automatically and require explicit sign-off. Tier 2 packages are
-held for 10 days after a new version is published. Tier 3 packages update
-freely on the next
-.BR "nog update" .
+Tier 1 packages (the kernel, bootloader, glibc, systemd, mesa) are held for
+30 days after upstream publish before auto-releasing. Tier 2 packages are
+held for 15 days. Tier 3 packages are held for 7 days. Expert users can
+switch Tier 1 to a manual-sign-off mode via
+.B tier-pins.toml
+if they prefer to eyeball every kernel upgrade personally. See
+.B TIER SYSTEM
+for the full model.
 .PP
 .B nog
 should always be run as your regular user. It escalates to root only where
@@ -39,50 +46,81 @@ section below for the complete privilege model.
 .SH COMMANDS
 .TP
 .B nog install \fIpackage\fR [\fIpackage\fR...]
-Install one or more packages. Tier 1 packages are blocked — use
-.B nog unlock
-first. Tier 2 packages proceed with a hold notice. Tier 3 packages install immediately.
+Install one or more packages. Tier classification is printed as informational
+output; installs are never blocked or gated — explicit user commands execute
+user intent. If an AUR helper is configured (see
+.BR nog.conf (5)),
+the install routes through the helper, so AUR-only packages work transparently
+without any pre-check. Tier protection applies to future updates, not to installs.
 .TP
 .B nog remove \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
 .BR pacman (8).
+Works uniformly for packages originally installed from official repos or AUR.
 .TP
 .B nog update
-Synchronize package databases and upgrade all packages. Tier 1 packages
-are automatically excluded via
-.BR pacman 's
-.B --ignore
-flag — they will not be touched under any circumstances.
+Compute a tier-aware system upgrade plan and hand it off to
+.BR pacman (8)
+or the configured AUR helper. Every pending upgrade is shown before any
+transaction starts, classified into one of three buckets:
+.RS
+.IP \(bu 2
+.B Ready to install
+\(em hold window has expired; safe to upgrade
+.IP \(bu 2
+.B Held
+\(em still within the tier's hold window, or Tier 1 package with
+.B manual_signoff = true
+.IP \(bu 2
+.B Unknown
+\(em no resolvable build date (locally built, disabled repo, or helper lookup failed)
+.RE
+Each
+.B Unknown
+package triggers an interactive
+.B "[y/N]"
+prompt. Pending official repo upgrades come from
+.BR checkupdates (8);
+pending AUR upgrades come from
+.B "<helper> -Qua" .
+Build dates come from the enabled pacman sync databases and, for AUR packages
+not found in any sync DB, from the helper's cached metadata (\fB<helper> -Sai\fR).
+The final transaction invokes
+.B pacman
+or the helper with
+.B --ignore=
+listing all held and user-skipped packages.
 .TP
 .B nog search \fIquery\fR
 Search for packages matching
-.IR query .
-Results are annotated with tier information:
-.RS
-.IP \(bu 2
-.B [Tier 1 — manual sign-off]
-shown in red
-.IP \(bu 2
-.B [Tier 2 — 10d hold]
-shown in yellow
-.IP \(bu 2
-.B [Tier 3 — fast-track]
-shown in green
-.RE
+.IR query
+via
+.BR pacman (8).
+Each result is annotated by tier using the Catppuccin Mocha palette
+(red Tier 1, yellow Tier 2, green Tier 3).
 .TP
 .B nog pin \fIpackage\fR \fB--tier=\fR\fI<1|2|3>\fR
-Pin a package to a specific tier. The change is written immediately to
+Pin a package to a specific tier. The change is written to
 .IR /etc/nog/tier-pins.toml
-and survives reboots.
+via
+.B sudo tee
+and survives reboots. Pinning to Tier 3 removes any existing Tier 1 or Tier 2
+entry for that package (Tier 3 is the implicit default for anything not listed).
 .TP
 .B nog unlock \fIpackage\fR [\fB--promote\fR]
-Unlock a Tier 1 package for manual upgrade. Without
+Without
 .BR --promote ,
-prints a confirmation message only. With
+this command is informational only. Tier 1 packages under
+.B manual_signoff = true
+are held wholesale; there is no per-session unlock state to toggle, so this
+mode simply prints the held status and points at
+.BR --promote .
+With
 .BR --promote ,
-calls
+force-upgrade the package immediately via
 .BR pacman (8)
-to install or upgrade the package immediately.
+or the configured helper, bypassing the hold window and any sign-off policy.
+This is the escape hatch for a held Tier 1 package.
 .
 .SH OPTIONS
 .TP
@@ -95,29 +133,72 @@ Print version information.
 .SH FILES
 .TP
 .I /etc/nog/nog.conf
-Main nog configuration file. Defines paths, hold windows, and repo locations.
+Main nog configuration file. Defines paths, hold windows (\fB[holds]\fR), and
+AUR helper preference (\fB[aur]\fR).
 .TP
 .I /etc/nog/tier-pins.toml
-Tier assignments for all managed packages. Edited directly by
+Tier assignments for all managed packages. Edited by
 .B nog pin
+(written via
+.BR "sudo tee" )
 or manually by the system administrator.
+.B manual_signoff
+under
+.B [tier1]
+controls whether Tier 1 auto-releases (default) or stays wholesale held
+(expert mode).
+.TP
+.I /var/lib/pacman/sync/*.db
+Pacman sync databases. Read-only by nog, for build-date lookup during
+.BR "nog update" .
+.TP
+.I /etc/pacman.conf
+Read-only. nog parses it for enabled repositories and their priority order.
 .TP
 .I /usr/bin/nog
 The nog binary.
 .
 .SH TIER SYSTEM
-.SS Tier 1 — Manual Sign-Off Required
-Packages that are never auto-updated. Includes:
-.BR linux ", " linux-zen ", " linux-lts ", " systemd ", " glibc ", "
-.BR grub ", " efibootmgr ", " mkinitcpio ", " pacman ", " mesa .
-.SS Tier 2 — 10-Day Hold
-Key desktop applications held for 10 days after release. Includes:
-.BR plasma-desktop ", " sddm ", " pipewire ", " networkmanager ", "
-.BR firefox ", " dolphin ", " konsole ", " kate ", " grubforge .
-.SS Tier 3 — Fast Track
-Everything else. A minimal 3-day hold applies, then updates flow through
-automatically on the next
+Every package nog manages is classified into one of three tiers, defined in
+.IR /etc/nog/tier-pins.toml .
+Each tier has a hold window (from the
+.B [holds]
+section of
+.IR /etc/nog/nog.conf )
+that must elapse after the package's upstream publish date before the update is
+applied during
 .BR "nog update" .
+.SS Tier 1 \(em 30-day hold, auto-release by default
+The most critical packages: kernel, bootloader, glibc, systemd, mesa. By default
+(\fBmanual_signoff = false\fR), Tier 1 auto-releases after a 30-day hold window
+\(em a full month of community testing before an update lands on your system.
+.PP
+Expert mode: set
+.B manual_signoff = true
+under
+.B [tier1]
+in
+.IR tier-pins.toml
+to switch Tier 1 to always-held; updates release only via
+.B "nog unlock <pkg> --promote" .
+Recommended only for users who want to review every kernel / glibc / systemd
+upgrade personally.
+.PP
+Default Tier 1 packages:
+.BR linux ", " linux-zen ", " linux-lts ", " linux-hardened ", " systemd ", "
+.BR systemd-libs ", " glibc ", " grub ", " efibootmgr ", " mkinitcpio ", "
+.BR pacman ", " mesa .
+.SS Tier 2 \(em 15-day hold
+Key desktop applications and system services. Held for 15 days after upstream
+publish \(em enough time for major regressions to surface without falling far behind.
+.PP
+Default Tier 2 packages:
+.BR plasma-meta ", " plasma-desktop ", " sddm ", " pipewire ", " pipewire-pulse ", "
+.BR wireplumber ", " networkmanager ", " firefox ", " dolphin ", " konsole ", "
+.BR kate ", " grubforge ", " alacritty ", " fish ", " alacrittyforge .
+.SS Tier 3 \(em 7-day hold
+Everything else. A short 7-day safety buffer without meaningful delay. Anything
+not listed in Tier 1 or Tier 2 falls into Tier 3 automatically.
 .
 .SH EXAMPLES
 .TP

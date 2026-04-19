@@ -11,9 +11,17 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(
     name = "nog",
-    about = "Kognog OS package manager",
+    about = "Tier-aware package manager for Arch Linux",
     version = env!("CARGO_PKG_VERSION"),
-    long_about = "nog wraps pacman with tier-aware update management for Kognog OS."
+    long_about = "\
+nog wraps pacman (and optionally yay or paru) with a three-tier update \
+management system. Every package is classified into Tier 1 (kernel, bootloader, \
+glibc, systemd — 30-day hold), Tier 2 (desktop environment and key apps — \
+15-day hold), or Tier 3 (everything else — 7-day hold). `nog update` computes \
+a plan showing Ready / Held / Unknown buckets before any transaction runs.\n\
+\n\
+Run `nog` as your regular user; it prompts for sudo internally only when root \
+is actually needed. See `man nog` for the full reference."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -22,29 +30,50 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Install one or more packages
+    /// Install packages (tier classification shown; installs are never gated)
+    ///
+    /// Routes through the configured AUR helper if one is detected, so
+    /// AUR-only packages work transparently. Tier protection applies to
+    /// future updates, not to installs — explicit user commands execute
+    /// user intent.
     Install {
         #[arg(required = true)]
         packages: Vec<String>,
     },
-    /// Remove one or more packages
+    /// Remove packages (works for both official and AUR-installed)
     Remove {
         #[arg(required = true)]
         packages: Vec<String>,
     },
-    /// Update all packages (respects tier holds)
+    /// Compute a tier-aware upgrade plan and hand off to pacman or the helper
+    ///
+    /// Lists pending upgrades via `checkupdates` (and `<helper> -Qua` if
+    /// configured), evaluates each against its tier's hold window using
+    /// sync-DB build dates (plus `<helper> -Sai` for AUR packages), and
+    /// groups them into Ready / Held / Unknown. Unknown packages prompt
+    /// per-package. The final transaction runs `pacman -Syu --ignore=…`
+    /// or `<helper> -Syu --ignore=…`.
     Update,
-    /// Search for a package
+    /// Search pacman repos; results annotated by tier (red/yellow/green)
     Search {
         query: String,
     },
-    /// Pin a package to a specific tier
+    /// Pin a package to a specific tier (persists to /etc/nog/tier-pins.toml)
+    ///
+    /// Writes via `sudo tee` — no shell-level sudo required. Pinning to
+    /// Tier 3 removes any existing Tier 1 or Tier 2 entry (Tier 3 is the
+    /// implicit default).
     Pin {
         package: String,
         #[arg(long, default_value = "1")]
         tier: u8,
     },
-    /// Unlock a tier-1 package for manual update
+    /// Force-upgrade a held Tier 1 package via --promote; otherwise informational
+    ///
+    /// With `--promote`: bypass the hold window and any sign-off policy,
+    /// upgrading the package immediately via pacman or the configured helper.
+    /// Without `--promote`: just prints the held status (there is no per-session
+    /// unlock state to toggle).
     Unlock {
         package: String,
         #[arg(long)]
