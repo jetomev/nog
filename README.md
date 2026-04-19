@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.1](https://img.shields.io/badge/Version-1.0.1-purple.svg)
+![Version: 1.0.2](https://img.shields.io/badge/Version-1.0.2-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -223,7 +223,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.1"
+version = "1.0.2"
 log_level = "info"
 
 [paths]
@@ -432,6 +432,24 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v1.0.2 — April 19, 2026
+**Dogfood-surfaced polish batch**
+
+Five small fixes and two matrix refinements, all caught during the end-to-end dogfood of the AUR-installed v1.0.1 binary. See [`TEST-REPORT-v1.0.md`](TEST-REPORT-v1.0.md) for the full run — every finding is documented there with observed behavior, severity, and fix rationale.
+
+**Fixes:**
+- 🛑 **F5 — graceful exit on missing tier-pins.** `load_tiers()` no longer panics with a Rust-native backtrace hint when `/etc/nog/tier-pins.toml` is unreadable. Clean `eprintln!` + `std::process::exit(1)` with the attempted path in the error message for diagnostic clarity.
+- 🗂 **F4 — single-warning config load.** `NogConfig::load_default()` now cached via `OnceLock` — no more duplicate "no nog.conf found" warnings on misconfigured systems, and repeat callers read from the cache instead of re-hitting the filesystem.
+- 🔒 **F2 — release binaries no longer embed the maintainer's build path.** The `CARGO_MANIFEST_DIR` dev-fallback branch is gated behind `#[cfg(debug_assertions)]`. Release binaries pass `strings` checks cleanly; dev clones still work as before via `cargo run`. Resolves the `makepkg` `$srcdir` warning.
+- 🎨 **F1 — `nog search` tier annotations are now config-aware and consistent.** Tier 1 shows `30d hold` by default (was the misleading `manual sign-off`), flipping to `manual sign-off` only when `tier1 manual_signoff = true`. Tier 3 shows `7d hold` (was `fast-track`). All day counts read from `nog.conf`'s `[holds]` section.
+- 📝 **F3 — error messages no longer duplicate "exit status".** Every `eprintln!("... exited with status {}", status)` now uses `status.code().unwrap_or(-1)` so output reads `exited with status 1` instead of `exited with status exit status: 1`.
+
+**Matrix refinements:**
+- 📋 **M1** — [`TEST-MATRIX.md`](TEST-MATRIX.md) check 15.3 updated: `.pacsave`/`.pacnew` siblings are expected after any uninstall/reinstall cycle (the PKGBUILD's `backup=` directive intentionally preserves user-modified configs)
+- 📋 **M2** — [`TEST-MATRIX.md`](TEST-MATRIX.md) check 3.5 no longer keys the pass criterion on a specific exit code for nonexistent packages — helpers have inconsistent behavior here (yay returns 0 with "nothing to do"; paru may return non-zero)
+
+**No behavior changes** beyond the error-path polish and the search label text. 6/6 hold tests still green. Same zstd-via-pkg-config dynamic-linking contract as v1.0.1.
 
 ### v1.0.1 — April 19, 2026
 **Hotfix — AUR build failure on fresh environments**
