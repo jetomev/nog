@@ -410,6 +410,8 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] ~~Phase 3 — wire into `nog update`~~ ✅
 - [x] ~~Phase 4 — AUR helper detection~~ ✅
 - [ ] **Phase 5 — polish** — full man page refresh, updated help text, terminal screenshots, CHANGELOG finalization, AUR build-date lookup via AUR RPC (lets real hold windows apply to AUR packages instead of bucketing them as Unknown)
+- [ ] **AUR v1.0 submission** — regenerate `PKGBUILD` + `.SRCINFO` pinned to the v1.0.0 GitHub tarball, push to `ssh://aur@aur.archlinux.org/nog.git`
+- [ ] **v1.0 dogfood** — full uninstall (`yay -R nog`), rebuild from the fresh PKGBUILD, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end on a real system
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
