@@ -8,11 +8,17 @@ pub struct PendingUpdate {
     pub new_version: String,
 }
 
+/// Invoke pacman through sudo so `nog` itself never needs to run as root.
+/// sudo prompts for the user's password the first time and caches the session
+/// timestamp; subsequent calls within the cache window are pass-through. If
+/// the caller is already root (e.g. legacy `sudo nog install`), sudo is a
+/// no-op, so this is fully backwards-compatible.
 pub fn run(args: &[&str]) -> ExitStatus {
-    Command::new("pacman")
+    Command::new("sudo")
+        .arg("pacman")
         .args(args)
         .status()
-        .unwrap_or_else(|e| panic!("nog: failed to launch pacman: {}", e))
+        .unwrap_or_else(|e| panic!("nog: failed to launch sudo pacman: {}", e))
 }
 
 /// Run `checkupdates` (from pacman-contrib) and return the list of pending

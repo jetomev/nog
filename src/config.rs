@@ -28,12 +28,31 @@ pub struct HoldsConfig {
     pub tier3_days: u32,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct AurConfig {
+    /// One of: "auto" | "yay" | "paru" | "none".
+    ///   "auto" — prefer yay if present, else paru, else disable AUR support
+    ///   "yay" / "paru" — require that specific helper; error if missing
+    ///   "none" — skip all AUR-aware paths even if a helper is installed
+    pub helper: String,
+}
+
+impl Default for AurConfig {
+    fn default() -> Self {
+        AurConfig { helper: "auto".to_string() }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct NogConfig {
     pub general: GeneralConfig,
     pub paths: PathsConfig,
     pub repos: ReposConfig,
     pub holds: HoldsConfig,
+    // Phase 4 added the [aur] section. Existing installs without it should
+    // keep working with the default ("auto" helper).
+    #[serde(default)]
+    pub aur: AurConfig,
 }
 
 impl NogConfig {
@@ -83,6 +102,7 @@ impl NogConfig {
                 tier2_days: 15,
                 tier3_days: 7,
             },
+            aur: AurConfig::default(),
         }
     }
 }

@@ -81,9 +81,7 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
     // Tier 3 is the default — just removing from other tiers is enough
     if tier == 3 {
         let new_contents = lines.join("\n") + "\n";
-        fs::write(path, new_contents)
-            .map_err(|e| format!("Could not write {}: {}", path, e))?;
-        return Ok(());
+        return write_as_root(path, &new_contents);
     }
 
     // Find the right tier section and add the package
@@ -112,8 +110,42 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
     }
 
     let new_contents = lines.join("\n") + "\n";
-    fs::write(path, new_contents)
-        .map_err(|e| format!("Could not write {}: {}", path, e))?;
+    write_as_root(path, &new_contents)
+}
 
+/// Write `contents` to a root-owned path without requiring the user to invoke
+/// nog via sudo. Pipes the buffer through `sudo tee` — sudo prompts the user
+/// once (cached afterwards), tee writes the file with root's credentials. If
+/// nog is already running as root, sudo passes through without prompting.
+///
+/// tee does a truncate-and-write; for a <1 KiB config this is effectively
+/// atomic in practice. A crash during the write would corrupt the file, but
+/// the same was true of the previous `fs::write` path, so we're not
+/// regressing.
+fn write_as_root(path: &str, contents: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("sudo")
+        .arg("tee")
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to launch sudo tee: {}", e))?;
+
+    {
+        let stdin = child.stdin.as_mut()
+            .ok_or_else(|| "sudo tee: stdin not captured".to_string())?;
+        stdin.write_all(contents.as_bytes())
+            .map_err(|e| format!("failed to pipe contents to sudo tee: {}", e))?;
+    }
+
+    let status = child.wait()
+        .map_err(|e| format!("sudo tee wait failed: {}", e))?;
+    if !status.success() {
+        return Err(format!("sudo tee {} exited with status {}", path, status));
+    }
     Ok(())
 }

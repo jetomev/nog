@@ -1,3 +1,4 @@
+use crate::aur::{self, Helper};
 use crate::tiers::{Tier, TierManager};
 use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
@@ -21,12 +22,52 @@ fn tier_color(tier: &Tier) -> &'static str {
     }
 }
 
+/// Resolve the AUR helper once per command invocation. Returns `None` when the
+/// user has disabled AUR support or "auto" found nothing installed; returns
+/// `Some` when a helper is available and should drive AUR-aware paths. Hard
+/// errors (invalid config value, explicit helper missing) exit the process so
+/// every caller gets the same failure semantics.
+fn resolve_helper(cfg: &NogConfig) -> Option<Helper> {
+    match aur::detect_helper(&cfg.aur.helper) {
+        Ok(opt) => opt,
+        Err(e) => {
+            eprintln!("nog: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Fail fast if nog is invoked through sudo while a helper is configured.
+/// yay and paru refuse to run as root, so the helper-driven code paths would
+/// break later in a confusing way. Cleaner to surface the mismatch up front.
+///
+/// Detection is env-based: sudo sets SUDO_USER / SUDO_UID when it invokes us.
+/// That's the exact case we care about; a user logged in as root directly
+/// won't have these set and will just hit the helper's own root-refusal
+/// message — still actionable.
+fn guard_not_sudo_with_helper(helper: Option<Helper>) {
+    if helper.is_none() { return; }
+    if std::env::var_os("SUDO_USER").is_none() && std::env::var_os("SUDO_UID").is_none() {
+        return;
+    }
+    eprintln!(
+        "nog: detected `sudo nog` invocation with an AUR helper configured ({}).",
+        helper.map(|h| h.to_string()).unwrap_or_default()
+    );
+    eprintln!("     AUR helpers refuse to run as root; they sudo internally when they need it.");
+    eprintln!("     Re-run without sudo: `nog <command>` (nog will prompt for sudo itself).");
+    std::process::exit(1);
+}
+
 pub fn install(packages: &[String]) {
     // Explicit user action — never gate or block. Just report tier classification
-    // for transparency, then hand off to pacman. Tier protection lives in the
-    // passive `nog update` path, not at install time.
-    let tm = load_tiers();
+    // for transparency, then hand off. Tier protection lives in the passive
+    // `nog update` path, not at install time.
+    let cfg = load_config();
+    let helper = resolve_helper(&cfg);
+    guard_not_sudo_with_helper(helper);
 
+    let tm = load_tiers();
     for pkg in packages {
         let tier = tm.classify(pkg);
         match tier {
@@ -42,9 +83,17 @@ pub fn install(packages: &[String]) {
         }
     }
 
-    let status = pacman::install(packages);
+    // When a helper is configured we always route through it — the helper
+    // checks sync repos before AUR, so official packages still install via
+    // pacman under the hood. This keeps the code simple and avoids a brittle
+    // "is this package in a sync DB?" pre-check that would have to stay in
+    // sync with pacman's own resolution order.
+    let status = match helper {
+        Some(h) => aur::install(h, packages),
+        None    => pacman::install(packages),
+    };
     if !status.success() {
-        eprintln!("nog: pacman exited with status {}", status);
+        eprintln!("nog: install exited with status {}", status);
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -59,10 +108,12 @@ pub fn remove(packages: &[String]) {
 
 pub fn update() {
     let cfg = load_config();
+    let helper = resolve_helper(&cfg);
+    guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
     println!("nog: checking for pending updates...");
-    let pending = match pacman::checkupdates_capture() {
+    let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
         Err(CheckUpdatesError::Missing) => {
             eprintln!("nog: `checkupdates` not found. Please install `pacman-contrib`:");
@@ -74,6 +125,25 @@ pub fn update() {
             std::process::exit(1);
         }
     };
+
+    // Phase 4: fold AUR pending upgrades into the same list when a helper is
+    // configured. They don't appear in any sync DB, so the hold evaluator will
+    // bucket them as Unknown — the per-package prompt handles them cleanly.
+    // Future: AUR RPC lookup can feed real build dates in here.
+    if let Some(h) = helper {
+        match aur::pending_updates(h) {
+            Ok(aur_list) => {
+                if !aur_list.is_empty() {
+                    println!("nog: {} AUR update(s) reported by {}.", aur_list.len(), h);
+                }
+                pending.extend(aur_list);
+            }
+            Err(e) => {
+                eprintln!("nog: warning — could not query AUR updates from {}: {}", h, e);
+                eprintln!("     proceeding with official repo updates only.");
+            }
+        }
+    }
 
     if pending.is_empty() {
         println!("nog: system is up to date — nothing to do.");
@@ -159,11 +229,18 @@ pub fn update() {
     }
 
     println!();
-    println!("{}nog: handing off to pacman...{}", C_BOLD, C_RESET);
-
-    let status = pacman::update_excluding(&ignore);
+    let status = match helper {
+        Some(h) => {
+            println!("{}nog: handing off to {}...{}", C_BOLD, h, C_RESET);
+            aur::upgrade_excluding(h, &ignore)
+        }
+        None => {
+            println!("{}nog: handing off to pacman...{}", C_BOLD, C_RESET);
+            pacman::update_excluding(&ignore)
+        }
+    };
     if !status.success() {
-        eprintln!("nog: pacman exited with status {}", status);
+        eprintln!("nog: upgrade exited with status {}", status);
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -348,11 +425,18 @@ pub fn unlock(package: &str, promote: bool) {
         return;
     }
 
-    println!("nog: promoting '{}' — forcing pacman to upgrade it now.", package);
+    let cfg = load_config();
+    let helper = resolve_helper(&cfg);
+    guard_not_sudo_with_helper(helper);
+
+    println!("nog: promoting '{}' — forcing an upgrade now.", package);
     let pkgs = vec![package.to_string()];
-    let status = pacman::install(&pkgs);
+    let status = match helper {
+        Some(h) => aur::install(h, &pkgs),
+        None    => pacman::install(&pkgs),
+    };
     if !status.success() {
-        eprintln!("nog: pacman exited with status {}", status);
+        eprintln!("nog: upgrade exited with status {}", status);
         std::process::exit(status.code().unwrap_or(1));
     }
 }

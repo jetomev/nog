@@ -1,3 +1,4 @@
+mod aur;
 mod commands;
 mod config;
 mod holds;
