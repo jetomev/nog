@@ -207,12 +207,6 @@ nog: handing off to yay...
 
 ---
 
-## Screenshots
-
-*Terminal screenshots coming in v1.0*
-
----
-
 ## Configuration
 
 nog reads two configuration files from `/etc/nog/`.
@@ -416,10 +410,11 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 - [x] ~~Phase 5a — AUR build-date resolution~~ ✅
 - [x] ~~Phase 5b — documentation polish (man + help)~~ ✅
 
-### v1.0 release kit — In Progress
-- [x] **PKGBUILD drafted** — at repo root, pinned to v1.0.0 tarball. `sha256sums=('SKIP')`; real hash filled in at submit time via `updpkgsums`.
-- [ ] **AUR v1.0 submission** — clone `ssh://aur@aur.archlinux.org/nog.git`, copy the updated PKGBUILD, run `updpkgsums && makepkg --printsrcinfo > .SRCINFO`, commit + push
-- [ ] **v1.0 dogfood** — `yay -R nog && yay -S nog` to reinstall from fresh AUR, run [`TEST-MATRIX.md`](TEST-MATRIX.md) end-to-end, capture asciinema screenshots, embed them in README under the Screenshots section
+### v1.0 release kit — ✅ Shipped
+- [x] **PKGBUILD in tree** at repo root, kept in lockstep with the latest tag
+- [x] **AUR submission** — [`ssh://aur@aur.archlinux.org/nog.git`](https://aur.archlinux.org/packages/nog) tracks releases; maintained via `~/Programs/aur-nog-remote/`
+- [x] **Dogfood** — full [`TEST-MATRIX.md`](TEST-MATRIX.md) run captured in [`TEST-REPORT-v1.0.md`](TEST-REPORT-v1.0.md); the dogfood surfaced the v1.0.1 zstd fix and the v1.0.2 polish batch, both validated on the AUR-delivered binary
+- [x] **Release discipline** — every release now runs through local `makepkg -si` test → AUR push → uninstall + fresh AUR install verification
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
