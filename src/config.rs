@@ -1,27 +1,28 @@
 use serde::Deserialize;
 use std::fs;
+use std::sync::OnceLock;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct GeneralConfig {
     pub version: String,
     pub log_level: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PathsConfig {
     pub tier_pins: String,
     pub pacman_conf: String,
     pub log_file: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ReposConfig {
     pub staging: String,
     pub testing: String,
     pub stable: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct HoldsConfig {
     pub tier1_days: u32,
     pub tier2_days: u32,
@@ -43,7 +44,7 @@ impl Default for AurConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct NogConfig {
     pub general: GeneralConfig,
     pub paths: PathsConfig,
@@ -63,22 +64,37 @@ impl NogConfig {
             .map_err(|e| format!("Could not parse nog.conf: {}", e))
     }
 
+    /// Load the config with the standard fallback chain, caching the result
+    /// so repeat calls within a single process invocation don't re-read the
+    /// file (or, when the file is missing, don't print the "no nog.conf
+    /// found" warning multiple times). Callers get an owned clone.
     pub fn load_default() -> Self {
-        // Dev fallback paths — resolved at compile time to the absolute path of
-        // the project root, so they work regardless of the current working directory.
-        let dev_nog_conf = concat!(env!("CARGO_MANIFEST_DIR"), "/config/nog.conf");
-        let dev_tier_pins = concat!(env!("CARGO_MANIFEST_DIR"), "/config/tier-pins.toml");
+        static CACHED: OnceLock<NogConfig> = OnceLock::new();
+        CACHED.get_or_init(Self::resolve_once).clone()
+    }
 
-        // Try the system path first; fall back to the dev path during development.
-        // If the dev config loads, override tier_pins to the dev-absolute path so
-        // the user doesn't need /etc/nog/tier-pins.toml installed to test locally.
+    /// The actual resolution logic — called at most once per process through
+    /// the `CACHED` OnceLock above. Any side effects (the "no nog.conf
+    /// found" warning) fire here, exactly once.
+    fn resolve_once() -> Self {
+        // Try the system path first.
         if let Ok(cfg) = Self::load("/etc/nog/nog.conf") {
             return cfg;
         }
 
-        if let Ok(mut cfg) = Self::load(dev_nog_conf) {
-            cfg.paths.tier_pins = dev_tier_pins.to_string();
-            return cfg;
+        // Dev fallback: resolved at compile time to the cargo manifest dir.
+        // In release builds this branch would embed the maintainer's build
+        // path into the final binary as a string literal — see the
+        // debug_assertions gate below (F2) that removes the embedding in
+        // release builds.
+        #[cfg(debug_assertions)]
+        {
+            let dev_nog_conf = concat!(env!("CARGO_MANIFEST_DIR"), "/config/nog.conf");
+            let dev_tier_pins = concat!(env!("CARGO_MANIFEST_DIR"), "/config/tier-pins.toml");
+            if let Ok(mut cfg) = Self::load(dev_nog_conf) {
+                cfg.paths.tier_pins = dev_tier_pins.to_string();
+                return cfg;
+            }
         }
 
         eprintln!("nog warning: no nog.conf found — using built-in defaults");
@@ -88,7 +104,10 @@ impl NogConfig {
                 log_level: "info".to_string(),
             },
             paths: PathsConfig {
-                tier_pins: dev_tier_pins.to_string(),
+                // Built-in-defaults path: point at the canonical system
+                // location. If that file is also missing, tier loading will
+                // fail with a clean error (F5 fix in commands::load_tiers).
+                tier_pins: "/etc/nog/tier-pins.toml".to_string(),
                 pacman_conf: "/etc/pacman.conf".to_string(),
                 log_file: "/var/log/nog.log".to_string(),
             },
