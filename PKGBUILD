@@ -1,4 +1,5 @@
 # Maintainer: jetomev <jetomev@gmail.com>
+# Co-developer: Claude (Anthropic)
 
 pkgname=nog
 pkgver=1.0.0
@@ -13,6 +14,11 @@ optdepends=(
     'yay: AUR helper integration (preferred if installed)'
     'paru: AUR helper integration (alternative)'
 )
+# Preserve user modifications to these files across upgrades — pacman will
+# write .pacnew next to them instead of overwriting. Without this, running
+# `nog pin` to customize tier-pins.toml would get silently clobbered the next
+# time the AUR ships a new nog version with a different default.
+backup=('etc/nog/nog.conf' 'etc/nog/tier-pins.toml')
 # SKIP is the submission-time placeholder. Before pushing to AUR, run
 # `updpkgsums` in the AUR clone to replace SKIP with the real sha256 of the
 # v1.0.0 GitHub source tarball.
