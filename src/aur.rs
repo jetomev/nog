@@ -18,6 +18,7 @@
 //   <helper> -Syu [--ignore=…]  full upgrade, same ignore semantics as pacman
 // So once we pick a binary name, everything downstream is identical.
 
+use std::collections::HashMap;
 use std::process::{Command, ExitStatus};
 
 use crate::pacman::PendingUpdate;
@@ -162,4 +163,78 @@ pub fn upgrade_excluding(helper: Helper, excluded: &[String]) -> ExitStatus {
         .args(&str_args)
         .status()
         .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
+}
+
+/// Resolve AUR build dates for the given packages by delegating to the helper's
+/// `-Sai` info command. The helper already caches AUR metadata for the user;
+/// we reuse its cache instead of calling the AUR RPC ourselves, which keeps
+/// nog's threat model unchanged — it remains purely a subprocess orchestrator.
+///
+/// Parses the helper's human-readable "Last Modified" line per package and
+/// converts it to a Unix timestamp via `date -d "<str>" +%s`. Packages with
+/// unparseable dates, missing entries, or helper failures are simply omitted —
+/// callers treat them as Unknown, matching the current fallback behavior.
+///
+/// Single batched call for efficiency; AUR upgrade lists are typically < 10.
+pub fn build_dates_for(helper: Helper, packages: &[String]) -> HashMap<String, u64> {
+    let mut out = HashMap::new();
+    if packages.is_empty() {
+        return out;
+    }
+
+    // `-Sai` forces AUR lookup; packages also found in a sync DB will error
+    // for that entry, which is fine — the caller already has the sync-DB date.
+    let mut args: Vec<String> = vec!["-Sai".to_string()];
+    args.extend(packages.iter().cloned());
+    let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let output = match Command::new(helper.binary()).args(&str_args).output() {
+        Ok(o) => o,
+        Err(_) => return out, // helper unavailable mid-run: soft-fail to Unknown
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse key/value blocks. The output is a stream of `Key ... : value` lines
+    // separated by blank lines between packages. We only care about `Name` (to
+    // track which package a subsequent field belongs to) and `Last Modified`.
+    // split_once(':') grabs only the first colon, so values containing colons
+    // (URLs, timestamps) are preserved intact.
+    let mut current_name: Option<String> = None;
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            current_name = None;
+            continue;
+        }
+        let (key, val) = match line.split_once(':') {
+            Some((k, v)) => (k.trim(), v.trim()),
+            None => continue,
+        };
+        match key {
+            "Name" => current_name = Some(val.to_string()),
+            "Last Modified" => {
+                if let (Some(name), Some(ts)) = (current_name.as_ref(), parse_date_to_unix(val)) {
+                    out.insert(name.clone(), ts);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
+/// Convert a human-readable date string (as printed by yay/paru's `-Si`) into
+/// a Unix timestamp by shelling out to `date -d`. Matches how `_debug-dates`
+/// already handles epoch display — no new Rust dep needed.
+fn parse_date_to_unix(s: &str) -> Option<u64> {
+    let out = Command::new("date")
+        .arg("-d").arg(s)
+        .arg("+%s")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok()
 }

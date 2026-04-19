@@ -126,15 +126,18 @@ pub fn update() {
         }
     };
 
-    // Phase 4: fold AUR pending upgrades into the same list when a helper is
-    // configured. They don't appear in any sync DB, so the hold evaluator will
-    // bucket them as Unknown — the per-package prompt handles them cleanly.
-    // Future: AUR RPC lookup can feed real build dates in here.
+    // Fold AUR pending upgrades into the same list when a helper is configured.
+    // We track which names came from AUR so we can look up their build dates
+    // via the helper's cached metadata below.
+    let mut aur_names: Vec<String> = Vec::new();
     if let Some(h) = helper {
         match aur::pending_updates(h) {
             Ok(aur_list) => {
                 if !aur_list.is_empty() {
                     println!("nog: {} AUR update(s) reported by {}.", aur_list.len(), h);
+                }
+                for u in &aur_list {
+                    aur_names.push(u.name.clone());
                 }
                 pending.extend(aur_list);
             }
@@ -150,8 +153,26 @@ pub fn update() {
         return;
     }
 
-    // Load build dates once; expensive enough to avoid reloading per package.
-    let build_dates = sync_db::load_build_dates();
+    // Sync-DB build dates first (covers official repos and any binary AUR
+    // mirrors like Chaotic-AUR).
+    let mut build_dates = sync_db::load_build_dates();
+
+    // Then extend with AUR build dates fetched via the helper's cached metadata
+    // (`<helper> -Sai`). Only query for AUR names that weren't already resolved
+    // by the sync-DB pass. If the helper is unreachable or the date is
+    // unparseable, those packages fall back to the Unknown bucket — the
+    // per-package y/N prompt still handles them cleanly.
+    if let Some(h) = helper {
+        let missing: Vec<String> = aur_names.iter()
+            .filter(|name| !build_dates.contains_key(name.as_str()))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            let aur_dates = aur::build_dates_for(h, &missing);
+            build_dates.extend(aur_dates);
+        }
+    }
+
     let now = std::time::SystemTime::now();
 
     // Evaluate every pending update and bucket it.
