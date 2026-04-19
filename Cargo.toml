@@ -1,6 +1,6 @@
 [package]
 name = "nog"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 
 [[bin]]
@@ -13,4 +13,10 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 flate2 = "1"
 tar = "0.4"
-zstd = "0.13"
+# pkg-config feature forces zstd-sys to use the system libzstd via dynamic
+# linking instead of its bundled static build. The bundled path was failing
+# to link under Arch's makepkg env (LLD + -Wl,--as-needed + -nodefaultlibs)
+# because the link directive for the bundled libzstd.a wasn't being emitted.
+# System libzstd is always present on Arch (pacman depends on it) and
+# pkg-config is in base-devel — zero extra runtime/build dependencies.
+zstd = { version = "0.13", features = ["pkg-config"] }
