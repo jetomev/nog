@@ -479,7 +479,7 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ### v1.0 release kit — ✅ Shipped
 - [x] **PKGBUILD in tree** at repo root, kept in lockstep with the latest tag
 - [x] **AUR submission** — [`ssh://aur@aur.archlinux.org/nog.git`](https://aur.archlinux.org/packages/nog) tracks releases; maintained via `~/Programs/aur-nog-remote/`
-- [x] **Dogfood** — full [`TEST-MATRIX.md`](TEST-MATRIX.md) run captured in [`TEST-REPORT-v1.0.md`](TEST-REPORT-v1.0.md); the dogfood surfaced the v1.0.1 zstd fix and the v1.0.2 polish batch, both validated on the AUR-delivered binary
+- [x] **Dogfood** — full [`Test Matrix`](testing/20260513 - Test Matrix for nog v1-0-3.md) run captured in [`v1.0 Test Results`](testing/20260419 - Test Results for nog v1-0-0.md); the dogfood surfaced the v1.0.1 zstd fix and the v1.0.2 polish batch, both validated on the AUR-delivered binary
 - [x] **Release discipline** — every release now runs through local `makepkg -si` test → AUR push → uninstall + fresh AUR install verification
 
 ### Future
@@ -528,7 +528,7 @@ No new dependencies. Same dynamic-libzstd linking contract as v1.0.1/v1.0.2.
 ### v1.0.2 — April 19, 2026
 **Dogfood-surfaced polish batch**
 
-Five small fixes and two matrix refinements, all caught during the end-to-end dogfood of the AUR-installed v1.0.1 binary. See [`TEST-REPORT-v1.0.md`](TEST-REPORT-v1.0.md) for the full run — every finding is documented there with observed behavior, severity, and fix rationale.
+Five small fixes and two matrix refinements, all caught during the end-to-end dogfood of the AUR-installed v1.0.1 binary. See [`v1.0 Test Results`](testing/20260419 - Test Results for nog v1-0-0.md) for the full run — every finding is documented there with observed behavior, severity, and fix rationale.
 
 **Fixes:**
 - 🛑 **F5 — graceful exit on missing tier-pins.** `load_tiers()` no longer panics with a Rust-native backtrace hint when `/etc/nog/tier-pins.toml` is unreadable. Clean `eprintln!` + `std::process::exit(1)` with the attempted path in the error message for diagnostic clarity.
@@ -538,8 +538,8 @@ Five small fixes and two matrix refinements, all caught during the end-to-end do
 - 📝 **F3 — error messages no longer duplicate "exit status".** Every `eprintln!("... exited with status {}", status)` now uses `status.code().unwrap_or(-1)` so output reads `exited with status 1` instead of `exited with status exit status: 1`.
 
 **Matrix refinements:**
-- 📋 **M1** — [`TEST-MATRIX.md`](TEST-MATRIX.md) check 15.3 updated: `.pacsave`/`.pacnew` siblings are expected after any uninstall/reinstall cycle (the PKGBUILD's `backup=` directive intentionally preserves user-modified configs)
-- 📋 **M2** — [`TEST-MATRIX.md`](TEST-MATRIX.md) check 3.5 no longer keys the pass criterion on a specific exit code for nonexistent packages — helpers have inconsistent behavior here (yay returns 0 with "nothing to do"; paru may return non-zero)
+- 📋 **M1** — [`Test Matrix`](testing/20260513 - Test Matrix for nog v1-0-3.md) check 15.3 updated: `.pacsave`/`.pacnew` siblings are expected after any uninstall/reinstall cycle (the PKGBUILD's `backup=` directive intentionally preserves user-modified configs)
+- 📋 **M2** — [`Test Matrix`](testing/20260513 - Test Matrix for nog v1-0-3.md) check 3.5 no longer keys the pass criterion on a specific exit code for nonexistent packages — helpers have inconsistent behavior here (yay returns 0 with "nothing to do"; paru may return non-zero)
 
 **No behavior changes** beyond the error-path polish and the search label text. 6/6 hold tests still green. Same zstd-via-pkg-config dynamic-linking contract as v1.0.1.
 

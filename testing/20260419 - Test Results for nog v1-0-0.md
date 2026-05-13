@@ -1,6 +1,6 @@
 # nog v1.0 — Dogfood Test Report
 
-Full run of [`TEST-MATRIX.md`](TEST-MATRIX.md) against the freshly AUR-installed `nog 1.0.1` on **2026-04-19**.
+Full run of [`Test Matrix`](20260513 - Test Matrix for nog v1-0-3.md) against the freshly AUR-installed `nog 1.0.1` on **2026-04-19**.
 
 Every check from the matrix is annotated with pass / partial / fail status and a one-line observation. Findings (bugs or polish items surfaced during the run) are collected in a dedicated section and batched into a planned **v1.0.2 hotfix** documented at the bottom.
 
@@ -309,7 +309,7 @@ TierManager::load(&cfg.paths.tier_pins).unwrap_or_else(|e| {
 
 **Not a bug.** Exit status here is determined by the helper, not by nog. The spirit of the check — "no false-positive installation, no phantom sudo prompt" — is satisfied.
 
-**Fix:** Update [`TEST-MATRIX.md`](TEST-MATRIX.md) check 3.5 to relax the exit-status criterion. Pass criteria become: (a) clear error/informational output from the helper; (b) no unexpected sudo prompt; (c) nog doesn't falsely claim a successful install.
+**Fix:** Update [`Test Matrix`](20260513 - Test Matrix for nog v1-0-3.md) check 3.5 to relax the exit-status criterion. Pass criteria become: (a) clear error/informational output from the helper; (b) no unexpected sudo prompt; (c) nog doesn't falsely claim a successful install.
 
 ### M1 — Matrix refinement: `.pacsave` files expected with `backup=`
 
@@ -319,7 +319,7 @@ TierManager::load(&cfg.paths.tier_pins).unwrap_or_else(|e| {
 
 **Not a bug.** The `.pacsave` files are pacman's correct behavior given the PKGBUILD's `backup=('etc/nog/nog.conf' 'etc/nog/tier-pins.toml')` directive. When the previous nog was removed via `yay -R nog` earlier in the dogfood session, pacman saved the user's configs rather than deleting them. When `yay -S nog` then installed the new package, pacman wrote fresh defaults and left the saved copies as `.pacsave`.
 
-**Fix:** Update [`TEST-MATRIX.md`](TEST-MATRIX.md) check 15.3 to note that `.pacsave` (and `.pacnew`) files are expected after an uninstall/reinstall cycle and should not be counted against the matrix. Queued with the v1.0.2 batch so it ships as part of the same release.
+**Fix:** Update [`Test Matrix`](20260513 - Test Matrix for nog v1-0-3.md) check 15.3 to note that `.pacsave` (and `.pacnew`) files are expected after an uninstall/reinstall cycle and should not be counted against the matrix. Queued with the v1.0.2 batch so it ships as part of the same release.
 
 ---
 
@@ -384,7 +384,7 @@ Following the established Phase / hotfix pattern:
 6. **GitHub Release** — via `gh release create v1.0.2 --latest`
 7. **AUR update** — bump `pkgver=1.0.2` in `~/Programs/nog/PKGBUILD`, run through `~/Programs/aur-nog/` test build first, then push via `~/Programs/aur-nog-remote/`
 
-The fix execution itself is **out of scope for this document**. This report exists as a permanent record of what was tested, what was found, and what's planned — living alongside [`TEST-MATRIX.md`](TEST-MATRIX.md) as the v1.0 release's validation artifact.
+The fix execution itself is **out of scope for this document**. This report exists as a permanent record of what was tested, what was found, and what's planned — living alongside [`Test Matrix`](20260513 - Test Matrix for nog v1-0-3.md) as the v1.0 release's validation artifact.
 
 ---
 
