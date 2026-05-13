@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.2](https://img.shields.io/badge/Version-1.0.2-purple.svg)
+![Version: 1.0.3](https://img.shields.io/badge/Version-1.0.3-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -217,7 +217,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.2"
+version = "1.0.3"
 log_level = "info"
 
 [paths]
@@ -427,6 +427,37 @@ nog runs as your user. It escalates exactly twice: `sudo pacman` for package tra
 ---
 
 ## Changelog
+
+### v1.0.3 — May 13, 2026
+**Hotfix — kernel / headers / DKMS coupling**
+
+Fixes a regression-class bug where `nog update` could leave a system unbootable. On 2026-05-13 a user's machine ran `nog update`: the Tier 1 30-day hold on `linux-zen` and `linux-lts` kept the kernel binaries pinned, but `linux-zen-headers`, `linux-lts-headers`, and `nvidia-open-dkms` (all Tier 3 defaults) flowed through. The next DKMS rebuild emitted:
+
+```
+ERROR: Missing 6.18.29-1-lts kernel modules tree for module nvidia/595.71.05.
+ERROR: Missing 7.0.5-zen1-1-zen kernel modules tree for module nvidia/595.71.05.
+```
+
+After reboot the running kernel was the old one, no `nvidia.ko` existed for it either, the GPU was unbound, and the user fell back to a single washed-out monitor on simpledrm framebuffer.
+
+The root cause was architectural: kernel + headers + DKMS modules form a triplet that must move together, but `<X>-headers` packages were defaulting to Tier 3 even when their kernel was Tier 1.
+
+**Fixes:**
+- 🔗 **Auto-coupling — `<X>-headers` inherits its kernel's Tier 1.** `TierManager::classify()` now treats any package matching the `<name>-headers` pattern as Tier 1 when `<name>` is Tier 1. Same PKGBUILD produces both, so their build dates match and their holds expire together — coupling guarantees they bucket together at plan time too. Hardcoded, not configurable; the Arch convention is universal and the bug is severe.
+- 📦 **New optional `[groups]` table in `tier-pins.toml`.** Escape hatch for non-standard kernel names (`linux-cachyos-cacule-headers`) and for bundling extras (e.g. `linux + nvidia-utils`). Members inherit the highest tier present among any other group member. See the commented example in the default `tier-pins.toml`.
+- ⚠ **Plan-time desync detector.** At `nog update`, the installed versions of each Tier 1 kernel and its matching headers are compared via `pacman -Q`. Any mismatch prints a red ⚠ block before the Ready/Held/Unknown buckets, naming each desynced pair and pointing at the recovery flag below.
+- 🔧 **New `nog update --realign` flag — forward-path recovery.** When desync is detected and the held kernel's pending upgrade version matches the installed headers version, `--realign` pulls that kernel out of the Held bucket and into Ready with the annotation `[Tier 1 · realigned to match installed headers]`. The subsequent transaction upgrades the kernel to match the headers in one coherent step. For the pathological case where no held kernel matches, the flag prints a clear notice and falls back to the standard plan.
+
+**What this changes for existing installs:**
+- After upgrading to v1.0.3, **`linux-headers`, `linux-zen-headers`, `linux-lts-headers`, and `linux-hardened-headers` move silently from Tier 3 to Tier 1**. On the next `nog update`, they will appear under **Held** with 30-day windows where v1.0.2 would have shown them as Ready with 7-day windows. This is the fix in action — those headers should never have been able to flow ahead of their kernel.
+- The new `[groups]` table is optional; existing `tier-pins.toml` files without it continue to work unchanged.
+- DKMS modules (e.g. `nvidia-open-dkms`) are **not** coupled explicitly — they're downstream victims that succeed automatically once kernel ↔ headers are coherent.
+
+**Tests:** 6 → 14. Eight new unit tests in `tiers::tests` cover direct lookup (regression guard), `*-headers` auto-coupling for Tier 1, non-Tier 1 fall-through, group inheritance (both Tier 1 and Tier 2 / 3 cases), empty groups, and the `tier1_packages()` accessor used by the desync detector.
+
+**TEST-MATRIX:** new section 16 with 16 regression-guard checks across 16a (auto-coupling, dev-build-safe), 16b ([groups]), 16c (desync warning), 16d (--realign recovery). Section 16a runs cleanly against any dev build with no system state changes.
+
+No new dependencies. Same dynamic-libzstd linking contract as v1.0.1/v1.0.2.
 
 ### v1.0.2 — April 19, 2026
 **Dogfood-surfaced polish batch**
