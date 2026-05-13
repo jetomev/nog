@@ -18,9 +18,9 @@ Conventions:
 
 ## 1. Baseline sanity
 
-- [ ] **1.1** `$ nog --version` prints `nog 1.0.0`
+- [ ] **1.1** `$ nog --version` prints `nog 1.0.3`
 - [ ] **1.2** `$ nog --help` lists all subcommands (`install`, `remove`, `update`, `search`, `pin`, `unlock`) and neither of the hidden `_debug-*` commands
-- [ ] **1.3** `$ man nog` opens cleanly; header reads `nog v1.0.0`; **PRIVILEGES AND SUDO** section present
+- [ ] **1.3** `$ man nog` opens cleanly; header reads `nog v1.0.3`; **PRIVILEGES AND SUDO** section present
 - [ ] **1.4** `/etc/nog/nog.conf` exists, owned by `root:root`, mode 644; `[holds]` = 30/15/7; `[aur] helper = "auto"`
 - [ ] **1.5** `/etc/nog/tier-pins.toml` exists, owned by `root:root`, mode 644; `[tier1] manual_signoff = false`
 
@@ -166,6 +166,56 @@ Conventions:
 
 ---
 
+## 16. Kernel / headers coupling (v1.0.3)
+
+> Regression guard for the 2026-05-13 nvidia driver breakage: `linux-zen` was held by the 30-day Tier 1 window while `linux-zen-headers` (defaulting to Tier 3) and `nvidia-open-dkms` were allowed through. The next DKMS rebuild failed with `Missing 7.0.5-zen1-1-zen kernel modules tree for module nvidia/595.71.05`, the GPU was unbound, and `/usr/lib/modules/<KVER>` was absent after reboot.
+>
+> v1.0.3 fixes this by treating `<X>-headers` as the same tier as `<X>` when `<X>` is Tier 1, and adds a plan-time desync detector + `--realign` recovery flag.
+
+### 16a. Auto-coupling — `<X>-headers` inherits Tier 1
+
+Non-destructive; safe against a dev build.
+
+- [ ] **16.1** `$ nog search linux-headers` — annotation is red `[Tier 1 — 30d hold]` (previously green Tier 3 in v1.0.2)
+- [ ] **16.2** `$ nog search linux-zen-headers` — red `[Tier 1 — 30d hold]`
+- [ ] **16.3** `$ nog search linux-lts-headers` — red `[Tier 1 — 30d hold]`
+- [ ] **16.4** `$ nog search firefox-headers` (hypothetical) — green `[Tier 3 — 7d hold]` (the rule only fires when the base name is in Tier 1)
+- [ ] **16.5** `$ nog _debug-hold linux-zen-headers` — `tier: Tier 1`, `window: 30 days`
+
+### 16b. Group inheritance via `[groups]`
+
+Requires editing `/etc/nog/tier-pins.toml` (revert after).
+
+- [ ] **16.6** Append a `[groups]` table with `custom = ["linux", "weirdname-extras"]` to `/etc/nog/tier-pins.toml`
+- [ ] **16.7** `$ nog search weirdname-extras` — annotation is red `[Tier 1 — 30d hold]` (inherited via the group, even though the name doesn't match the `-headers` pattern)
+- [ ] **16.8** Remove the `[groups]` table — `$ nog search weirdname-extras` returns to green Tier 3
+
+### 16c. Desync detection — informational warning
+
+Requires an actual installed-version mismatch between a kernel and its headers. The natural way to reproduce: hold a kernel through the v1.0.2-style bug. Easier: forcibly install an older kernel from `/var/cache/pacman/pkg/` while leaving headers at current.
+
+```
+# In a VM or test box only:
+sudo pacman -U /var/cache/pacman/pkg/linux-zen-<older-version>.pkg.tar.zst
+nog update
+```
+
+- [ ] **16.9** When kernel and headers versions differ, `nog update` prints a red ⚠ warning block before the Ready/Held/Unknown buckets, listing each desynced pair with both installed versions
+- [ ] **16.10** Without `--realign`, the warning includes the recovery hint `nog update --realign`
+- [ ] **16.11** No false positive: in a coherent system (kernel and headers at matching versions), no warning appears
+
+### 16d. `--realign` — forward-path recovery
+
+Requires the desync state from 16c.
+
+- [ ] **16.12** `$ nog update --realign` — for each desynced kernel whose pending upgrade version matches the installed headers version, the row moves from **Held** to **Ready** with annotation `[Tier 1 · realigned to match installed headers]`
+- [ ] **16.13** A line is printed in the warning block: `--realign: <kernel> <oldver> → <newver> pulled into Ready.`
+- [ ] **16.14** Transaction proceeds; the realigned kernel is upgraded; subsequent DKMS rebuild succeeds (e.g., `dkms status` shows nvidia modules built for the new KVER)
+- [ ] **16.15** If no held kernel matches the headers version (e.g., headers are ahead of any pending kernel upgrade — pathological case), `--realign` prints `--realign: no held kernel matches the installed headers version` and falls back to the standard plan
+- [ ] **16.16** `$ nog update --realign` against a coherent system (no desync) is a no-op for the realign path — runs identically to plain `nog update`
+
+---
+
 ## Appendix — state restoration after testing
 
 If any test modified state you want reverted:
@@ -184,5 +234,6 @@ Before v1.0 ships, the following test IDs can be run against `cargo build --rele
 - Sections 2, 5, 6, 8, 9 (with the dev config fallback in place)
 - Section 11 (root-guard tests)
 - Section 12 (config edge cases)
+- **Section 16a** (auto-coupling assertions via `nog search` — non-destructive, dev-build-safe)
 
-Install-path tests (section 3) and most of section 7/10/13/14 are best saved for the real post-install dogfood since they mutate system state.
+Install-path tests (section 3) and most of section 7/10/13/14 are best saved for the real post-install dogfood since they mutate system state. Section 16c–16d need an induced desync (VM or test box) since reproducing the v1.0.2 bug requires holding a kernel while letting its headers move.

@@ -106,7 +106,16 @@ pub fn remove(packages: &[String]) {
     }
 }
 
-pub fn update() {
+/// Why this package landed in the Ready bucket. Distinguishes the normal
+/// "hold window passed" case from the `--realign` override that pulled a held
+/// kernel into Ready to recover from a kernel/headers version mismatch.
+#[derive(Clone)]
+enum ReadyReason {
+    Expired { days_past_window: u64 },
+    Realigned,
+}
+
+pub fn update(realign: bool) {
     let cfg = load_config();
     let helper = resolve_helper(&cfg);
     guard_not_sudo_with_helper(helper);
@@ -176,7 +185,7 @@ pub fn update() {
     let now = std::time::SystemTime::now();
 
     // Evaluate every pending update and bucket it.
-    let mut ready: Vec<(PendingUpdate, Tier, u64)> = Vec::new();      // (upd, tier, days_past_window)
+    let mut ready: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
     let mut held: Vec<(PendingUpdate, Tier, u64, bool)> = Vec::new(); // (upd, tier, days_remaining, forced_by_signoff)
     let mut unknown: Vec<(PendingUpdate, Tier)> = Vec::new();
 
@@ -196,7 +205,7 @@ pub fn update() {
                 held.push((upd.clone(), tier, 0, true));
             }
             HoldStatus::Expired { days_past_window } => {
-                ready.push((upd.clone(), tier, days_past_window));
+                ready.push((upd.clone(), tier, ReadyReason::Expired { days_past_window }));
             }
             HoldStatus::Holding { days_remaining } => {
                 held.push((upd.clone(), tier, days_remaining, false));
@@ -204,6 +213,74 @@ pub fn update() {
             HoldStatus::Unknown => {
                 unknown.push((upd.clone(), tier));
             }
+        }
+    }
+
+    // Desync detection: for each Tier 1 package that is installed, check
+    // whether its <X>-headers companion is installed at a *different* version.
+    // That's the post-incident fingerprint of the 2026-05-13 nvidia breakage —
+    // headers raced ahead of the held kernel and the next DKMS rebuild errored
+    // with "Missing <KVER> kernel modules tree."
+    let kernel_names = tm.tier1_packages();
+    let mut to_query: Vec<String> = kernel_names.clone();
+    to_query.extend(kernel_names.iter().map(|k| format!("{}-headers", k)));
+    let installed = pacman::installed_versions(&to_query);
+
+    let mut desyncs: Vec<(String, String, String)> = Vec::new(); // (kernel, kver, hver)
+    for k in &kernel_names {
+        let kver = match installed.get(k) { Some(v) => v, None => continue };
+        let hpkg = format!("{}-headers", k);
+        let hver = match installed.get(&hpkg) { Some(v) => v, None => continue };
+        if kver != hver {
+            desyncs.push((k.clone(), kver.clone(), hver.clone()));
+        }
+    }
+
+    if !desyncs.is_empty() {
+        println!();
+        println!("{}{}nog: ⚠ kernel / headers version mismatch detected:{}", C_BOLD, C_RED, C_RESET);
+        for (k, kver, hver) in &desyncs {
+            println!("       {:<22} {}", k, kver);
+            println!("       {:<22} {}", format!("{}-headers", k), hver);
+        }
+        println!("{}     DKMS rebuilds against the newer headers will fail because the{}",
+            C_SUBTEXT, C_RESET);
+        println!("{}     kernel modules tree for that version isn't installed.{}",
+            C_SUBTEXT, C_RESET);
+
+        if realign {
+            // Forward path: pull each desynced kernel out of the Held bucket
+            // when its pending upgrade version matches the installed headers
+            // version. The transaction will then upgrade kernel-to-match-headers
+            // in a single coherent step and the next DKMS rebuild succeeds.
+            let mut new_held: Vec<(PendingUpdate, Tier, u64, bool)> = Vec::new();
+            let mut realigned_count = 0usize;
+            for entry in held.drain(..) {
+                let (upd, tier, _, _) = &entry;
+                let matched = desyncs.iter().any(|(k, _, hver)| {
+                    &upd.name == k && &upd.new_version == hver
+                });
+                if matched {
+                    println!("{}     --realign: {} {} → {} pulled into Ready.{}",
+                        C_SUBTEXT, upd.name, upd.old_version, upd.new_version, C_RESET);
+                    ready.push((upd.clone(), tier.clone(), ReadyReason::Realigned));
+                    realigned_count += 1;
+                } else {
+                    new_held.push(entry);
+                }
+            }
+            held = new_held;
+            if realigned_count == 0 {
+                println!("{}     --realign: no held kernel matches the installed headers version{}",
+                    C_SUBTEXT, C_RESET);
+                println!("{}     (recovery may require `sudo pacman -U` from the cache instead).{}",
+                    C_SUBTEXT, C_RESET);
+            }
+        } else {
+            println!("{}     To recover, re-run with `--realign`:{}", C_SUBTEXT, C_RESET);
+            println!("{}         nog update --realign{}", C_SUBTEXT, C_RESET);
+            println!("{}     This pulls held kernels into the upgrade so they match the headers.{}",
+                C_SUBTEXT, C_RESET);
         }
     }
 
@@ -294,7 +371,7 @@ fn prompt_unknown(pkg: &str, tier: &Tier, old: &str, new: &str) -> PromptOutcome
 }
 
 fn print_buckets(
-    ready: &[(PendingUpdate, Tier, u64)],
+    ready: &[(PendingUpdate, Tier, ReadyReason)],
     held: &[(PendingUpdate, Tier, u64, bool)],
     unknown: &[(PendingUpdate, Tier)],
 ) {
@@ -304,20 +381,19 @@ fn print_buckets(
     if !ready.is_empty() {
         println!();
         println!("{}Ready to install ({}):{}", C_BOLD, ready.len(), C_RESET);
-        for (upd, tier, past) in ready {
+        for (upd, tier, reason) in ready {
             let color = tier_color(tier);
-            let past_str = if *past == 0 {
-                "hold just expired".to_string()
-            } else if *past == 1 {
-                "1 day past window".to_string()
-            } else {
-                format!("{} days past window", past)
+            let reason_str = match reason {
+                ReadyReason::Expired { days_past_window: 0 } => "hold just expired".to_string(),
+                ReadyReason::Expired { days_past_window: 1 } => "1 day past window".to_string(),
+                ReadyReason::Expired { days_past_window } => format!("{} days past window", days_past_window),
+                ReadyReason::Realigned => "realigned to match installed headers".to_string(),
             };
             println!(
                 "  {}{}{} {}{} -> {}{}  {}[{} · {}]{}",
                 color, upd.name, C_RESET,
                 C_SUBTEXT, upd.old_version, upd.new_version, C_RESET,
-                C_SUBTEXT, tier, past_str, C_RESET,
+                C_SUBTEXT, tier, reason_str, C_RESET,
             );
         }
     }

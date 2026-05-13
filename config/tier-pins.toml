@@ -40,3 +40,18 @@ packages = [
 [tier3]
 manual_signoff = false
 # everything not listed above falls here automatically
+
+# Optional. Bundle packages that must move together. Members inherit the
+# highest tier among any other group member. Useful for non-standard kernel
+# names whose headers don't follow the `<kernel>-headers` convention, or for
+# pulling extra packages (e.g. nvidia-utils) into a kernel's tier.
+#
+# Standard Arch kernels (linux, linux-zen, linux-lts, linux-hardened) do NOT
+# need a group — nog auto-couples `<kernel>-headers` to its Tier 1 kernel.
+#
+# [groups]
+# cachyos-bundle = [
+#     "linux-cachyos",
+#     "linux-cachyos-headers",
+#     "linux-cachyos-cacule-headers",
+# ]

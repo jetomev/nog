@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::process::{Command, ExitStatus, Output};
 
 /// One pending upgrade reported by `checkupdates`.
@@ -119,4 +120,36 @@ pub fn search_capture(query: &str) -> Output {
         .args(["-Ss", query])
         .output()
         .unwrap_or_else(|e| panic!("nog: failed to launch pacman: {}", e))
+}
+
+/// Resolve the installed versions of multiple packages in a single `pacman -Q`
+/// call. Packages that aren't installed are absent from the returned map (not
+/// represented as None) — callers use `.get()` to distinguish "installed at
+/// version X" from "not installed."
+///
+/// pacman -Q exits non-zero if any requested package is missing, but still
+/// prints the ones it found on stdout. We deliberately don't gate on the exit
+/// status; parsing what was returned is the right behavior here.
+pub fn installed_versions(packages: &[String]) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if packages.is_empty() {
+        return out;
+    }
+    let mut args = vec!["-Q".to_string()];
+    args.extend(packages.iter().cloned());
+    let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let output = match Command::new("pacman").args(&str_args).output() {
+        Ok(o) => o,
+        Err(_) => return out,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        let mut parts = line.split_whitespace();
+        if let (Some(name), Some(version)) = (parts.next(), parts.next()) {
+            out.insert(name.to_string(), version.to_string());
+        }
+    }
+    out
 }

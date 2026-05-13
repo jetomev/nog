@@ -53,7 +53,15 @@ enum Commands {
     /// groups them into Ready / Held / Unknown. Unknown packages prompt
     /// per-package. The final transaction runs `pacman -Syu --ignore=…`
     /// or `<helper> -Syu --ignore=…`.
-    Update,
+    ///
+    /// `--realign` recovers from a kernel/headers version mismatch by pulling
+    /// any held kernel whose pending upgrade matches the installed headers
+    /// version out of the Held bucket and into the upgrade transaction. Useful
+    /// after a partial upgrade left DKMS in a broken state.
+    Update {
+        #[arg(long, help = "Pull held kernels into the upgrade to match installed headers")]
+        realign: bool,
+    },
     /// Search pacman repos; results annotated by tier (red/yellow/green)
     Search {
         query: String,
@@ -96,7 +104,7 @@ fn main() {
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
-        Commands::Update => commands::update(),
+        Commands::Update { realign } => commands::update(realign),
         Commands::Search { query } => commands::search(&query),
         Commands::Pin { package, tier } => commands::pin(&package, tier),
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
