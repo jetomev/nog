@@ -90,6 +90,35 @@ The final transaction invokes
 or the helper with
 .B --ignore=
 listing all held and user-skipped packages.
+.PP
+Before the buckets render,
+.B nog update
+checks installed kernel and
+.IR <kernel>-headers
+versions for every Tier 1 kernel. If any pair disagrees
+(e.g.
+.IR linux-lts
+at 6.18.22-1 but
+.IR linux-lts-headers
+at 6.18.29-1, the fingerprint of a v1.0.2-style desync), a red warning block
+is printed naming each desynced pair and pointing at
+.BR --realign .
+.TP
+.B nog update \-\-realign
+Recover from a kernel / headers version mismatch. For each desynced kernel
+whose pending upgrade version matches the installed headers version, the row
+is pulled from the
+.B Held
+bucket into the
+.B Ready
+bucket with the annotation
+.RB [ "Tier 1 · realigned to match installed headers" ].
+The subsequent transaction upgrades the kernel to match the headers in a
+single coherent step, after which the next DKMS rebuild succeeds. If no held
+kernel matches the installed headers version, a clean fall-through notice is
+printed and
+.B nog update
+proceeds with the standard plan.
 .TP
 .B nog search \fIquery\fR
 Search for packages matching
@@ -199,6 +228,54 @@ Default Tier 2 packages:
 .SS Tier 3 \(em 7-day hold
 Everything else. A short 7-day safety buffer without meaningful delay. Anything
 not listed in Tier 1 or Tier 2 falls into Tier 3 automatically.
+.SS Coupling \(em \fI<X>-headers\fR follows its kernel
+A kernel package and its matching
+.IR <name>-headers
+package share a single PKGBUILD upstream, which means they share a single
+build date and must be installed at the same version on disk \(em every DKMS
+hook (e.g.
+.BR nvidia-open-dkms (1))
+rebuilds against
+.IR <kernel>-headers
+and places its output under
+.IR /usr/lib/modules/<KVER>/ ,
+which is only present when
+.IR <kernel>
+itself is installed at the matching version.
+.PP
+.B nog
+auto-couples this relationship: any package matching the
+.IR <X>-headers
+pattern is classified as Tier 1 when
+.IR <X>
+is Tier 1. This is hardcoded behavior, not configurable. The Arch naming
+convention is universal and the failure mode (broken DKMS module, unbound
+GPU after reboot) is severe enough that opting out is not supported.
+.SS Groups (advanced)
+The optional
+.B [groups]
+table in
+.IR /etc/nog/tier-pins.toml
+is the escape hatch for non-standard kernel names whose headers do not match
+the
+.IR <X>-headers
+pattern (e.g.
+.IR linux-cachyos-cacule-headers ),
+or for bundling extra packages into a kernel's tier.
+.PP
+.RS
+.nf
+[groups]
+cachyos-bundle = [
+    "linux-cachyos",
+    "linux-cachyos-headers",
+    "linux-cachyos-cacule-headers",
+]
+.fi
+.RE
+.PP
+Every member of a group inherits the highest tier present among any other
+member of the same group.
 .
 .SH EXAMPLES
 .TP
@@ -275,6 +352,58 @@ or
 .BR paru (8);
 every install, remove, and upgrade is subject to pacman's signature
 verification and conflict resolution, which nog cannot bypass.
+.
+.SH TROUBLESHOOTING
+.SS DKMS rebuild fails after \fBnog update\fR
+If a DKMS hook (typically
+.BR nvidia-open-dkms ,
+.BR nvidia-dkms ,
+or
+.BR virtualbox-host-dkms )
+emits
+.RS
+.PP
+.B "ERROR: Missing <KVER> kernel modules tree for module <name>/<version>."
+.RE
+.PP
+your kernel and its headers have diverged on disk \(em headers are at
+.IR <KVER>
+but the kernel binary for that version isn't installed under
+.IR /usr/lib/modules/<KVER>/ .
+.PP
+In v1.0.3 and later this state is detected automatically; the desync warning
+block in
+.B nog update
+points at the recovery flag:
+.PP
+.RS
+.B nog update --realign
+.RE
+.PP
+Manual recovery (use when
+.B --realign
+cannot apply, e.g. headers are ahead of any pending kernel upgrade):
+.PP
+.RS
+.nf
+sudo pacman -S linux-zen linux-lts      # adjust to your kernels
+sudo pacman -S nvidia-open-dkms          # or the failing DKMS package
+.fi
+.RE
+.PP
+Verify the rebuild with
+.B dkms status
+and look for the expected
+.I .ko.zst
+files under
+.IR /usr/lib/modules/$(uname\ -r)/updates/dkms/ .
+.SS Verifying coupling is active
+.B nog search linux-zen-headers
+should annotate the result with
+.RB [ "Tier 1 \(em 30d hold" ].
+A green Tier 3 annotation means you are still running v1.0.2 or earlier;
+upgrade nog before the next
+.BR "nog update" .
 .
 .SH SEE ALSO
 .BR pacman (8),

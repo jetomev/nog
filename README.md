@@ -71,6 +71,27 @@ Key desktop applications and system services. Updates are held for **15 days** �
 ### Tier 3 — 7-Day Hold
 Everything else. Updates are held for **7 days** — a short safety buffer without meaningful delay.
 
+### Tier coupling — kernel ↔ headers ↔ DKMS
+
+A kernel package (`linux`, `linux-zen`, `linux-lts`, `linux-hardened`) and its matching `*-headers` package are produced from the same PKGBUILD — they share a single build date and must always be installed at the same version, because every DKMS module (e.g. `nvidia-open-dkms`) is rebuilt against whichever `<kernel>-headers` is on disk and then placed under `/usr/lib/modules/<KVER>/`. If headers move ahead of the kernel, the next DKMS rebuild has nowhere to land and the GPU driver fails to load after reboot.
+
+To prevent this, nog **automatically couples `<X>-headers` to its base kernel's tier**. If `linux-zen` is Tier 1, then `linux-zen-headers` is treated as Tier 1 too — they hold together, they release together. This is hardcoded behavior: not configurable, always on. The Arch naming convention is universal and the failure mode is severe.
+
+**For non-standard kernel names** (`linux-cachyos-cacule-headers` etc.), the `<X>-headers` pattern doesn't apply directly. Use the optional `[groups]` table in `/etc/nog/tier-pins.toml` to bundle them explicitly:
+
+```toml
+[groups]
+cachyos-bundle = [
+    "linux-cachyos",
+    "linux-cachyos-headers",
+    "linux-cachyos-cacule-headers",
+]
+```
+
+Every member of a group inherits the highest tier present among any other member. The same mechanism can pull additional packages into a kernel's tier (e.g. `linux + nvidia-utils + nvidia-open-dkms` if you want maximally cautious GPU handling).
+
+**DKMS modules themselves are not coupled.** They don't need to be — once kernel and headers are coherent, DKMS rebuilds succeed automatically.
+
 ---
 
 ## Requirements
@@ -381,6 +402,51 @@ nog never invokes `sudo yay` or `sudo paru`. That is a deliberate refusal — bo
 ### In one paragraph
 
 nog runs as your user. It escalates exactly twice: `sudo pacman` for package transactions, and `sudo tee /etc/nog/tier-pins.toml` for the one file it ever writes. It never modifies any other file on your system, never bypasses pacman's signature verification, and never runs as root itself. If a helper is configured, transactions are handed off to `yay` or `paru` as your user, and those helpers escalate themselves.
+
+---
+
+## Troubleshooting
+
+### `ERROR: Missing <KVER> kernel modules tree for module <name>/<version>`
+
+You're seeing this from `nvidia-open-dkms`, `nvidia-dkms`, `virtualbox-host-dkms`, or another DKMS hook after running `nog update` (or `pacman -Syu` directly). The message means: DKMS is trying to build a kernel module against a `<KVER>` whose kernel binary is not installed at `/usr/lib/modules/<KVER>/`.
+
+This is the **kernel / headers / DKMS desync** described in [Tier coupling](#tier-coupling--kernel--headers--dkms). Until v1.0.3, nog's Tier 1 hold applied to `linux*` packages but not their `*-headers` companions, so headers could race ahead of held kernels and break DKMS rebuilds.
+
+**Recovery in v1.0.3:**
+
+```sh
+nog update --realign
+```
+
+The `--realign` flag pulls held kernels into the upgrade transaction when their pending version matches the installed headers, so kernel + headers end up at the same version in a single coherent step. After the transaction completes, DKMS rebuilds run with consistent inputs and the affected modules build successfully.
+
+**Manual recovery (if `nog update --realign` doesn't apply** — e.g. headers are *ahead* of any pending kernel upgrade, or you're on v1.0.2 and haven't upgraded nog yet**):**
+
+```sh
+# 1. Pull the held kernels forward to match the installed headers.
+sudo pacman -S linux-zen linux-lts            # adjust to your kernels
+
+# 2. Reinstall the DKMS package to retrigger the build hook.
+sudo pacman -S nvidia-open-dkms                # or whatever DKMS package broke
+
+# 3. Verify the modules built.
+dkms status
+find /usr/lib/modules/$(uname -r)/updates/dkms -name '*.ko.zst'
+```
+
+**Verifying coupling is in effect (v1.0.3+):**
+
+```sh
+nog search linux-zen-headers
+# expect: red [Tier 1 — 30d hold] annotation
+```
+
+If it shows green Tier 3, you're still on v1.0.2 or earlier — upgrade nog before you next run `nog update`.
+
+### `nog update` reports more Held packages after upgrading from v1.0.2
+
+Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-headers`, and `linux-hardened-headers` from Tier 3 (7-day hold) to Tier 1 (30-day hold) implicitly via the `<X>-headers` coupling rule. The first `nog update` after upgrading will surface those headers in the **Held** bucket where v1.0.2 might have shown them as Ready. This is the protection working — they will release in lockstep with their kernel.
 
 ---
 
