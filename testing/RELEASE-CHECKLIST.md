@@ -94,6 +94,10 @@ Every release artifact carries the dual credit line:
     - Releases — v1.0.X marked Latest, body matches the prepared notes, prior releases unaltered
     - Packages — AUR link still resolves
     - README cross-links resolve on github.com (render check)
+    - **AUR badge cache check (shields.io ↔ camo):**
+      - Verify shields.io is current: `curl -s 'https://img.shields.io/aur/version/nog' | grep -oE 'v[0-9.]+'` should print the new version
+      - Verify github.com renders current: load the repo page; if the AUR badge still shows the old version 15+ minutes after the AUR push, GitHub's camo proxy is holding a stale SVG. **Fix:** bump a query param on the badge URL to bust the camo hash. The cheapest cache-buster is `?color=1793d1` (Arch blue) which is already in place; if needed again, change to `?color=1793d2` (or any new value), commit, push. New URL → new camo hash → fresh fetch from shields.io.
+      - Root cause for the record: camo caches by source-URL hash with `max-age=3600`. If shields.io's own AUR API cache was still stale when camo first fetched after a push, camo locks that stale value in for up to an hour. URL change is the only deterministic refresh.
 12. If any finding surfaces during steps 10–11, batch as `Fn`/`Mn` items and write a new Test Results file in `testing/`. Hotfix batch becomes the next release (vX.Y.Z+1).
 
 ## After release — record-keeping
