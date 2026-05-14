@@ -300,23 +300,29 @@ The `manual_signoff` field is only meaningful on `[tier1]`. Tier 2 and Tier 3 do
 
 ```
 nog/
+|-- README.md                  # This file
+|-- LICENSE                    # GPL v3
 |-- Cargo.toml                 # Package manifest — dependencies, metadata
+|-- Cargo.lock                 # Locked dependency tree (committed for reproducible binary builds)
 |-- src/
 |   |-- main.rs                # Entry point, CLI definition via clap
 |   |-- commands/
-|   |   |-- mod.rs             # All subcommand implementations
-|   |-- tiers.rs               # Tier classification engine
-|   |-- pacman.rs              # pacman subprocess wrapper (invokes sudo pacman)
+|   |   |-- mod.rs             # All subcommand implementations (incl. nog update --realign)
+|   |-- tiers.rs               # Tier classification engine (incl. *-headers auto-coupling + [groups])
+|   |-- pacman.rs              # pacman subprocess wrapper; installed-versions reader for the desync detector
 |   |-- aur.rs                 # AUR helper detection (yay / paru) + delegation
 |   |-- sync_db.rs             # pacman sync-DB reader (build-date lookup)
 |   |-- holds.rs               # Hold-status evaluator (pure function)
-|   |-- config.rs              # Config loader
+|   |-- config.rs              # Config loader (OnceLock-cached)
 |-- config/
 |   |-- nog.conf               # Default nog configuration
-|   |-- tier-pins.toml         # Default tier assignments
+|   |-- tier-pins.toml         # Default tier assignments (incl. commented [groups] example)
 |-- nog.1                      # Man page
-|-- PKGBUILD                   # AUR package build file
-|-- LICENSE                    # GPL v3
+|-- PKGBUILD                   # AUR package build file (in lockstep with the latest tag)
+|-- testing/                   # Per-release Test Matrix + Test Results + release checklist
+|   |-- 20260513 - Test Matrix for nog v1-0-3.md
+|   |-- 20260419 - Test Results for nog v1-0-0.md
+|   |-- RELEASE-CHECKLIST.md   # Pre-flight gates for every release (version sync, audits, AUR flow)
 ```
 
 ---
@@ -481,6 +487,10 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [x] **AUR submission** — [`ssh://aur@aur.archlinux.org/nog.git`](https://aur.archlinux.org/packages/nog) tracks releases; maintained via `~/Programs/aur-nog-remote/`
 - [x] **Dogfood** — full [`Test Matrix`](testing/20260513 - Test Matrix for nog v1-0-3.md) run captured in [`v1.0 Test Results`](testing/20260419 - Test Results for nog v1-0-0.md); the dogfood surfaced the v1.0.1 zstd fix and the v1.0.2 polish batch, both validated on the AUR-delivered binary
 - [x] **Release discipline** — every release now runs through local `makepkg -si` test → AUR push → uninstall + fresh AUR install verification
+
+### v1.0.3 — Released
+- [x] **Phase 6 — tier coupling for headers + DKMS** — `<X>-headers` auto-inherits Tier 1 when `<X>` is Tier 1 (hardcoded, same PKGBUILD → same build date); new optional `[groups]` table in `tier-pins.toml` for non-standard kernel names or custom bundles; plan-time desync detector compares installed kernel vs. headers versions; `nog update --realign` recovers a system already in the desynced state by pulling held kernels forward to match the installed headers; 14/14 tests (8 new in `tiers::tests`); [Test Matrix](testing/20260513 - Test Matrix for nog v1-0-3.md) section 16 with 16 regression-guard checks across 16a/b/c/d
+- [x] **`testing/` folder convention adopted** — per-release Test Matrix + Test Results + a nog-specific `RELEASE-CHECKLIST.md` matching the KognogOS ecosystem layout
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
@@ -729,6 +739,8 @@ See [LICENSE](LICENSE) for the full license text.
 
 ## Contributing
 
-nog is in early alpha. Ideas, feedback, and contributions are welcome — open an issue or pull request on GitHub.
+nog is stable as of v1.0.0 (April 2026), with the v1.0.3 hotfix locking in kernel/headers/DKMS coupling. The release cadence follows a phased discipline documented in [`testing/RELEASE-CHECKLIST.md`](testing/RELEASE-CHECKLIST.md); every release ships through GitHub + AUR with a fresh-install verification on the maintainer's machine.
+
+Ideas, bug reports, regression scenarios, and pull requests are welcome — open an issue or PR on GitHub. If you hit an issue that the [Troubleshooting](#troubleshooting) section doesn't cover, paste the output of `nog --version`, `pacman -Qi nog`, and (if relevant) the failing `nog update` excerpt.
 
 If this project resonates with you, consider starring the repository. It helps others find it and motivates continued development.
