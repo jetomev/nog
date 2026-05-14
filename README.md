@@ -491,6 +491,7 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ### v1.0.3 — Released
 - [x] **Phase 6 — tier coupling for headers + DKMS** — `<X>-headers` auto-inherits Tier 1 when `<X>` is Tier 1 (hardcoded, same PKGBUILD → same build date); new optional `[groups]` table in `tier-pins.toml` for non-standard kernel names or custom bundles; plan-time desync detector compares installed kernel vs. headers versions; `nog update --realign` recovers a system already in the desynced state by pulling held kernels forward to match the installed headers; 14/14 tests (8 new in `tiers::tests`); [Test Matrix](testing/20260513 - Test Matrix for nog v1-0-3.md) section 16 with 16 regression-guard checks across 16a/b/c/d
 - [x] **`testing/` folder convention adopted** — per-release Test Matrix + Test Results + a nog-specific `RELEASE-CHECKLIST.md` matching the KognogOS ecosystem layout
+- [x] **Dogfood (post-AUR)** — [v1.0.3 Test Results](testing/20260513 - Test Results for nog v1-0-3.md) captured on the AUR-delivered binary (no findings); coupling assertions verified live, `cargo test --release --locked` runs 14/14 green on every machine via the PKGBUILD `check()` step
 
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
