@@ -2,7 +2,7 @@
 # Co-developer: Claude (Anthropic)
 
 pkgname=nog
-pkgver=1.0.3
+pkgver=1.0.4
 pkgrel=1
 pkgdesc="A tier-aware package manager for Arch Linux — pacman with a safety net, written in Rust"
 arch=('x86_64')
