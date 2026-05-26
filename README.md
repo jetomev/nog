@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.3](https://img.shields.io/badge/Version-1.0.3-purple.svg)
+![Version: 1.0.4](https://img.shields.io/badge/Version-1.0.4-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -238,7 +238,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.3"
+version = "1.0.4"
 log_level = "info"
 
 [paths]
@@ -493,6 +493,12 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [x] **`testing/` folder convention adopted** — per-release Test Matrix + Test Results + a nog-specific `RELEASE-CHECKLIST.md` matching the KognogOS ecosystem layout
 - [x] **Dogfood (post-AUR)** — [v1.0.3 Test Results](testing/20260513 - Test Results for nog v1-0-3.md) captured on the AUR-delivered binary (no findings); coupling assertions verified live, `cargo test --release --locked` runs 14/14 green on every machine via the PKGBUILD `check()` step
 
+### v1.0.4 — Released
+- [x] **Phase 7 — split-PKGBUILD pkgbase coupling** — generalizes v1.0.3's `*-headers` rule to all packages sharing a `pkgbase`. `sync_db.rs` now reads the `%BASE%` field from pacman's sync DBs; `TierManager` consults `PkgbaseIndex` to bucket siblings to the highest tier present in their group. Auto-handles pipewire, mesa, plasma, qt, kde-applications, and every other Arch split PKGBUILD where Arch enforces lockstep via `=` version deps. Closes the 2026-05-25 pipewire-family lockstep failure.
+- [x] **Layer B — `lib32-<X>` auto-coupling** — multilib packages have their own pkgbase but are version-pinned to the main package by Arch convention. Stripping `lib32-` and inheriting the base's Tier 1 / Tier 2 tier covers cases like `mesa` ↔ `lib32-mesa` where pkgbase alone wouldn't bridge them. Composes with Layer A — `lib32-libpipewire` correctly resolves Tier 2 via its lib32-pipewire sibling.
+- [x] **Layer D — `nog unlock --promote` for any tier** — v1.0.3 restricted unlock to Tier 1. v1.0.4 relaxes it: Tier 2 (15-day hold) and Tier 3 (7-day hold) packages can be promoted too. Necessary fallback if a tier-mismatched lockstep deadlock recurs in a configuration the auto-coupling doesn't catch.
+- [x] **Test surface** — 14 → 22 tests (8 new in `tiers::tests`); [Test Matrix](testing/20260525 - Test Matrix for nog v1-0-4.md) section 17 adds 16 regression-guard checks across 17a (pkgbase coupling), 17b (lib32), 17c (live family-upgrade reproduction), 17d (Tier 2 unlock), 17e (no false positives).
+
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
 - [ ] Chaotic-AUR binary package (submit once v1.0 is stable)
@@ -504,6 +510,49 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.4 — May 25, 2026
+**Hotfix — split-PKGBUILD pkgbase coupling**
+
+Fixes a regression-class bug in the same architectural class as v1.0.3, surfaced 2026-05-25 when `nog update` produced an unresolvable transaction. `pipewire` and `pipewire-pulse` were Tier 2 with 2 days remaining; the rest of the pipewire family (`libpipewire`, `pipewire-audio`, `pipewire-alsa`, `pipewire-jack`, `gst-plugin-pipewire`, `alsa-card-profiles`, `lib32-pipewire`, `lib32-libpipewire`) defaulted to Tier 3 Ready. pacman aborted:
+
+```
+:: installing libpipewire (1:1.6.5-2) breaks dependency 'libpipewire=1:1.6.5-1' required by pipewire
+:: installing libpipewire (1:1.6.5-2) breaks dependency 'libpipewire=1:1.6.5-1' required by pipewire-pulse
+```
+
+Root cause: Arch's split-PKGBUILD convention ships multiple subpackages from one source (`pkgbase = pipewire` here) and enforces `=` version dependencies between them. Tier-mismatched holds across siblings violate that lockstep. v1.0.3 fixed the special case (`<X>-headers`); v1.0.4 generalizes.
+
+**Fixes:**
+
+- 🔗 **Layer A — pkgbase sibling coupling.** `sync_db.rs::parse_desc` now extracts the `%BASE%` field from every package in the sync DBs and exposes a `load_packages()` API returning rich metadata. A new `PkgbaseIndex` (constructed in `TierManager::with_pkgbase_index`) maps each package to its pkgbase and each pkgbase to its sibling list. `TierManager::classify()` consults the index: when classifying a package P with pkgbase B, the result is the highest tier present among siblings of B. Auto-handles pipewire, plasma, qt, kde-applications, gnome family — anywhere Arch ships coordinated subpackages with versioned deps.
+- 🔀 **Layer B — `lib32-<X>` auto-coupling.** Multilib packages have their own PKGBUILD (different pkgbase) but Arch enforces version-pinned lockstep with the main package. The rule strips `lib32-` and inherits the base's tier if Tier 1 or Tier 2. Composes with Layer A: `lib32-libpipewire`'s pkgbase is `lib32-pipewire`, which classifies Tier 2 via the lib32- rule stripping to `pipewire` — so `lib32-libpipewire` correctly inherits Tier 2 transitively.
+- 🔓 **Layer D — `nog unlock --promote` for any tier.** v1.0.3 restricted unlock to Tier 1 with the message "no unlock needed (only Tier 1 is ever held by policy)." That assumption was wrong — Tier 2 packages are held within their 15-day window too, and during a tier-mismatched lockstep failure the user needs to release Tier 2 holds to break the deadlock. The rule is now: any package can be force-upgraded via `--promote`, regardless of tier. The informational (no `--promote`) mode now shows tier-specific copy explaining the relevant hold window.
+
+**What this changes for existing installs:**
+- After upgrading to v1.0.4, **many more packages will silently re-classify** to Tier 1 or Tier 2 via pkgbase coupling. Examples:
+  - pipewire family (`libpipewire`, `pipewire-audio`, etc.) → Tier 2 (inheriting from `pipewire`)
+  - lib32-mesa, lib32-vulkan-icd-loader, etc. → Tier 1 (inheriting from `mesa` via lib32 prefix)
+  - plasma-meta siblings → Tier 2 (inheriting from `plasma-desktop`)
+  - qt5/qt6 sub-libraries → Tier 2 if any qt package is Tier 2
+- On the next `nog update`, you'll see **more packages in the Held bucket** than v1.0.3. This is the fix in action — those siblings should never have been able to flow ahead of their base. Same pattern of silent re-tiering as v1.0.3's `*-headers` rule, just broader.
+- `nog search` annotations now reflect pkgbase coupling too — `nog search libpipewire` shows yellow `[Tier 2 — 15d hold]` where v1.0.3 showed green Tier 3.
+
+**Performance note:** `load_tiers()` now walks the sync DB (~18k packages on a typical Arch install) once per nog invocation to build the pkgbase index. The walk is OnceLock-cached so repeated classify calls within the same process don't re-walk. Adds a one-time cost (hundreds of ms) to commands that previously didn't touch the DB (`nog install`, `nog search`, `nog pin`, `nog unlock`). Accepted for the correctness gain.
+
+**Tests:** 14 → 22 (8 new in `tiers::tests`):
+- `lib32_inherits_tier1_when_base_is_tier1` (e.g., `lib32-mesa` → Tier 1)
+- `lib32_inherits_tier2_when_base_is_tier2`
+- `lib32_of_tier3_stays_tier3`
+- `lib32_of_headers_inherits_via_inner_pattern`
+- `pkgbase_sibling_inherits_tier2_from_base` (the pipewire family)
+- `pkgbase_sibling_with_no_tier_pinned_member_stays_tier3`
+- `empty_pkgbase_index_falls_through_to_tier3` (back-compat with v1.0.3 tier-pin-only behavior)
+- `lib32_of_pkgbase_sibling_resolves_via_own_multilib_pkgbase` (composed Layer A + B)
+
+**TEST-MATRIX:** new section 17 with 16 regression-guard checks across 17a (Layer A pkgbase), 17b (Layer B lib32), 17c (live regression — pipewire family upgrades together), 17d (Layer D Tier 2 unlock), 17e (no false positives on coherent systems).
+
+No new dependencies. Same dynamic-libzstd linking contract as v1.0.1/v1.0.2/v1.0.3.
 
 ### v1.0.3 — May 13, 2026
 **Hotfix — kernel / headers / DKMS coupling**
