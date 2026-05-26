@@ -150,6 +150,12 @@ fn debug_hold(package: &str) {
             std::process::exit(1);
         }
     };
+    // v1.0.4: attach pkgbase coupling index so debug_hold reports the same
+    // tier nog update would. Without this, _debug-hold libpipewire reports
+    // Tier 3 while nog update buckets it Tier 2 — confusing.
+    let tier_manager = tier_manager.with_pkgbase_index(
+        tiers::PkgbaseIndex::from_packages(sync_db::load_packages())
+    );
 
     let tier = tier_manager.classify(package);
     let dates = sync_db::load_build_dates();

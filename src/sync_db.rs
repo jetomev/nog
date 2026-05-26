@@ -1,4 +1,4 @@
-// sync_db.rs — read pacman's sync databases and extract build dates
+// sync_db.rs — read pacman's sync databases and extract package metadata
 //
 // Pacman stores per-repo metadata at /var/lib/pacman/sync/<repo>.db as
 // compressed tar archives. The compression format varies by repo:
@@ -16,20 +16,25 @@
 //   %NAME%
 //   firefox
 //
+//   %BASE%
+//   firefox
+//
 //   %VERSION%
 //   149.0.2-1
 //
 //   %BUILDDATE%
 //   1775526658
 //
-// We walk every enabled repo and build a HashMap of package name to
-// build-date Unix timestamp. This is the foundation of the date-based hold
-// system — everything downstream reads from this map.
+// We walk every enabled repo and build a map of package name to its full
+// metadata (build-date + pkgbase). v1.0.4 added the pkgbase field to power
+// split-PKGBUILD sibling coupling (Layer A of the pkgbase-coupling fix —
+// the bug surfaced 2026-05-25 by the pipewire family).
 
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use flate2::read::GzDecoder;
 use tar::Archive;
@@ -37,12 +42,47 @@ use tar::Archive;
 const SYNC_DB_DIR: &str = "/var/lib/pacman/sync";
 const PACMAN_CONF: &str = "/etc/pacman.conf";
 
-/// Load a map of package-name -> build-date Unix timestamp by walking every
-/// enabled sync database on disk. On repeated package names across repos,
-/// the first repo (in pacman.conf order) wins — matching pacman's own
-/// resolution rules.
+/// Per-package metadata extracted from a sync DB `desc` file.
+///
+/// `pkgbase` is the value of the `%BASE%` field, identifying the PKGBUILD a
+/// package was built from. Multiple split packages share the same pkgbase
+/// (e.g., `pipewire`, `libpipewire`, `pipewire-pulse`, ... all have
+/// `pkgbase = pipewire`). Arch enforces lockstep for these via `=` version
+/// dependencies — that's what the v1.0.4 pkgbase coupling rule leverages.
+///
+/// `pkgbase` is `None` when `%BASE%` is missing from `desc` — defensive
+/// fallback; in current Arch every desc has it.
+#[derive(Debug, Clone)]
+pub struct PackageDesc {
+    pub builddate: u64,
+    pub pkgbase: Option<String>,
+}
+
+/// Load the full package map (name → PackageDesc) from every enabled sync
+/// database. **Cached via `OnceLock`** — first call walks the DBs (~18k
+/// packages on a typical Arch install, gzip + zstd decode); subsequent
+/// callers within the same process reuse the cached map. This keeps
+/// `nog update` from double-walking when both `load_build_dates()` (for
+/// hold evaluation) and the new `PkgbaseIndex` (for sibling coupling) need
+/// the same data.
+pub fn load_packages() -> &'static HashMap<String, PackageDesc> {
+    static CACHED: OnceLock<HashMap<String, PackageDesc>> = OnceLock::new();
+    CACHED.get_or_init(walk_all_repos)
+}
+
+/// Back-compat wrapper: derives the name → build-date map from `load_packages`.
+/// Existing callers (`commands::update`, `main::debug_*`) get the same data
+/// they had pre-v1.0.4 with no behavior change. New code should call
+/// `load_packages` directly to also access pkgbase.
 pub fn load_build_dates() -> HashMap<String, u64> {
-    let mut dates: HashMap<String, u64> = HashMap::new();
+    load_packages()
+        .iter()
+        .map(|(name, desc)| (name.clone(), desc.builddate))
+        .collect()
+}
+
+fn walk_all_repos() -> HashMap<String, PackageDesc> {
+    let mut pkgs: HashMap<String, PackageDesc> = HashMap::new();
 
     let repos = enabled_repos().unwrap_or_else(|e| {
         eprintln!("nog warning: could not read {}: {}", PACMAN_CONF, e);
@@ -58,10 +98,10 @@ pub fn load_build_dates() -> HashMap<String, u64> {
             continue;
         }
 
-        match read_repo_dates(&db_path) {
-            Ok(repo_dates) => {
-                for (name, date) in repo_dates {
-                    dates.entry(name).or_insert(date);
+        match read_repo(&db_path) {
+            Ok(repo_pkgs) => {
+                for (name, desc) in repo_pkgs {
+                    pkgs.entry(name).or_insert(desc);
                 }
             }
             Err(e) => {
@@ -73,7 +113,7 @@ pub fn load_build_dates() -> HashMap<String, u64> {
         }
     }
 
-    dates
+    pkgs
 }
 
 /// Read the list of enabled repositories from pacman.conf, preserving order.
@@ -140,9 +180,9 @@ fn detect_compression(file: &mut File) -> Result<Compression, String> {
     }
 }
 
-/// Read one repo's sync database and return a map of package-name -> build-date.
+/// Read one repo's sync database and return a map of package-name -> PackageDesc.
 /// Auto-detects gzip or zstd based on the file's magic bytes.
-fn read_repo_dates(db_path: &Path) -> Result<HashMap<String, u64>, String> {
+fn read_repo(db_path: &Path) -> Result<HashMap<String, PackageDesc>, String> {
     let mut file = File::open(db_path)
         .map_err(|e| format!("open failed: {}", e))?;
 
@@ -160,7 +200,7 @@ fn read_repo_dates(db_path: &Path) -> Result<HashMap<String, u64>, String> {
 
     let mut archive = Archive::new(decoder);
 
-    let mut dates: HashMap<String, u64> = HashMap::new();
+    let mut pkgs: HashMap<String, PackageDesc> = HashMap::new();
 
     let entries = archive.entries()
         .map_err(|e| format!("archive read failed: {}", e))?;
@@ -182,7 +222,7 @@ fn read_repo_dates(db_path: &Path) -> Result<HashMap<String, u64>, String> {
         }
 
         // The parent directory of `desc` is `<n>-<pkgver>-<pkgrel>`.
-        // We read the desc contents to get %NAME% and %BUILDDATE% directly,
+        // We read the desc contents to get %NAME%, %BUILDDATE%, %BASE% directly,
         // which is safer than trying to parse name out of the folder string.
         let mut contents = String::new();
         if entry.read_to_string(&mut contents).is_err() {
@@ -191,20 +231,26 @@ fn read_repo_dates(db_path: &Path) -> Result<HashMap<String, u64>, String> {
             continue;
         }
 
-        if let Some((name, date)) = parse_desc(&contents) {
-            dates.insert(name, date);
+        if let Some((name, desc)) = parse_desc(&contents) {
+            pkgs.insert(name, desc);
         }
     }
 
-    Ok(dates)
+    Ok(pkgs)
 }
 
 /// Parse the key fields we care about out of a desc file.
+///
 /// Format is a series of `%KEY%` lines followed by one or more value lines,
-/// separated by blank lines. We only read %NAME% and %BUILDDATE%.
-fn parse_desc(contents: &str) -> Option<(String, u64)> {
+/// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, and `%BASE%`.
+///
+/// Returns `None` if `%NAME%` or `%BUILDDATE%` is missing (we need both for
+/// any useful classification). `%BASE%` is optional — defensive fallback
+/// for non-standard desc files; in practice every Arch package has it.
+fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     let mut name: Option<String> = None;
     let mut date: Option<u64> = None;
+    let mut pkgbase: Option<String> = None;
 
     let mut lines = contents.lines();
     while let Some(line) = lines.next() {
@@ -221,12 +267,20 @@ fn parse_desc(contents: &str) -> Option<(String, u64)> {
                     }
                 }
             }
+            "%BASE%" => {
+                if let Some(v) = lines.next() {
+                    let trimmed = v.trim();
+                    if !trimmed.is_empty() {
+                        pkgbase = Some(trimmed.to_string());
+                    }
+                }
+            }
             _ => {}
         }
     }
 
     match (name, date) {
-        (Some(n), Some(d)) => Some((n, d)),
+        (Some(n), Some(d)) => Some((n, PackageDesc { builddate: d, pkgbase })),
         _ => None,
     }
 }

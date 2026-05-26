@@ -512,28 +512,38 @@ pub fn pin(package: &str, tier: u8) {
 }
 
 pub fn unlock(package: &str, promote: bool) {
-    // `unlock` only makes sense for Tier 1 packages held by `manual_signoff = true`.
-    // With the default `manual_signoff = false`, Tier 1 auto-updates after 30
-    // days and this command is a no-op for most users. Its one real action is
-    // `--promote`: force-upgrade a held Tier 1 package right now, bypassing the
-    // hold regardless of the date window or sign-off policy.
+    // `unlock --promote` force-upgrades a package immediately, bypassing the
+    // hold window regardless of tier.
+    //
+    // v1.0.4 relaxed the Tier 1 restriction. Pre-v1.0.4 unlock refused any
+    // non-Tier-1 package ("no unlock needed (only Tier 1 is ever held by
+    // policy)"), but Tier 2 packages CAN be held within their 15-day window —
+    // and the 2026-05-25 pipewire split-PKGBUILD incident showed that users
+    // need to release Tier 2 holds to break a tier-mismatched lockstep
+    // deadlock. The new rule: any held package can be promoted.
     let tm = load_tiers();
     let tier = tm.classify(package);
-
-    if tier != Tier::One {
-        println!("nog: '{}' is {} — no unlock needed (only Tier 1 is ever held by policy).", package, tier);
-        return;
-    }
+    let signoff = tm.is_manual_signoff(package);
 
     if !promote {
-        println!(
-            "nog: '{}' is Tier 1. `nog unlock` by itself does nothing — it has no session state to toggle.",
-            package,
-        );
-        println!(
-            "     To force-upgrade this package now, bypassing its hold, run:"
-        );
-        println!("         sudo nog unlock {} --promote", package);
+        println!("nog: '{}' is {}.", package, tier);
+        match tier {
+            Tier::One if signoff => {
+                println!("     Tier 1 with `manual_signoff = true` — wholesale held until promote.");
+            }
+            Tier::One => {
+                println!("     Tier 1 (30-day hold by default).");
+            }
+            Tier::Two => {
+                println!("     Tier 2 (15-day hold by default).");
+            }
+            Tier::Three => {
+                println!("     Tier 3 (7-day hold by default).");
+            }
+        }
+        println!("     `nog unlock` by itself does nothing — it has no per-session state to toggle.");
+        println!("     To force-upgrade this package now, bypassing the hold, run:");
+        println!("         nog unlock {} --promote", package);
         return;
     }
 
@@ -541,7 +551,7 @@ pub fn unlock(package: &str, promote: bool) {
     let helper = resolve_helper(&cfg);
     guard_not_sudo_with_helper(helper);
 
-    println!("nog: promoting '{}' — forcing an upgrade now.", package);
+    println!("nog: promoting '{}' (currently {}) — forcing an upgrade now.", package, tier);
     let pkgs = vec![package.to_string()];
     let status = match helper {
         Some(h) => aur::install(h, &pkgs),
@@ -555,7 +565,7 @@ pub fn unlock(package: &str, promote: bool) {
 
 fn load_tiers() -> TierManager {
     let cfg = NogConfig::load_default();
-    TierManager::load(&cfg.paths.tier_pins).unwrap_or_else(|e| {
+    let tm = TierManager::load(&cfg.paths.tier_pins).unwrap_or_else(|e| {
         // Use a clean user-facing error rather than a Rust panic — a panic
         // emits an unhelpful backtrace hint and a "fatal" line that reads
         // like an internal error. This path is reachable when the user has
@@ -565,7 +575,21 @@ fn load_tiers() -> TierManager {
         eprintln!("nog: could not load tier-pins: {}", e);
         eprintln!("     (tried: {})", cfg.paths.tier_pins);
         std::process::exit(1);
-    })
+    });
+
+    // v1.0.4: attach the pkgbase coupling index so classify() can resolve
+    // split-PKGBUILD siblings to the highest tier present in their group.
+    // Without this, e.g., `libpipewire` would default to Tier 3 even though
+    // its sibling `pipewire` is Tier 2 — breaking Arch's lockstep contract
+    // and surfacing the 2026-05-25 pacman dep-resolution failure.
+    //
+    // Walks the sync DB on first call (OnceLock-cached in sync_db.rs); same
+    // data underlies load_build_dates so `nog update` only walks once total.
+    // For commands that don't already touch the DB (install, search, pin,
+    // unlock), this adds a one-time ~hundreds-of-ms cost per nog invocation
+    // — accepted for the correctness gain.
+    let pkgbase_index = crate::tiers::PkgbaseIndex::from_packages(crate::sync_db::load_packages());
+    tm.with_pkgbase_index(pkgbase_index)
 }
 
 fn load_config() -> NogConfig {
