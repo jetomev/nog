@@ -41,7 +41,35 @@ From the 2026-06-20 dogfood session (a `nog update` run that triggered 145 upgra
 - **Why it cleared:** KDE Plasma 6.7 reached release readiness, which carried the coordinated rebuild of x265's downstream cone.
 - **Detection mechanism:** `pactree -r x265` showed a massive downstream tree dominated by KDE Plasma 6 packages — no AUR packages on the critical path. The simultaneous appearance of x265 + ffmpeg (with `-2 → -6` pkgrel ladder = four rebuilds) + ~50 Plasma 6.6.5→6.7.0 packages in the same upgrade batch is the signature of a coordinated transition completing.
 
-Both anomalies were **legitimate upstream blocks**, not user error. nog correctly reported the gap; the gap had a real upstream cause that nog had no way to surface.
+### Finding 3 — multi-package rebuild cluster cleared 2026-06-26 (~700-day outliers)
+
+A second dogfood run six days after the first surfaced **another cluster of long-tail entries**, this time predominantly pure `pkgrel`-bump rebuilds rather than version bumps. The same Case B / Case C pattern, different upstream catalysts.
+
+| Package | Days past window | Old → New | Bump shape |
+|---|---|---|---|
+| `cabextract` | 708 | `1.11-2 → 1.11-3` | pure rebuild (pkgrel only) |
+| `vid.stab` | 706 | `1.1.1-2 → 1.1.1-3` | pure rebuild |
+| `xvidcore` | 706 | `1.3.7-3 → 1.3.7-4` | pure rebuild |
+| `libssh2` | 535 | `1.11.1-1 → 1.11.1-5` | **four rebuilds queued** (-2, -3, -4, -5 all skipped) |
+| `lib32-libssh2` | 469 | `1.11.1-1 → 1.11.1-3` | mirror of above, multilib lag |
+| `libdovi` | 329 | `3.3.2-1 → 3.3.2-2` | pure rebuild |
+| `lib32-libffi` | 321 | `3.5.2-1 → 3.6.0-1` | minor version bump |
+| `python-moddb` | 187 | `0.14.0-2 → 0.15.0-1` | minor version bump + grew dep tree (curl-impersonate, python-curl_cffi, python-pycurl, python-eventlet, python-gevent, others) |
+
+**Notable substructure:** the three 706–708-day entries are *exactly* clustered — three packages all sitting at the same age suggests a **single distro-wide rebuild batch** released together (likely a shared toolchain or library transition that touched all three at once). This is a stronger Case C signature than Finding 2's x265 case, because the simultaneous-age signal is observable from the raw output alone without any downstream-cone analysis.
+
+**Notable secondary effect:** the `python-moddb 0.14 → 0.15` upgrade quietly pulled in **17 new packages** to satisfy the new version's dependency tree (curl-impersonate + Python scraping stack). `nog explain` could surface this kind of "dependency surface expansion warning" as an optional v2.1+ enhancement — *"this upgrade will add N new packages to your system"* — distinct from the core blocker-classification mission but in adjacent territory.
+
+**What this finding adds to the design thesis:**
+1. **Pure pkgrel-bump outliers are common, not rare.** Three of the eight long-tail entries in this batch were pkgrel-only — meaning users see "708 days past window" for what is technically the *same package version* they already have, just rebuilt. The `nog explain` output should differentiate "your package needs a rebuild" from "your package needs a new version" since the user-facing risk is very different.
+2. **Multi-package age-clustering is itself a Case C signal.** Three packages all at 706-708 days is unlikely to be coincidence — it's the fingerprint of a coordinated rebuild batch. The classifier should detect age-clustering across multiple packages and surface it as a single explanation: *"these N packages cleared together — likely the same upstream rebuild batch."*
+3. **The pattern recurs reliably.** Two consecutive dogfood sessions, six days apart, both surfaced 5+ long-tail outliers with the same root-cause families. This isn't a one-time anomaly worth a special-case fix — it's a **recurring class of output** that deserves a first-class diagnostic command.
+
+All eight 2026-06-26 outliers were **legitimate upstream blocks**, same as Findings 1 and 2. nog correctly held them at the appropriate tier; the gap to the user's understanding is what `nog explain` would close.
+
+---
+
+The three findings together establish that long-tail "X days past window" entries are **not noise and not bugs** — they are a normal, recurring product of nog's tier system honestly reporting upstream coordination delays. nog correctly reported the gap each time; the gap had a real upstream cause that nog had no way to surface. `nog explain` is the missing piece.
 
 ---
 
