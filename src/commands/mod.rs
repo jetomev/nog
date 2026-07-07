@@ -162,23 +162,42 @@ pub fn update(realign: bool) {
         return;
     }
 
-    // Sync-DB build dates first (covers official repos and any binary AUR
-    // mirrors like Chaotic-AUR).
-    let mut build_dates = sync_db::load_build_dates();
+    // v1.0.5: evaluate holds against the SAME database snapshot that produced
+    // the candidate list. `checkupdates` syncs fresh DBs into its private
+    // dbpath; the system DB at /var/lib/pacman/sync only refreshes when root
+    // syncs — for `nog update`, during the handoff AFTER this report. Reading
+    // the system DB dated every first-sighting update from its predecessor's
+    // builddate (years old in the worst case) and waved it through its window
+    // — the 2026-07-06 finding: all 14 "Ready" packages that day were 1-4
+    // days old and belonged in Held.
+    let mut packages = match sync_db::load_fresh_packages() {
+        Some(p) => p,
+        None => {
+            eprintln!("nog: warning — checkupdates DB not found; using the system sync DB.");
+            eprintln!("     Hold windows may be dated from stale build dates.");
+            sync_db::load_packages().clone()
+        }
+    };
 
     // Then extend with AUR build dates fetched via the helper's cached metadata
     // (`<helper> -Sai`). Only query for AUR names that weren't already resolved
     // by the sync-DB pass. If the helper is unreachable or the date is
     // unparseable, those packages fall back to the Unknown bucket — the
-    // per-package y/N prompt still handles them cleanly.
+    // per-package y/N prompt still handles them cleanly. AUR entries carry no
+    // version, so they skip the candidate-version guard.
     if let Some(h) = helper {
         let missing: Vec<String> = aur_names.iter()
-            .filter(|name| !build_dates.contains_key(name.as_str()))
+            .filter(|name| !packages.contains_key(name.as_str()))
             .cloned()
             .collect();
         if !missing.is_empty() {
-            let aur_dates = aur::build_dates_for(h, &missing);
-            build_dates.extend(aur_dates);
+            for (name, builddate) in aur::build_dates_for(h, &missing) {
+                packages.insert(name, sync_db::PackageDesc {
+                    builddate,
+                    pkgbase: None,
+                    version: None,
+                });
+            }
         }
     }
 
@@ -191,7 +210,14 @@ pub fn update(realign: bool) {
 
     for upd in &pending {
         let tier = tm.classify(&upd.name);
-        let status = holds::evaluate(&upd.name, tier.clone(), &build_dates, &cfg.holds, now);
+        let status = holds::evaluate_candidate(
+            &upd.name,
+            tier.clone(),
+            &upd.new_version,
+            &packages,
+            &cfg.holds,
+            now,
+        );
 
         // Expert-mode override: `manual_signoff = true` on Tier 1 forces every
         // Tier 1 package into the held bucket regardless of date. Escape hatch
@@ -291,9 +317,11 @@ pub fn update(realign: bool) {
     let mut extra_ignore: Vec<String> = Vec::new();
     if !unknown.is_empty() {
         println!();
-        println!("{}nog: {} package(s) have no build date in any sync DB.{}",
+        println!("{}nog: {} package(s) have no usable build date in any sync DB.{}",
             C_SUBTEXT, unknown.len(), C_RESET);
-        println!("{}      This usually means an AUR-only, locally-built, or disabled-repo package.{}",
+        println!("{}      Usually an AUR-only, locally-built, or disabled-repo package — or a{}",
+            C_SUBTEXT, C_RESET);
+        println!("{}      DB entry that doesn't match the pending candidate's version.{}",
             C_SUBTEXT, C_RESET);
         println!();
 

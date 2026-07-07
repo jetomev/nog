@@ -56,6 +56,11 @@ const PACMAN_CONF: &str = "/etc/pacman.conf";
 pub struct PackageDesc {
     pub builddate: u64,
     pub pkgbase: Option<String>,
+    /// The `%VERSION%` field (`epoch:pkgver-pkgrel`). v1.0.5 added this to
+    /// power the candidate-version guard in hold evaluation: a build date is
+    /// only meaningful for the version it belongs to. `None` when `%VERSION%`
+    /// is missing — defensive fallback; every real desc has it.
+    pub version: Option<String>,
 }
 
 /// Load the full package map (name → PackageDesc) from every enabled sync
@@ -81,17 +86,72 @@ pub fn load_build_dates() -> HashMap<String, u64> {
         .collect()
 }
 
+/// Load package metadata from the sync DBs `checkupdates` just refreshed.
+///
+/// `checkupdates` (pacman-contrib) syncs the enabled repos into a private
+/// dbpath — `$CHECKUPDATES_DB`, defaulting to `${TMPDIR:-/tmp}/checkup-db-<uid>/`
+/// — as an unprivileged user, then diffs against the local DB. That private
+/// copy is the database snapshot that PRODUCED the pending-update list, while
+/// `/var/lib/pacman/sync` only refreshes when root syncs — for `nog update`,
+/// during the handoff AFTER hold evaluation. Hold windows must be dated from
+/// the same snapshot as the candidates (the 2026-07-06 stale-DB finding), so
+/// `nog update` prefers this loader and falls back to `load_packages` only
+/// when the directory is missing.
+///
+/// Returns `None` when the checkupdates dbpath (or its `sync/` subdir)
+/// doesn't exist. Not cached — called at most once per `nog update`, right
+/// after `checkupdates` has refreshed the directory.
+pub fn load_fresh_packages() -> Option<HashMap<String, PackageDesc>> {
+    let dir = checkupdates_sync_dir()?;
+    if !dir.is_dir() {
+        return None;
+    }
+    Some(walk_repos_in(&dir))
+}
+
+/// Resolve the `sync/` subdir of checkupdates' private dbpath, mirroring the
+/// resolution in the checkupdates script itself: `$CHECKUPDATES_DB` if set,
+/// else `${TMPDIR:-/tmp}/checkup-db-<uid>`.
+fn checkupdates_sync_dir() -> Option<PathBuf> {
+    let base = match std::env::var_os("CHECKUPDATES_DB") {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+            PathBuf::from(tmp).join(format!("checkup-db-{}", current_uid()?))
+        }
+    };
+    Some(base.join("sync"))
+}
+
+/// Numeric uid via `id -u` — matches the shell `$UID` checkupdates uses,
+/// without adding a libc dependency for one syscall.
+fn current_uid() -> Option<String> {
+    let out = std::process::Command::new("id").arg("-u").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let uid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if uid.is_empty() { None } else { Some(uid) }
+}
+
 fn walk_all_repos() -> HashMap<String, PackageDesc> {
+    walk_repos_in(Path::new(SYNC_DB_DIR))
+}
+
+fn walk_repos_in(sync_dir: &Path) -> HashMap<String, PackageDesc> {
     let mut pkgs: HashMap<String, PackageDesc> = HashMap::new();
 
     let repos = enabled_repos().unwrap_or_else(|e| {
         eprintln!("nog warning: could not read {}: {}", PACMAN_CONF, e);
-        eprintln!("nog warning: falling back to scanning every *.db file in {}", SYNC_DB_DIR);
-        fallback_repos_from_disk()
+        eprintln!(
+            "nog warning: falling back to scanning every *.db file in {}",
+            sync_dir.display()
+        );
+        fallback_repos_from_disk(sync_dir)
     });
 
     for repo in repos {
-        let db_path = PathBuf::from(SYNC_DB_DIR).join(format!("{}.db", repo));
+        let db_path = sync_dir.join(format!("{}.db", repo));
         if !db_path.exists() {
             // Repo is enabled in pacman.conf but we haven't `pacman -Sy`'d yet,
             // or the file is genuinely missing. Not fatal — just skip it.
@@ -139,9 +199,9 @@ fn enabled_repos() -> Result<Vec<String>, String> {
 /// Fallback: scan the sync directory directly when pacman.conf is unreadable.
 /// Less accurate because we lose repo-priority ordering, but better than
 /// failing entirely.
-fn fallback_repos_from_disk() -> Vec<String> {
+fn fallback_repos_from_disk(sync_dir: &Path) -> Vec<String> {
     let mut repos = Vec::new();
-    if let Ok(entries) = fs::read_dir(SYNC_DB_DIR) {
+    if let Ok(entries) = fs::read_dir(sync_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
                 if let Some(repo) = name.strip_suffix(".db") {
@@ -242,15 +302,18 @@ fn read_repo(db_path: &Path) -> Result<HashMap<String, PackageDesc>, String> {
 /// Parse the key fields we care about out of a desc file.
 ///
 /// Format is a series of `%KEY%` lines followed by one or more value lines,
-/// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, and `%BASE%`.
+/// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, `%BASE%`, and
+/// `%VERSION%`.
 ///
 /// Returns `None` if `%NAME%` or `%BUILDDATE%` is missing (we need both for
-/// any useful classification). `%BASE%` is optional — defensive fallback
-/// for non-standard desc files; in practice every Arch package has it.
+/// any useful classification). `%BASE%` and `%VERSION%` are optional —
+/// defensive fallback for non-standard desc files; in practice every Arch
+/// package has both.
 fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     let mut name: Option<String> = None;
     let mut date: Option<u64> = None;
     let mut pkgbase: Option<String> = None;
+    let mut version: Option<String> = None;
 
     let mut lines = contents.lines();
     while let Some(line) = lines.next() {
@@ -258,6 +321,14 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
             "%NAME%" => {
                 if let Some(v) = lines.next() {
                     name = Some(v.trim().to_string());
+                }
+            }
+            "%VERSION%" => {
+                if let Some(v) = lines.next() {
+                    let trimmed = v.trim();
+                    if !trimmed.is_empty() {
+                        version = Some(trimmed.to_string());
+                    }
                 }
             }
             "%BUILDDATE%" => {
@@ -280,7 +351,51 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     }
 
     match (name, date) {
-        (Some(n), Some(d)) => Some((n, PackageDesc { builddate: d, pkgbase })),
+        (Some(n), Some(d)) => Some((n, PackageDesc { builddate: d, pkgbase, version })),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESC: &str = "\
+%NAME%
+lib32-brotli
+
+%VERSION%
+1.2.0-2
+
+%BASE%
+lib32-brotli
+
+%BUILDDATE%
+1783600000
+";
+
+    #[test]
+    fn parse_desc_reads_all_fields() {
+        let (name, desc) = parse_desc(DESC).expect("desc should parse");
+        assert_eq!(name, "lib32-brotli");
+        assert_eq!(desc.builddate, 1783600000);
+        assert_eq!(desc.pkgbase.as_deref(), Some("lib32-brotli"));
+        assert_eq!(desc.version.as_deref(), Some("1.2.0-2"));
+    }
+
+    #[test]
+    fn parse_desc_tolerates_missing_version_and_base() {
+        let contents = "%NAME%\nghost\n\n%BUILDDATE%\n1000\n";
+        let (name, desc) = parse_desc(contents).expect("desc should parse");
+        assert_eq!(name, "ghost");
+        assert_eq!(desc.builddate, 1000);
+        assert_eq!(desc.pkgbase, None);
+        assert_eq!(desc.version, None);
+    }
+
+    #[test]
+    fn parse_desc_requires_name_and_builddate() {
+        assert!(parse_desc("%NAME%\nonly-name\n").is_none());
+        assert!(parse_desc("%BUILDDATE%\n1000\n").is_none());
     }
 }

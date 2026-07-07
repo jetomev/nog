@@ -363,6 +363,7 @@ mod tests {
             pkgs.insert(name.to_string(), PackageDesc {
                 builddate: 0,
                 pkgbase: Some(base.to_string()),
+                version: None,
             });
         }
         let pins: TierPins = toml::from_str(toml_src).expect("test toml parses");

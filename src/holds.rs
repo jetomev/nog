@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::HoldsConfig;
+use crate::sync_db::PackageDesc;
 use crate::tiers::Tier;
 
 /// The result of evaluating a package's hold.
@@ -51,11 +52,52 @@ pub fn evaluate(
     holds: &HoldsConfig,
     now: SystemTime,
 ) -> HoldStatus {
-    let build_ts = match build_dates.get(package) {
-        Some(ts) => *ts,
+    match build_dates.get(package) {
+        Some(ts) => evaluate_ts(*ts, tier, holds, now),
+        None => HoldStatus::Unknown,
+    }
+}
+
+/// Evaluate the hold status of a pending update against the exact candidate
+/// it proposes to install.
+///
+/// Same date math as `evaluate`, plus a version guard: a build date is only
+/// meaningful for the version it belongs to. If the DB entry we're reading
+/// the date from is NOT the pending candidate's version, evaluating it would
+/// clock the hold window from a different build of the package — that is the
+/// 2026-07-06 finding, where holds evaluated against the stale system sync
+/// DB dated every first-sighting update from its PREDECESSOR's builddate
+/// (years old in the worst case) and waved it straight through its window.
+/// Mismatches return `Unknown`, which routes to the per-package y/N prompt —
+/// conservative, and honest about what we actually know.
+///
+/// Entries with `version: None` (AUR helper dates, defensive desc fallback)
+/// skip the guard and evaluate on build date alone, as before.
+pub fn evaluate_candidate(
+    package: &str,
+    tier: Tier,
+    candidate_version: &str,
+    packages: &HashMap<String, PackageDesc>,
+    holds: &HoldsConfig,
+    now: SystemTime,
+) -> HoldStatus {
+    let desc = match packages.get(package) {
+        Some(d) => d,
         None => return HoldStatus::Unknown,
     };
 
+    if let Some(db_version) = &desc.version {
+        if db_version != candidate_version {
+            return HoldStatus::Unknown;
+        }
+    }
+
+    evaluate_ts(desc.builddate, tier, holds, now)
+}
+
+/// The shared date math: elapsed days since `build_ts` (rounded up) compared
+/// against the tier's hold window.
+fn evaluate_ts(build_ts: u64, tier: Tier, holds: &HoldsConfig, now: SystemTime) -> HoldStatus {
     let now_ts = match now.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs(),
         // Clock is before 1970 — absurd, but bail safely rather than panic.
@@ -206,5 +248,83 @@ mod tests {
         );
         // Elapsed = 0, Tier 1 window = 30, remaining = 30.
         assert_eq!(got, HoldStatus::Holding { days_remaining: 30 });
+    }
+
+    // --- evaluate_candidate: the v1.0.5 version guard ---
+
+    fn pkg_map(name: &str, builddate: u64, version: Option<&str>) -> HashMap<String, PackageDesc> {
+        let mut m = HashMap::new();
+        m.insert(name.to_string(), PackageDesc {
+            builddate,
+            pkgbase: None,
+            version: version.map(|v| v.to_string()),
+        });
+        m
+    }
+
+    #[test]
+    fn candidate_version_mismatch_returns_unknown() {
+        // The 2026-07-06 failure shape: the DB entry is the PREDECESSOR
+        // (1.1.0-1, built ~day 0 = ancient) but the pending candidate is
+        // 1.2.0-2. Old behavior: Expired by ~968 days -> installed with zero
+        // hold. Guarded behavior: Unknown -> per-package prompt.
+        let pkgs = pkg_map("lib32-brotli", 0, Some("1.1.0-1"));
+        let got = evaluate_candidate(
+            "lib32-brotli",
+            Tier::Three,
+            "1.2.0-2",
+            &pkgs,
+            &holds_default(),
+            at_days_after_epoch(975),
+        );
+        assert_eq!(got, HoldStatus::Unknown);
+    }
+
+    #[test]
+    fn candidate_version_match_evaluates_normally() {
+        // Fresh DB entry IS the candidate: built at day 20, checked at day
+        // 21, Tier 3 window = 7 -> Holding with 6 remaining. This is what a
+        // 1-day-old package should look like.
+        let pkgs = pkg_map("lib32-brotli", 20 * SECONDS_PER_DAY, Some("1.2.0-2"));
+        let got = evaluate_candidate(
+            "lib32-brotli",
+            Tier::Three,
+            "1.2.0-2",
+            &pkgs,
+            &holds_default(),
+            at_days_after_epoch(21),
+        );
+        assert_eq!(got, HoldStatus::Holding { days_remaining: 6 });
+    }
+
+    #[test]
+    fn candidate_without_db_version_skips_guard() {
+        // AUR helper dates carry no version — evaluate on build date alone,
+        // exactly as pre-v1.0.5. Built day 0, checked day 20, Tier 3 window 7
+        // -> Expired 13 past.
+        let pkgs = pkg_map("fresh-editor-bin", 0, None);
+        let got = evaluate_candidate(
+            "fresh-editor-bin",
+            Tier::Three,
+            "0.4.3-1",
+            &pkgs,
+            &holds_default(),
+            at_days_after_epoch(20),
+        );
+        assert_eq!(got, HoldStatus::Expired { days_past_window: 13 });
+    }
+
+    #[test]
+    fn candidate_missing_from_map_is_unknown() {
+        let pkgs: HashMap<String, PackageDesc> = HashMap::new();
+        let got = evaluate_candidate(
+            "ghost",
+            Tier::Three,
+            "1.0-1",
+            &pkgs,
+            &holds_default(),
+            at_days_after_epoch(10),
+        );
+        assert_eq!(got, HoldStatus::Unknown);
     }
 }
