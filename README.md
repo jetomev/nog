@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.4](https://img.shields.io/badge/Version-1.0.4-purple.svg)
+![Version: 1.0.5](https://img.shields.io/badge/Version-1.0.5-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -173,12 +173,12 @@ When you run `nog update`, nog:
 
 1. Calls `checkupdates` (pacman-contrib) to get the list of pending **official repo** upgrades — no sync-DB side effects
 2. If an AUR helper is configured, calls `<helper> -Qua` to append pending **AUR** upgrades to the same list
-3. Loads build dates: first from every enabled pacman sync DB, then (for AUR packages not found in any sync DB) from the helper's cached metadata via `<helper> -Sai`
-4. Classifies each pending package and evaluates its hold window against the combined build-date map
+3. Loads build dates from the **same fresh DB snapshot `checkupdates` just synced** (its private dbpath, `$CHECKUPDATES_DB` or `${TMPDIR:-/tmp}/checkup-db-<uid>/`), then (for AUR packages not found in any sync DB) from the helper's cached metadata via `<helper> -Sai`. If the snapshot is missing, falls back to `/var/lib/pacman/sync` with a warning (v1.0.5 — see [changelog](#changelog))
+4. Classifies each pending package and evaluates its hold window against the combined build-date map. A DB entry that isn't the pending candidate's exact version is never trusted for dating — it routes to **Unknown** instead (v1.0.5 candidate-version guard)
 5. Groups the result into three buckets:
    - **Ready to install** — hold expired, safe to upgrade
    - **Held** — either still inside the hold window, or Tier 1 under `manual_signoff = true`
-   - **Unknown** — no resolvable build date (locally-built, disabled-repo, or helper lookup failed)
+   - **Unknown** — no usable build date (locally-built, disabled-repo, helper lookup failed, or a DB entry that doesn't match the candidate's version)
 6. For each **Unknown** package, prompts `update anyway? [y/N]`
 7. Hands off the transaction:
    - With helper: `<helper> -Syu --ignore=<held + skipped-unknowns>` — one combined upgrade for official + AUR. The helper runs as your user and sudo-s pacman internally for the pacman step.
@@ -215,8 +215,9 @@ Held (3):
 Unknown (1):
   my-local-pkg    0.9-1 -> 1.0-1 [Tier 3 · no build date in sync DB]
 
-nog: 1 package(s) have no resolvable build date.
-      This usually means a locally-built package or an AUR query failure.
+nog: 1 package(s) have no usable build date in any sync DB.
+      Usually an AUR-only, locally-built, or disabled-repo package — or a
+      DB entry that doesn't match the pending candidate's version.
 
   my-local-pkg (Tier 3 0.9-1 -> 1.0-1) — update anyway? [y/N] n
 
@@ -238,7 +239,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.4"
+version = "1.0.5"
 log_level = "info"
 
 [paths]
@@ -450,6 +451,14 @@ nog search linux-zen-headers
 
 If it shows green Tier 3, you're still on v1.0.2 or earlier — upgrade nog before you next run `nog update`.
 
+### `nog update` shows fewer Ready / more Held packages after upgrading to v1.0.5
+
+Expected. Pre-1.0.5, hold windows were dated from the (stale) system sync DB, so updates being seen for the first time were often waved straight into Ready with inflated "days past window" figures. v1.0.5 dates every hold from the fresh DB snapshot `checkupdates` just synced, so new updates now serve their full window. "Days remaining" on already-Held packages may also shift a few days — the clock is now measured from the candidate's true build date. See the [v1.0.5 changelog entry](#changelog).
+
+### `nog: warning — checkupdates DB not found; using the system sync DB.`
+
+`nog update` couldn't locate the private dbpath `checkupdates` syncs into (`$CHECKUPDATES_DB`, default `${TMPDIR:-/tmp}/checkup-db-<uid>/`). It fell back to `/var/lib/pacman/sync`, which may date holds from stale build dates (the pre-1.0.5 behavior). Likely causes: `CHECKUPDATES_DB` set for checkupdates but not visible to nog, a `TMPDIR` mismatch between the two, or a pacman-contrib update changing the default path. Check `ls "${TMPDIR:-/tmp}/checkup-db-$(id -u)/sync"` right after a run — if the layout moved, file a bug.
+
 ### `nog update` reports more Held packages after upgrading from v1.0.2
 
 Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-headers`, and `linux-hardened-headers` from Tier 3 (7-day hold) to Tier 1 (30-day hold) implicitly via the `<X>-headers` coupling rule. The first `nog update` after upgrading will surface those headers in the **Held** bucket where v1.0.2 might have shown them as Ready. This is the protection working — they will release in lockstep with their kernel.
@@ -500,6 +509,11 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [x] **Test surface** — 14 → 22 tests (8 new in `tiers::tests`); [Test Matrix](testing/20260525 - Test Matrix for nog v1-0-4.md) section 17 adds 16 regression-guard checks across 17a (pkgbase coupling), 17b (lib32), 17c (live family-upgrade reproduction), 17d (Tier 2 unlock), 17e (no false positives).
 - [x] **Dogfood (post-AUR)** — [v1.0.4 Test Results](testing/20260525 - Test Results for nog v1-0-4.md) captured on the AUR-delivered binary (no findings); pkgbase coupling, lib32- rule, and composed Layer A+B all verified live; 22/22 unit tests run in the AUR build's `check()` phase on every install.
 
+### v1.0.5 — Released
+- [x] **Phase 8 — candidate-fresh hold evaluation** — `nog update` now dates hold windows from the **same DB snapshot that produced the candidate list**: the private dbpath `checkupdates` syncs on every run (`$CHECKUPDATES_DB`, default `${TMPDIR:-/tmp}/checkup-db-<uid>/`). Previously it read `/var/lib/pacman/sync`, which only refreshes when root syncs — i.e. during the handoff *after* the report — so every first-sighting update was dated from its *predecessor's* builddate and could skip its hold entirely (975 days "past window" in the worst observed case). Falls back to the system DB with a warning if the snapshot is missing.
+- [x] **Candidate-version guard** — `sync_db.rs` now reads `%VERSION%`; the new `holds::evaluate_candidate()` refuses to date a hold from a DB entry that isn't the pending candidate's exact version — mismatches route to **Unknown** (per-package prompt) instead of borrowing a clock from a different build. Defense-in-depth behind the fresh-snapshot fix.
+- [x] **Test surface** — 22 → 29 tests (4 new in `holds::tests` covering the guard, 3 new in `sync_db::tests` covering `%VERSION%` parsing); [Test Matrix](testing/20260707 - Test Matrix for nog v1-0-5.md) section 18 adds regression-guard checks for the fresh-snapshot path, the fallback warning, and the guard.
+
 ### Future
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
 - [ ] Chaotic-AUR binary package (submit once v1.0 is stable)
@@ -511,6 +525,25 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.5 — July 7, 2026
+**Hotfix — hold windows dated from stale sync DBs**
+
+Fixes the third — and most fundamental — bug in the hold system's short history: hold windows were being measured from the **wrong package's build date**. Surfaced 2026-07-06 when a routine `nog update` reported `lib32-brotli` as *"975 days past window"* — for a package built **the day before**. Post-mortem showed all 14 "Ready" packages that day were 1–4 days old and belonged in Held; among them `bluez` ("53 days past window", built 2 days earlier) and `qtkeychain-qt6` ("62 days past window", built *that same day*).
+
+Root cause: a **split-brain between two databases.** `nog update` gets its candidate list from `checkupdates`, which syncs fresh DBs into a private dbpath as an unprivileged user. But it read build dates from `/var/lib/pacman/sync` — which only refreshes when root syncs, i.e. during the yay/pacman handoff *after* the hold report. So for any update published since the last run (by definition, every update seen for the first time), the system DB still held the *predecessor* version, and the hold was clocked from the predecessor's builddate. Slow-moving packages (predecessor older than the window) sailed through with zero hold; fast-moving packages landed in Held with a wrong clock that silently self-corrected on later runs — which is why the bug stayed invisible from v1.0.0 until a 2.7-year-stale predecessor made the number absurd. **The Tier 1 implication was the serious one:** a new kernel arriving after a >30-day gap since the previous kernel's build would have skipped its 30-day window entirely.
+
+**Fixes:**
+
+- 📸 **Candidate-fresh snapshot.** `sync_db::load_fresh_packages()` walks the DBs `checkupdates` just synced (`$CHECKUPDATES_DB`, default `${TMPDIR:-/tmp}/checkup-db-<uid>/sync/`) — the exact snapshot that produced the candidate list. `nog update` prefers it and falls back to `/var/lib/pacman/sync` with a visible warning only if the snapshot is missing.
+- 🛡 **Candidate-version guard.** `sync_db` now parses `%VERSION%`, and the new `holds::evaluate_candidate()` refuses to date a hold from a DB entry whose version isn't the pending candidate's. Mismatches route to **Unknown** and the per-package y/N prompt — honest about what nog actually knows, instead of trusting a clock borrowed from a different build. AUR entries (helper-provided dates, no version) skip the guard, unchanged.
+
+**What this changes for existing installs:**
+- The first `nog update` after upgrading may show a **noticeably shorter Ready list** — brand-new updates that pre-1.0.5 would have skipped their hold now correctly enter **Held** with sane countdowns. This is the protection working for the first time on first-sighting updates.
+- "Days remaining" figures on already-Held packages may shift by a few days — they're now measured from the candidate's true builddate.
+- The Unknown-bucket copy now also mentions version-mismatched DB entries.
+
+Verified live before release: the fixed binary and an independent recomputation from the fresh DBs agreed on all 22 pending updates (21 repo + 1 AUR), every one correctly Held; unit tests 22 → 29.
 
 ### v1.0.4 — May 25, 2026
 **Hotfix — split-PKGBUILD pkgbase coupling**
