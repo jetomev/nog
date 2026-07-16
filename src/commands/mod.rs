@@ -115,6 +115,22 @@ enum ReadyReason {
     Realigned,
 }
 
+/// Why this package landed in the Held bucket. Drives the reason string shown in
+/// the Held listing.
+#[derive(Clone)]
+enum HeldReason {
+    /// Normal hold — the tier's window is still open (`days_remaining` left).
+    Window,
+    /// Expert-mode `manual_signoff = true` on a Tier 1 package. Released with
+    /// `nog unlock`.
+    ManualSignoff,
+    /// v1.0.6 (issue #1): held only because coupling this `lib32-<X>`/base `<X>`
+    /// pair keeps a version-locked multilib package from splitting across
+    /// buckets. Carries the partner it is waiting on. Its own window may already
+    /// have expired; the countdown shown is the partner's.
+    CoupledTo(String),
+}
+
 pub fn update(realign: bool) {
     let cfg = load_config();
     let helper = resolve_helper(&cfg);
@@ -205,7 +221,7 @@ pub fn update(realign: bool) {
 
     // Evaluate every pending update and bucket it.
     let mut ready: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
-    let mut held: Vec<(PendingUpdate, Tier, u64, bool)> = Vec::new(); // (upd, tier, days_remaining, forced_by_signoff)
+    let mut held: Vec<(PendingUpdate, Tier, u64, HeldReason)> = Vec::new(); // (upd, tier, days_remaining, reason)
     let mut unknown: Vec<(PendingUpdate, Tier)> = Vec::new();
 
     for upd in &pending {
@@ -228,13 +244,13 @@ pub fn update(realign: bool) {
             _ if signoff_hold => {
                 // Report 0 days remaining as a placeholder; the UI shows the
                 // "manual sign-off" reason instead of a countdown.
-                held.push((upd.clone(), tier, 0, true));
+                held.push((upd.clone(), tier, 0, HeldReason::ManualSignoff));
             }
             HoldStatus::Expired { days_past_window } => {
                 ready.push((upd.clone(), tier, ReadyReason::Expired { days_past_window }));
             }
             HoldStatus::Holding { days_remaining } => {
-                held.push((upd.clone(), tier, days_remaining, false));
+                held.push((upd.clone(), tier, days_remaining, HeldReason::Window));
             }
             HoldStatus::Unknown => {
                 unknown.push((upd.clone(), tier));
@@ -279,7 +295,7 @@ pub fn update(realign: bool) {
             // when its pending upgrade version matches the installed headers
             // version. The transaction will then upgrade kernel-to-match-headers
             // in a single coherent step and the next DKMS rebuild succeeds.
-            let mut new_held: Vec<(PendingUpdate, Tier, u64, bool)> = Vec::new();
+            let mut new_held: Vec<(PendingUpdate, Tier, u64, HeldReason)> = Vec::new();
             let mut realigned_count = 0usize;
             for entry in held.drain(..) {
                 let (upd, tier, _, _) = &entry;
@@ -307,6 +323,43 @@ pub fn update(realign: bool) {
             println!("{}         nog update --realign{}", C_SUBTEXT, C_RESET);
             println!("{}     This pulls held kernels into the upgrade so they match the headers.{}",
                 C_SUBTEXT, C_RESET);
+        }
+    }
+
+    // v1.0.6 (issue #1): couple split lib32/base pairs. A lib32-<X> and its base
+    // <X> are version-locked, but their hold windows are dated independently, so
+    // one can land in Ready while the other is Held. Releasing half the pair
+    // makes pacman's exact-version dependency unsatisfiable and aborts the whole
+    // transaction. Demote the Ready member of any split pair into Held (inheriting
+    // the held partner's countdown) so the pair releases together. Runs last, so
+    // it sees the post-realign buckets and feeds the ignore list below.
+    {
+        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+        let held_names: Vec<String> = held.iter().map(|(u, _, _, _)| u.name.clone()).collect();
+        let demotions = holds::lib32_coupling_demotions(&ready_names, &held_names);
+        if !demotions.is_empty() {
+            let mut kept: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
+            for entry in ready.drain(..) {
+                let (upd, tier, _) = &entry;
+                match demotions.iter().find(|(name, _)| name == &upd.name) {
+                    Some((_, partner)) => {
+                        // Inherit the partner's remaining days so both rows show
+                        // the same countdown and clear together.
+                        let remaining = held.iter()
+                            .find(|(u, _, _, _)| &u.name == partner)
+                            .map(|(_, _, r, _)| *r)
+                            .unwrap_or(0);
+                        held.push((
+                            upd.clone(),
+                            tier.clone(),
+                            remaining,
+                            HeldReason::CoupledTo(partner.clone()),
+                        ));
+                    }
+                    None => kept.push(entry),
+                }
+            }
+            ready = kept;
         }
     }
 
@@ -400,7 +453,7 @@ fn prompt_unknown(pkg: &str, tier: &Tier, old: &str, new: &str) -> PromptOutcome
 
 fn print_buckets(
     ready: &[(PendingUpdate, Tier, ReadyReason)],
-    held: &[(PendingUpdate, Tier, u64, bool)],
+    held: &[(PendingUpdate, Tier, u64, HeldReason)],
     unknown: &[(PendingUpdate, Tier)],
 ) {
     // Convention: each section opens with a leading blank line and never trails
@@ -429,14 +482,19 @@ fn print_buckets(
     if !held.is_empty() {
         println!();
         println!("{}Held ({}):{}", C_BOLD, held.len(), C_RESET);
-        for (upd, tier, remaining, signoff) in held {
+        for (upd, tier, remaining, reason) in held {
             let color = tier_color(tier);
-            let reason = if *signoff {
-                "manual sign-off required — run `nog unlock` to release".to_string()
-            } else if *remaining == 1 {
-                "1 day remaining".to_string()
-            } else {
-                format!("{} days remaining", remaining)
+            let reason = match reason {
+                HeldReason::ManualSignoff =>
+                    "manual sign-off required — run `nog unlock` to release".to_string(),
+                HeldReason::CoupledTo(partner) => match remaining {
+                    1 => format!("coupled to {} · 1 day", partner),
+                    n => format!("coupled to {} · {} days", partner, n),
+                },
+                HeldReason::Window => match remaining {
+                    1 => "1 day remaining".to_string(),
+                    n => format!("{} days remaining", n),
+                },
             };
             println!(
                 "  {}{}{} {}{} -> {}{}  {}[{} · {}]{}",

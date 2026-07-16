@@ -11,7 +11,7 @@
 //
 // Phase 2 delivers this module. Phase 3 will consume it from `nog update`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::HoldsConfig;
@@ -93,6 +93,44 @@ pub fn evaluate_candidate(
     }
 
     evaluate_ts(desc.builddate, tier, holds, now)
+}
+
+/// Couple a `lib32-<X>` multilib package to its base `<X>` at hold-release time
+/// (issue #1).
+///
+/// A `lib32-<X>` package hard-depends on its base `<X>` at an exact version
+/// (`lib32-nvidia-utils` → `nvidia-utils=<ver>`). Their hold windows are dated
+/// per-package from first-sighting, so they can expire on different days and
+/// land in different buckets — one Ready, one Held. Releasing only half the pair
+/// leaves pacman unable to satisfy the exact-version dependency and the whole
+/// transaction aborts. Tier classification already treats them alike; hold
+/// *release* did not, which is the gap this closes.
+///
+/// Given the package names currently in the Ready and Held buckets, return the
+/// Ready names that must be demoted into Held so each split pair moves as a unit,
+/// each paired with the held partner it is waiting on (for display, and to
+/// inherit that partner's countdown). Coupling is bidirectional: it fires
+/// whether the `lib32-` half or the base half is the one still held.
+pub fn lib32_coupling_demotions(ready: &[String], held: &[String]) -> Vec<(String, String)> {
+    let held_set: HashSet<&str> = held.iter().map(String::as_str).collect();
+    let mut demotions = Vec::new();
+    for name in ready {
+        // Direction 1: lib32-<X> is Ready while its base <X> is Held.
+        if let Some(base) = name.strip_prefix("lib32-") {
+            if held_set.contains(base) {
+                demotions.push((name.clone(), base.to_string()));
+                continue;
+            }
+        }
+        // Direction 2: base <X> is Ready while its lib32-<X> shim is Held.
+        // Upgrading the base alone would break the installed shim's exact-version
+        // dependency, so the base waits for the shim.
+        let sibling = format!("lib32-{name}");
+        if held_set.contains(sibling.as_str()) {
+            demotions.push((name.clone(), sibling));
+        }
+    }
+    demotions
 }
 
 /// The shared date math: elapsed days since `build_ts` (rounded up) compared
@@ -326,5 +364,56 @@ mod tests {
             at_days_after_epoch(10),
         );
         assert_eq!(got, HoldStatus::Unknown);
+    }
+
+    // --- v1.0.6 lib32/base hold coupling (issue #1) ---
+
+    fn owned(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn couples_lib32_ready_to_held_base() {
+        // The reported nvidia case: lib32-nvidia-utils is Ready, nvidia-utils
+        // is Held. The shim must be demoted and coupled to its base.
+        let ready = owned(&["lib32-nvidia-utils", "poppler"]);
+        let held = owned(&["nvidia-utils"]);
+        let got = lib32_coupling_demotions(&ready, &held);
+        assert_eq!(
+            got,
+            vec![("lib32-nvidia-utils".to_string(), "nvidia-utils".to_string())]
+        );
+    }
+
+    #[test]
+    fn couples_base_ready_to_held_lib32() {
+        // Mirror direction: base is Ready, the lib32 shim is Held. Upgrading the
+        // base alone would break the installed shim's exact-version dependency,
+        // so the base is demoted and coupled to the shim.
+        let ready = owned(&["nvidia-utils"]);
+        let held = owned(&["lib32-nvidia-utils"]);
+        let got = lib32_coupling_demotions(&ready, &held);
+        assert_eq!(
+            got,
+            vec![("nvidia-utils".to_string(), "lib32-nvidia-utils".to_string())]
+        );
+    }
+
+    #[test]
+    fn no_coupling_when_pair_not_split() {
+        // Both halves Ready (nothing Held) → the pair already moves together, so
+        // there is nothing to demote.
+        let ready = owned(&["lib32-mesa", "mesa"]);
+        let held: Vec<String> = Vec::new();
+        assert!(lib32_coupling_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn non_lib32_ready_without_shim_is_untouched() {
+        // A plain package whose lib32 sibling isn't in the update set at all is
+        // never demoted, even when unrelated packages are Held.
+        let ready = owned(&["firefox"]);
+        let held = owned(&["nvidia-utils"]);
+        assert!(lib32_coupling_demotions(&ready, &held).is_empty());
     }
 }
