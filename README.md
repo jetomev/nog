@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.5](https://img.shields.io/badge/Version-1.0.5-purple.svg)
+![Version: 1.0.6](https://img.shields.io/badge/Version-1.0.6-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -239,7 +239,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.5"
+version = "1.0.6"
 log_level = "info"
 
 [paths]
@@ -475,6 +475,9 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [ ] `nog rollback` — revert a recent update using pacman cache
 - [ ] Hook support for notifying a GUI companion like `nogforge`
 
+### v1.0.6 — Released
+- [x] **lib32/base hold coupling ([#1](https://github.com/jetomev/nog/issues/1))** — a `lib32-<X>` and its base `<X>` are version-locked, but their hold windows are dated independently, so one could land in **Ready** while the other stayed **Held** — leaving pacman unable to satisfy the exact-version dependency and aborting the *entire* transaction (hit live on the nvidia stack). `holds::lib32_coupling_demotions()` demotes the Ready member of any split pair into Held so the pair releases together; bidirectional, and the Held row now names the package it's waiting on. 29 → 33 tests.
+
 ### v1.0.5 — Released
 - [x] **Phase 8 — candidate-fresh hold evaluation** — `nog update` now dates hold windows from the **same DB snapshot that produced the candidate list**: the private dbpath `checkupdates` syncs on every run (`$CHECKUPDATES_DB`, default `${TMPDIR:-/tmp}/checkup-db-<uid>/`). Previously it read `/var/lib/pacman/sync`, which only refreshes when root syncs — i.e. during the handoff *after* the report — so every first-sighting update was dated from its *predecessor's* builddate and could skip its hold entirely (975 days "past window" in the worst observed case). Falls back to the system DB with a warning if the snapshot is missing.
 - [x] **Candidate-version guard** — `sync_db.rs` now reads `%VERSION%`; the new `holds::evaluate_candidate()` refuses to date a hold from a DB entry that isn't the pending candidate's exact version — mismatches route to **Unknown** (per-package prompt) instead of borrowing a clock from a different build. Defense-in-depth behind the fresh-snapshot fix.
@@ -526,6 +529,22 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.6 — July 15, 2026
+**Hotfix — split `lib32`/base pairs could abort the whole transaction**
+
+A `lib32-<X>` multilib package hard-depends on its base `<X>` at an exact version (`lib32-nvidia-utils` → `nvidia-utils=<ver>`). Their hold windows are dated independently from each package's first-sighting date, so they can cross their thresholds on different days and land in **different buckets** — one Ready, one Held. Releasing only half the pair leaves pacman unable to satisfy the exact-version dependency, and it aborts the **entire** `nog update` — taking every other Ready package down with it. Reported in [#1](https://github.com/jetomev/nog/issues/1), hit live on the nvidia stack (`lib32-nvidia-utils` Ready while `nvidia-utils` was Held).
+
+Same *family* as the tier-coupling (v1.0.3) and pkgbase-coupling (v1.0.4) fixes, but a distinct trigger: coupling existed for **tier bucketing**, not for **hold release** — two version-locked packages in the same tier could still be released on different days.
+
+**Fix:**
+
+- 🔗 **Hold-release coupling.** New `holds::lib32_coupling_demotions()` (pure, unit-tested) takes the Ready and Held name sets and returns the Ready packages to demote so each split `lib32`/base pair moves as a unit. Runs as a post-bucketing pass in `nog update`, before the ignore list is built, so a demoted package is genuinely withheld. **Bidirectional** — fires whether the `lib32-` half or the base half is the one still held.
+- 🏷 **Named hold reasons.** The Held listing now says *why* a coupled package waits — `[Tier 3 · coupled to nvidia-utils · 4 days]` — inheriting the partner's countdown so both rows clear together.
+
+**Scope:** name-pattern coupling (`lib32-` ↔ base), the reported failure; a fuller version keyed on the real `depends`/`provides` graph is noted in [#1](https://github.com/jetomev/nog/issues/1) for later. Ready↔Held only — a partner in the **Unknown** bucket keeps its per-package prompt.
+
+Unit tests 29 → 33; warnings unchanged.
 
 ### v1.0.5 — July 7, 2026
 **Hotfix — hold windows dated from stale sync DBs**
