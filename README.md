@@ -8,7 +8,7 @@
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
 ![Version: 1.0.6](https://img.shields.io/badge/Version-1.0.6-purple.svg)
-[![AUR](https://img.shields.io/aur/version/nog?color=1793d1)](https://aur.archlinux.org/packages/nog)
+[![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1800)](https://aur.archlinux.org/packages/nog)
 
 ---
 
