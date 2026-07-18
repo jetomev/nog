@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.6](https://img.shields.io/badge/Version-1.0.6-purple.svg)
+![Version: 1.0.7](https://img.shields.io/badge/Version-1.0.7-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1800)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -239,7 +239,7 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.6"
+version = "1.0.7"
 log_level = "info"
 
 [paths]
@@ -474,6 +474,10 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [ ] `nog status` — dashboard showing what's held, what's ready, what's overdue
 - [ ] `nog rollback` — revert a recent update using pacman cache
 - [ ] Hook support for notifying a GUI companion like `nogforge`
+- [ ] **`nog` run logging** — write each run to a CSV log (`nog-logs/YYYYMMDD nog-update.log`) mirroring the update-table columns; keep 3 months of history (planned v1.0.8).
+
+### v1.0.7 — Released
+- [x] **Reformatted `nog update` output** — a banner header (name / Date / Time / User), **per-source counts** (official via pacman + AUR via the helper), and the Ready / Held / Unknown buckets rendered as aligned **tables** (`Package (N) | Old Version | New Version | Tier | Note`; empty sections show `(none)`). Tier is a bare per-tier-colored digit; terminal width is intentionally ignored so long version strings just widen the columns. New pre-handoff **`Proceed? [Y/n]`** review gate (yay/pacman still confirms after — two deliberate layers). New pure `format_table()` with unit tests; 33 → 35.
 
 ### v1.0.6 — Released
 - [x] **lib32/base hold coupling ([#1](https://github.com/jetomev/nog/issues/1))** — a `lib32-<X>` and its base `<X>` are version-locked, but their hold windows are dated independently, so one could land in **Ready** while the other stayed **Held** — leaving pacman unable to satisfy the exact-version dependency and aborting the *entire* transaction (hit live on the nvidia stack). `holds::lib32_coupling_demotions()` demotes the Ready member of any split pair into Held so the pair releases together; bidirectional, and the Held row now names the package it's waiting on. 29 → 33 tests.
@@ -530,6 +534,21 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.7 — July 18, 2026
+**`nog update` output, reformatted**
+
+Rebuilds the update report around scannable tables and an at-a-glance header, from a user-driven redesign.
+
+- 🪪 **Header block** — a `nog - Update!` banner with **Date / Time / User**. Date/time come from the system `date` — no datetime-crate dependency (nog's slim dep tree is a feature).
+- 🔢 **Per-source counts** — separate lines for the official (pacman) and AUR (helper) update counts, so the split is visible before the detail. Future sources (flatpak, …) slot in as additional lines.
+- 📋 **Tables** — Ready / Held / Unknown each render as an aligned table: `Package (N) | Old Version | New Version | Tier | Note`. Empty sections show `(none)`. Tier is a bare, per-tier-colored digit. Terminal width is intentionally ignored — long version strings (e.g. the `gcc` `+g…` builds) simply widen the columns.
+- ✋ **Proceed gate** — a new `nog: Proceed with installation? [Y/n]` before handoff. yay/pacman still presents its transaction and asks again — two deliberate review layers so an expert can catch and cancel.
+- ✅ **Closing block** — `Update finished!` / `Thank you for using nog!` on success.
+
+Internals: a pure, unit-tested `format_table()` (alignment + the `(none)` case), with the Ready/Held reason text extracted into `ready_note` / `held_note`. Unit tests 33 → 35; warnings unchanged.
+
+The per-run **CSV log + 3-month retention** hinted at in the closing lines lands next, in v1.0.8.
 
 ### v1.0.6 — July 15, 2026
 **Hotfix — split `lib32`/base pairs could abort the whole transaction**
