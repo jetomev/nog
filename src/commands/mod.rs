@@ -137,7 +137,8 @@ pub fn update(realign: bool) {
     guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
-    println!("nog: checking for pending updates...");
+    print_update_header();
+    println!("nog: Checking for pending updates ...");
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
         Err(CheckUpdatesError::Missing) => {
@@ -150,17 +151,17 @@ pub fn update(realign: bool) {
             std::process::exit(1);
         }
     };
+    let official_count = pending.len();
 
     // Fold AUR pending upgrades into the same list when a helper is configured.
     // We track which names came from AUR so we can look up their build dates
     // via the helper's cached metadata below.
     let mut aur_names: Vec<String> = Vec::new();
+    let mut aur_count = 0usize;
     if let Some(h) = helper {
         match aur::pending_updates(h) {
             Ok(aur_list) => {
-                if !aur_list.is_empty() {
-                    println!("nog: {} AUR update(s) reported by {}.", aur_list.len(), h);
-                }
+                aur_count = aur_list.len();
                 for u in &aur_list {
                     aur_names.push(u.name.clone());
                 }
@@ -173,8 +174,17 @@ pub fn update(realign: bool) {
         }
     }
 
+    // Per-source counts. (Future sources — flatpak, etc. — slot in here as
+    // additional lines once nog learns to query them.)
+    println!();
+    println!("nog: {} official repository update(s) reported by pacman.", official_count);
+    if let Some(h) = helper {
+        println!("nog: {} AUR update(s) reported by {}.", aur_count, h);
+    }
+
     if pending.is_empty() {
-        println!("nog: system is up to date — nothing to do.");
+        println!();
+        println!("nog: System is up to date — nothing to do.");
         return;
     }
 
@@ -403,18 +413,26 @@ pub fn update(realign: bool) {
 
     if ready.is_empty() && ignore.len() == pending.len() {
         println!();
-        println!("nog: nothing to install right now — all pending updates are held.");
+        println!("nog: Nothing to install — every pending update is held.");
+        return;
+    }
+
+    // First review gate. yay/pacman will present its own transaction detail and
+    // ask again — two deliberate layers so an expert can still catch and cancel.
+    println!();
+    if !prompt_proceed() {
+        println!("nog: Cancelled — nothing was installed.");
         return;
     }
 
     println!();
     let status = match helper {
         Some(h) => {
-            println!("{}nog: handing off to {}...{}", C_BOLD, h, C_RESET);
+            println!("{}nog: Handing off to {} ...{}", C_BOLD, h, C_RESET);
             aur::upgrade_excluding(h, &ignore)
         }
         None => {
-            println!("{}nog: handing off to pacman...{}", C_BOLD, C_RESET);
+            println!("{}nog: Handing off to pacman ...{}", C_BOLD, C_RESET);
             pacman::update_excluding(&ignore)
         }
     };
@@ -422,6 +440,11 @@ pub fn update(realign: bool) {
         eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
+
+    println!();
+    println!("nog: Update finished!");
+    println!();
+    println!("Thank you for using nog!");
 }
 
 enum PromptOutcome { Yes, No, Eof }
@@ -451,72 +474,242 @@ fn prompt_unknown(pkg: &str, tier: &Tier, old: &str, new: &str) -> PromptOutcome
     }
 }
 
+/// Print the v1.0.7 update banner: name, date, time, and the invoking user.
+/// Date/time come from the system `date` command — nog already spawns
+/// subprocesses, and this keeps the dependency tree free of a datetime crate.
+fn print_update_header() {
+    let (date, time) = now_date_time();
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "unknown".to_string());
+    println!("{}nog - Update!{}", C_BOLD, C_RESET);
+    println!("=============");
+    println!("Date: {}", date);
+    println!("Time: {}", time);
+    println!("User: {}", user);
+    println!();
+}
+
+/// `(MM/DD/YYYY, HH:MM AM/PM)` via the system `date`. Falls back to placeholders
+/// if `date` is unavailable rather than failing the run.
+fn now_date_time() -> (String, String) {
+    if let Ok(o) = std::process::Command::new("date").arg("+%m/%d/%Y|%I:%M %p").output() {
+        if o.status.success() {
+            let s = String::from_utf8_lossy(&o.stdout);
+            if let Some((d, t)) = s.trim().split_once('|') {
+                return (d.to_string(), t.to_string());
+            }
+        }
+    }
+    ("--/--/----".to_string(), "--:-- --".to_string())
+}
+
+/// The pre-handoff review gate. Default is yes (`[Y/n]`); a non-interactive
+/// stdin (EOF) declines rather than auto-installing.
+fn prompt_proceed() -> bool {
+    use std::io::{self, Write};
+    print!("nog: Proceed with installation? [Y/n] ");
+    if io::stdout().flush().is_err() {
+        return false;
+    }
+    let mut buf = String::new();
+    match io::stdin().read_line(&mut buf) {
+        Ok(0) => false,
+        Ok(_) => {
+            let t = buf.trim().to_lowercase();
+            t.is_empty() || t == "y" || t == "yes"
+        }
+        Err(_) => false,
+    }
+}
+
+/// The tier's plain 1/2/3 number (the `Tier` column in the update tables).
+fn tier_num(t: &Tier) -> u8 {
+    match t {
+        Tier::One => 1,
+        Tier::Two => 2,
+        Tier::Three => 3,
+    }
+}
+
+/// Per-tier color keyed by the plain number (used to tint the `Tier` cell).
+fn tier_color_num(n: u8) -> &'static str {
+    match n {
+        1 => C_RED,
+        2 => C_YELLOW,
+        _ => C_GREEN,
+    }
+}
+
+/// One row in an update section table.
+struct TableRow {
+    pkg: String,
+    old: String,
+    new: String,
+    tier: u8,
+    note: String,
+}
+
+impl TableRow {
+    fn from(upd: &PendingUpdate, tier: &Tier, note: String) -> TableRow {
+        TableRow {
+            pkg: upd.name.clone(),
+            old: upd.old_version.clone(),
+            new: upd.new_version.clone(),
+            tier: tier_num(tier),
+            note,
+        }
+    }
+}
+
+/// Render one v1.0.7 update section as an aligned table. Pure + unit-tested.
+///
+/// Column widths are computed from the plain text; when `colorize` is set the
+/// `Tier` digit is wrapped in its per-tier color with the padding left OUTSIDE
+/// the escape codes, so alignment is byte-for-byte identical colored or not.
+/// An empty section renders its header and `(none)`. Terminal width is
+/// intentionally ignored — long version strings simply widen the columns.
+fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
+    let title_line = format!("{}:", title);
+    let mut out = format!("{}\n{}\n\n", title_line, "-".repeat(title_line.len()));
+
+    if rows.is_empty() {
+        out.push_str("(none)\n");
+        return out;
+    }
+
+    let pkg_hdr = format!("Package ({})", rows.len());
+    let w_pkg = std::iter::once(pkg_hdr.len())
+        .chain(rows.iter().map(|r| r.pkg.len()))
+        .max()
+        .unwrap();
+    let w_old = std::iter::once("Old Version".len())
+        .chain(rows.iter().map(|r| r.old.len()))
+        .max()
+        .unwrap();
+    let w_new = std::iter::once("New Version".len())
+        .chain(rows.iter().map(|r| r.new.len()))
+        .max()
+        .unwrap();
+    let w_tier = "Tier".len(); // the tier digit is always a single char
+    let g = "  ";
+
+    out.push_str(&format!(
+        "{:<wp$}{g}{:<wo$}{g}{:<wn$}{g}{:<wt$}{g}{}\n",
+        pkg_hdr, "Old Version", "New Version", "Tier", "Note",
+        wp = w_pkg, wo = w_old, wn = w_new, wt = w_tier, g = g,
+    ));
+    out.push('\n');
+
+    for r in rows {
+        let tier_cell = if colorize {
+            format!(
+                "{}{}{}{}",
+                tier_color_num(r.tier), r.tier, C_RESET, " ".repeat(w_tier - 1)
+            )
+        } else {
+            format!("{:<wt$}", r.tier, wt = w_tier)
+        };
+        out.push_str(&format!(
+            "{:<wp$}{g}{:<wo$}{g}{:<wn$}{g}{}{g}{}\n",
+            r.pkg, r.old, r.new, tier_cell, r.note,
+            wp = w_pkg, wo = w_old, wn = w_new, g = g,
+        ));
+    }
+    out
+}
+
+/// Map a Ready bucket entry to its `Note` text.
+fn ready_note(reason: &ReadyReason) -> String {
+    match reason {
+        ReadyReason::Expired { days_past_window: 0 } => "hold just expired".to_string(),
+        ReadyReason::Expired { days_past_window: 1 } => "1 day past window".to_string(),
+        ReadyReason::Expired { days_past_window } => format!("{} days past window", days_past_window),
+        ReadyReason::Realigned => "realigned to match installed headers".to_string(),
+    }
+}
+
+/// Map a Held bucket entry to its `Note` text.
+fn held_note(remaining: u64, reason: &HeldReason) -> String {
+    match reason {
+        HeldReason::ManualSignoff =>
+            "manual sign-off required — run `nog unlock` to release".to_string(),
+        HeldReason::CoupledTo(partner) => match remaining {
+            1 => format!("coupled to {} · 1 day", partner),
+            n => format!("coupled to {} · {} days", partner, n),
+        },
+        HeldReason::Window => match remaining {
+            1 => "1 day remaining".to_string(),
+            n => format!("{} days remaining", n),
+        },
+    }
+}
+
 fn print_buckets(
     ready: &[(PendingUpdate, Tier, ReadyReason)],
     held: &[(PendingUpdate, Tier, u64, HeldReason)],
     unknown: &[(PendingUpdate, Tier)],
 ) {
-    // Convention: each section opens with a leading blank line and never trails
-    // one. Upstream sections (outer `update()` logic) follow the same rule so
-    // spacing is uniform regardless of which buckets are populated.
-    if !ready.is_empty() {
-        println!();
-        println!("{}Ready to install ({}):{}", C_BOLD, ready.len(), C_RESET);
-        for (upd, tier, reason) in ready {
-            let color = tier_color(tier);
-            let reason_str = match reason {
-                ReadyReason::Expired { days_past_window: 0 } => "hold just expired".to_string(),
-                ReadyReason::Expired { days_past_window: 1 } => "1 day past window".to_string(),
-                ReadyReason::Expired { days_past_window } => format!("{} days past window", days_past_window),
-                ReadyReason::Realigned => "realigned to match installed headers".to_string(),
-            };
-            println!(
-                "  {}{}{} {}{} -> {}{}  {}[{} · {}]{}",
-                color, upd.name, C_RESET,
-                C_SUBTEXT, upd.old_version, upd.new_version, C_RESET,
-                C_SUBTEXT, tier, reason_str, C_RESET,
-            );
+    let ready_rows: Vec<TableRow> = ready.iter()
+        .map(|(upd, tier, reason)| TableRow::from(upd, tier, ready_note(reason)))
+        .collect();
+    let held_rows: Vec<TableRow> = held.iter()
+        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, held_note(*remaining, reason)))
+        .collect();
+    let unknown_rows: Vec<TableRow> = unknown.iter()
+        .map(|(upd, tier)| TableRow::from(upd, tier, "no build date in sync DB".to_string()))
+        .collect();
+
+    println!();
+    print!("{}", format_table("READY TO INSTALL", &ready_rows, true));
+    println!();
+    print!("{}", format_table("ON HOLD FROM INSTALL", &held_rows, true));
+    println!();
+    print!("{}", format_table("UNKNOWN", &unknown_rows, true));
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn table_aligns_and_counts() {
+        let rows = vec![
+            TableRow { pkg: "libnm".into(), old: "1.56.1-1".into(), new: "1.56.1-2".into(), tier: 2, note: "9 days past window".into() },
+            TableRow { pkg: "wine-staging".into(), old: "11.12-1".into(), new: "11.13-1".into(), tier: 3, note: "hold just expired".into() },
+        ];
+        let t = format_table("READY TO INSTALL", &rows, false);
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines[0], "READY TO INSTALL:");
+        assert_eq!(lines[1], "-".repeat("READY TO INSTALL:".len()));
+        assert_eq!(lines[2], "");
+        let hdr = lines[3];
+        assert!(hdr.starts_with("Package (2)"));
+        for label in ["Old Version", "New Version", "Tier", "Note"] {
+            assert!(hdr.contains(label), "header missing {label}");
+        }
+        assert_eq!(lines[4], "");
+        // Alignment guarantee: every column's value begins exactly under its header.
+        let (r0, r1) = (lines[5], lines[6]);
+        assert!(r0.starts_with("libnm"));
+        assert!(r1.starts_with("wine-staging"));
+        for (label, v0, v1) in [
+            ("Old Version", "1.56.1-1", "11.12-1"),
+            ("New Version", "1.56.1-2", "11.13-1"),
+            ("Tier", "2", "3"),
+            ("Note", "9 days past window", "hold just expired"),
+        ] {
+            let idx = hdr.find(label).unwrap();
+            assert!(r0[idx..].starts_with(v0), "row0 {label}: {:?}", &r0[idx..]);
+            assert!(r1[idx..].starts_with(v1), "row1 {label}: {:?}", &r1[idx..]);
         }
     }
 
-    if !held.is_empty() {
-        println!();
-        println!("{}Held ({}):{}", C_BOLD, held.len(), C_RESET);
-        for (upd, tier, remaining, reason) in held {
-            let color = tier_color(tier);
-            let reason = match reason {
-                HeldReason::ManualSignoff =>
-                    "manual sign-off required — run `nog unlock` to release".to_string(),
-                HeldReason::CoupledTo(partner) => match remaining {
-                    1 => format!("coupled to {} · 1 day", partner),
-                    n => format!("coupled to {} · {} days", partner, n),
-                },
-                HeldReason::Window => match remaining {
-                    1 => "1 day remaining".to_string(),
-                    n => format!("{} days remaining", n),
-                },
-            };
-            println!(
-                "  {}{}{} {}{} -> {}{}  {}[{} · {}]{}",
-                color, upd.name, C_RESET,
-                C_SUBTEXT, upd.old_version, upd.new_version, C_RESET,
-                C_SUBTEXT, tier, reason, C_RESET,
-            );
-        }
-    }
-
-    if !unknown.is_empty() {
-        println!();
-        println!("{}Unknown ({}):{}", C_BOLD, unknown.len(), C_RESET);
-        for (upd, tier) in unknown {
-            let color = tier_color(tier);
-            println!(
-                "  {}{}{} {}{} -> {}{}  {}[{} · no build date in sync DB]{}",
-                color, upd.name, C_RESET,
-                C_SUBTEXT, upd.old_version, upd.new_version, C_RESET,
-                C_SUBTEXT, tier, C_RESET,
-            );
-        }
+    #[test]
+    fn empty_table_renders_none() {
+        let t = format_table("UNKNOWN", &[], false);
+        assert!(t.starts_with("UNKNOWN:\n"));
+        assert!(t.contains("\n\n(none)\n"));
     }
 }
 
