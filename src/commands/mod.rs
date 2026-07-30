@@ -3,6 +3,7 @@ use crate::tiers::{Tier, TierManager};
 use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
+use crate::runlog;
 use crate::sync_db;
 
 // Catppuccin Mocha palette — true-color ANSI. Centralized so every tier-colored
@@ -137,7 +138,7 @@ pub fn update(realign: bool) {
     guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
-    print_update_header();
+    let (run_date, run_time, run_user) = print_update_header();
     println!("nog: Checking for pending updates ...");
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
@@ -185,6 +186,7 @@ pub fn update(realign: bool) {
     if pending.is_empty() {
         println!();
         println!("nog: System is up to date — nothing to do.");
+        write_run_log(&cfg, &run_date, &run_time, &run_user, Vec::new(), "up to date");
         return;
     }
 
@@ -375,6 +377,10 @@ pub fn update(realign: bool) {
 
     print_buckets(&ready, &held, &unknown);
 
+    // v1.0.8: snapshot the final buckets for the run log. Taken after the
+    // realign/coupling passes so the CSV mirrors the printed tables exactly.
+    let log_rows = runlog_rows(&ready, &held, &unknown);
+
     // Interactive step: decide what to do with Unknowns. Each gets a y/N prompt.
     // EOF or non-TTY stdin → default all remaining to skip, with a warning.
     let mut extra_ignore: Vec<String> = Vec::new();
@@ -414,6 +420,7 @@ pub fn update(realign: bool) {
     if ready.is_empty() && ignore.len() == pending.len() {
         println!();
         println!("nog: Nothing to install — every pending update is held.");
+        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "all held");
         return;
     }
 
@@ -422,6 +429,7 @@ pub fn update(realign: bool) {
     println!();
     if !prompt_proceed() {
         println!("nog: Cancelled — nothing was installed.");
+        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "cancelled");
         return;
     }
 
@@ -437,12 +445,16 @@ pub fn update(realign: bool) {
         }
     };
     if !status.success() {
-        eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
+        let code = status.code().unwrap_or(-1);
+        eprintln!("nog: upgrade exited with status {}", code);
+        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+            &format!("handoff failed (status {})", code));
         std::process::exit(status.code().unwrap_or(1));
     }
 
     println!();
     println!("nog: Update finished!");
+    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "installed");
     println!();
     println!("Thank you for using nog!");
 }
@@ -477,7 +489,9 @@ fn prompt_unknown(pkg: &str, tier: &Tier, old: &str, new: &str) -> PromptOutcome
 /// Print the v1.0.7 update banner: name, date, time, and the invoking user.
 /// Date/time come from the system `date` command — nog already spawns
 /// subprocesses, and this keeps the dependency tree free of a datetime crate.
-fn print_update_header() {
+/// Returns `(date, time, user)` so the run log (v1.0.8) records the exact
+/// context the banner showed.
+fn print_update_header() -> (String, String, String) {
     let (date, time) = now_date_time();
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
@@ -488,6 +502,7 @@ fn print_update_header() {
     println!("Time: {}", time);
     println!("User: {}", user);
     println!();
+    (date, time, user)
 }
 
 /// `(MM/DD/YYYY, HH:MM AM/PM)` via the system `date`. Falls back to placeholders
@@ -666,6 +681,78 @@ fn print_buckets(
     print!("{}", format_table("ON HOLD FROM INSTALL", &held_rows, true));
     println!();
     print!("{}", format_table("UNKNOWN", &unknown_rows, true));
+}
+
+/// Map the final buckets to run-log rows (v1.0.8) — same order and note
+/// text as the printed tables, so the CSV is a faithful mirror of what the
+/// user saw.
+fn runlog_rows(
+    ready: &[(PendingUpdate, Tier, ReadyReason)],
+    held: &[(PendingUpdate, Tier, u64, HeldReason)],
+    unknown: &[(PendingUpdate, Tier)],
+) -> Vec<runlog::RunRow> {
+    let row = |bucket: &str, upd: &PendingUpdate, tier: &Tier, note: String| runlog::RunRow {
+        bucket: bucket.to_string(),
+        package: upd.name.clone(),
+        old_version: upd.old_version.clone(),
+        new_version: upd.new_version.clone(),
+        tier: tier_num(tier).to_string(),
+        note,
+    };
+    let mut rows = Vec::new();
+    for (upd, tier, reason) in ready {
+        rows.push(row("ready", upd, tier, ready_note(reason)));
+    }
+    for (upd, tier, remaining, reason) in held {
+        rows.push(row("held", upd, tier, held_note(*remaining, reason)));
+    }
+    for (upd, tier) in unknown {
+        rows.push(row("unknown", upd, tier, "no build date in sync DB".to_string()));
+    }
+    rows
+}
+
+/// Write the run record and prune expired logs (v1.0.8). Every failure path
+/// is a warning, never an abort — the update itself has already succeeded or
+/// failed on its own terms by the time this runs.
+fn write_run_log(
+    cfg: &NogConfig,
+    date: &str,
+    time: &str,
+    user: &str,
+    rows: Vec<runlog::RunRow>,
+    outcome: &str,
+) {
+    let (today, cutoff) = match runlog::today_and_cutoff() {
+        Some(pair) => pair,
+        None => {
+            eprintln!("{}nog: warning — `date` unavailable; run not logged.{}",
+                C_SUBTEXT, C_RESET);
+            return;
+        }
+    };
+    let record = runlog::RunRecord {
+        date: date.to_string(),
+        time: time.to_string(),
+        user: user.to_string(),
+        rows,
+        outcome: outcome.to_string(),
+    };
+    match runlog::append_run(&cfg.paths.run_logs, &today, &record) {
+        Ok(path) => {
+            println!("{}nog: run logged to {}{}", C_SUBTEXT, path.display(), C_RESET);
+            match runlog::prune_old(&cfg.paths.run_logs, &cutoff) {
+                Ok(pruned) if !pruned.is_empty() => println!(
+                    "{}nog: pruned {} run log(s) older than {} days.{}",
+                    C_SUBTEXT, pruned.len(), runlog::RETENTION_DAYS, C_RESET),
+                Ok(_) => {}
+                Err(e) => eprintln!("{}nog: warning — run-log prune failed: {}{}",
+                    C_SUBTEXT, e, C_RESET),
+            }
+        }
+        Err(e) => eprintln!("{}nog: warning — run not logged: {}{}",
+            C_SUBTEXT, e, C_RESET),
+    }
 }
 
 #[cfg(test)]

@@ -13,6 +13,15 @@ pub struct PathsConfig {
     pub tier_pins: String,
     pub pacman_conf: String,
     pub log_file: String,
+    /// v1.0.8: directory for per-run CSV update logs. Defaults to the XDG
+    /// data dir — nog runs unprivileged, so /var/log is not an option.
+    /// Existing installs without the key keep working via the serde default.
+    #[serde(default = "default_run_logs")]
+    pub run_logs: String,
+}
+
+fn default_run_logs() -> String {
+    "~/.local/share/nog/logs".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -110,6 +119,7 @@ impl NogConfig {
                 tier_pins: "/etc/nog/tier-pins.toml".to_string(),
                 pacman_conf: "/etc/pacman.conf".to_string(),
                 log_file: "/var/log/nog.log".to_string(),
+                run_logs: default_run_logs(),
             },
             repos: ReposConfig {
                 staging: "https://repo.kognog.org/staging".to_string(),
