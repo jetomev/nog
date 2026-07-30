@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod holds;
 mod pacman;
+mod runlog;
 mod sync_db;
 mod tiers;
 
