@@ -38,7 +38,7 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine
 - 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held for 30 days by default; expert mode swaps to manual-only promotion
 - 📦 **Status-grouped update output** — every `nog update` groups pending upgrades into **Ready / Held / Unknown** with Catppuccin Mocha tier colors
-- 🗒 **CSV run logs** — every `nog update` run is appended to a per-day CSV log (`YYYYMMDD nog-update.log`) mirroring the report tables plus the run's outcome; 3-month retention, pruned automatically
+- 🗒 **CSV run logs** — every `nog update` run is appended to a per-day CSV log (`YYYYMMDD nog-update.csv`) mirroring the report tables plus the run's outcome; 3-month retention, pruned automatically
 - 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified, date-evaluated (via the helper's cached metadata), and bucketed alongside official repo packages; transactions are handed off to the helper for combined `-Syu`
 - ❓ **Interactive Unknown handling** — packages with no resolvable build date (locally-built, disabled-repo, or AUR query failure) are prompted case-by-case
 - 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman` and `sudo tee /etc/nog/tier-pins.toml`. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
@@ -185,7 +185,7 @@ When you run `nog update`, nog:
    - With helper: `<helper> -Syu --ignore=<held + skipped-unknowns>` — one combined upgrade for official + AUR. The helper runs as your user and sudo-s pacman internally for the pacman step.
    - Without helper: `sudo pacman -Syu --ignore=<...>` — official repos only.
 8. If everything is held, exits cleanly without invoking anything.
-9. Logs the run to `[paths] run_logs` (default `~/.local/share/nog/logs/YYYYMMDD nog-update.log`) — one CSV row per package, mirroring the report tables, tagged with the run's outcome (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`) — then prunes logs older than 90 days. Logging soft-fails with a warning; it never blocks an update.
+9. Logs the run to `[paths] run_logs` (default `~/.local/share/nog/logs/YYYYMMDD nog-update.csv`) — one CSV row per package, mirroring the report tables, tagged with the run's outcome (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`) — then prunes logs older than 90 days. Logging soft-fails with a warning; it never blocks an update.
 
 All classification happens before the transaction, so you always see the plan before anything is touched.
 
@@ -250,7 +250,7 @@ nog: Handing off to yay ...
    (the yay/pacman transaction runs here)
 
 nog: Update finished!
-nog: run logged to /home/jetomev/.local/share/nog/logs/20260729 nog-update.log
+nog: run logged to /home/jetomev/.local/share/nog/logs/20260729 nog-update.csv
 
 Thank you for using nog!
 ```
@@ -276,7 +276,7 @@ log_level = "info"
 tier_pins = "/etc/nog/tier-pins.toml"
 pacman_conf = "/etc/pacman.conf"
 log_file = "/var/log/nog.log"
-# v1.0.8: per-run CSV update logs ("YYYYMMDD nog-update.log", 90-day
+# v1.0.8: per-run CSV update logs ("YYYYMMDD nog-update.csv", 90-day
 # retention). nog runs unprivileged, so this lives in user space; a leading
 # ~/ expands against $HOME. Key is optional — this is also the default.
 run_logs = "~/.local/share/nog/logs"
@@ -510,7 +510,7 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [ ] Hook support for notifying a GUI companion like `nogforge`
 
 ### v1.0.8 — Released
-- [x] **CSV run logging** — every `nog update` run appends to a per-day CSV log (`YYYYMMDD nog-update.log` under `[paths] run_logs`, default `~/.local/share/nog/logs`) mirroring the update-table columns (bucket / package / old / new / tier / note) plus the banner context (date / time / user) and the run's **outcome** (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`). Retention: logs older than 90 days pruned after each write. Logging soft-fails with a warning — it never blocks an update. New pure `runlog` module with unit tests; 35 → 42.
+- [x] **CSV run logging** — every `nog update` run appends to a per-day CSV log (`YYYYMMDD nog-update.csv` under `[paths] run_logs`, default `~/.local/share/nog/logs`) mirroring the update-table columns (bucket / package / old / new / tier / note) plus the banner context (date / time / user) and the run's **outcome** (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`). Retention: logs older than 90 days pruned after each write. Logging soft-fails with a warning — it never blocks an update. New pure `runlog` module with unit tests; 35 → 42.
 
 ### v1.0.7 — Released
 - [x] **Reformatted `nog update` output** — a banner header (name / Date / Time / User), **per-source counts** (official via pacman + AUR via the helper), and the Ready / Held / Unknown buckets rendered as aligned **tables** (`Package (N) | Old Version | New Version | Tier | Note`; empty sections show `(none)`). Tier is a bare per-tier-colored digit; terminal width is intentionally ignored so long version strings just widen the columns. New pre-handoff **`Proceed? [Y/n]`** review gate (yay/pacman still confirms after — two deliberate layers). New pure `format_table()` with unit tests; 33 → 35.
@@ -577,7 +577,7 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 
 The follow-through on v1.0.7's closing hint: every `nog update` now writes a history record you can grep, sort, or open in a spreadsheet.
 
-- 🗒 **Per-day CSV log** — `YYYYMMDD nog-update.log` under `[paths] run_logs` (default `~/.local/share/nog/logs`; leading `~/` expands against `$HOME`). One header line per file; runs on the same day append.
+- 🗒 **Per-day CSV log** — `YYYYMMDD nog-update.csv` under `[paths] run_logs` (default `~/.local/share/nog/logs`; leading `~/` expands against `$HOME`). One header line per file; runs on the same day append.
 - 🪞 **Faithful mirror** — one row per package with the exact table columns the report showed (`bucket, package, old_version, new_version, tier, note`), snapshotted after the realign and lib32-coupling passes, plus the banner context (`date, time, user`) on every line so files stay self-describing under `cat`/`grep`.
 - 🏁 **Outcome column** — how the run ended: `installed`, `cancelled` (the Proceed gate), `all held`, `up to date` (logged as a marker line, so no-op runs still count), or `handoff failed (status N)`. The log answers "did I actually install that day?" — not just "what did nog show me?"
 - 🧹 **3-month retention** — files dated older than 90 days are pruned after each successful write, cutoff computed via the system `date` (still no datetime crate).

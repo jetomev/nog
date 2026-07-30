@@ -2,7 +2,7 @@
 //!
 //! Every `nog update` run appends a CSV record of the report it presented
 //! (mirroring the Ready / Held / Unknown table columns) plus the run's
-//! outcome, to a per-day log file — `YYYYMMDD nog-update.log` — under the
+//! outcome, to a per-day log file — `YYYYMMDD nog-update.csv` — under the
 //! `[paths] run_logs` directory. Files older than the retention window
 //! (3 months) are pruned after each successful write.
 //!
@@ -88,15 +88,17 @@ pub fn render_run(record: &RunRecord) -> String {
 
 /// The per-day log filename. The space is deliberate — it matches the
 /// project's human-readable file naming (`testing/20260718 - Test Results…`).
+/// The `.csv` extension is deliberate too: spreadsheet apps refuse to import
+/// a `.log`, and the content has been CSV from day one.
 pub fn filename_for(yyyymmdd: &str) -> String {
-    format!("{} nog-update.log", yyyymmdd)
+    format!("{} nog-update.csv", yyyymmdd)
 }
 
 /// Extract the date stamp from a run-log filename; `None` for anything that
-/// isn't exactly `YYYYMMDD nog-update.log` (so foreign files in the log
+/// isn't exactly `YYYYMMDD nog-update.csv` (so foreign files in the log
 /// directory are never prune candidates).
 fn log_date(name: &str) -> Option<&str> {
-    let stamp = name.strip_suffix(" nog-update.log")?;
+    let stamp = name.strip_suffix(" nog-update.csv")?;
     if stamp.len() == 8 && stamp.bytes().all(|b| b.is_ascii_digit()) {
         Some(stamp)
     } else {
@@ -278,23 +280,23 @@ mod tests {
     }
 
     #[test]
-    fn filename_matches_roadmap_convention() {
-        assert_eq!(filename_for("20260729"), "20260729 nog-update.log");
+    fn filename_is_spreadsheet_friendly_csv() {
+        assert_eq!(filename_for("20260729"), "20260729 nog-update.csv");
     }
 
     #[test]
     fn prune_selects_only_expired_run_logs() {
         let names: Vec<String> = vec![
-            "20260401 nog-update.log".into(), // before cutoff — prune
-            "20260430 nog-update.log".into(), // day before cutoff — prune
-            "20260501 nog-update.log".into(), // exactly cutoff — keep
-            "20260729 nog-update.log".into(), // fresh — keep
+            "20260401 nog-update.csv".into(), // before cutoff — prune
+            "20260430 nog-update.csv".into(), // day before cutoff — prune
+            "20260501 nog-update.csv".into(), // exactly cutoff — keep
+            "20260729 nog-update.csv".into(), // fresh — keep
             "notes.txt".into(),               // foreign file — never touch
-            "2026 nog-update.log".into(),     // malformed stamp — never touch
-            "20260401 something-else.log".into(), // wrong suffix — never touch
+            "2026 nog-update.csv".into(),     // malformed stamp — never touch
+            "20260401 something-else.csv".into(), // wrong suffix — never touch
         ];
         let pruned = prune_candidates(&names, "20260501");
-        assert_eq!(pruned, vec!["20260401 nog-update.log", "20260430 nog-update.log"]);
+        assert_eq!(pruned, vec!["20260401 nog-update.csv", "20260430 nog-update.csv"]);
     }
 
     #[test]

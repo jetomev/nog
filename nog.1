@@ -100,7 +100,7 @@ or the helper with
 .B --ignore=
 listing all held and user-skipped packages.
 Every run is appended to a per-day CSV log
-.RB ( "YYYYMMDD nog-update.log"
+.RB ( "YYYYMMDD nog-update.csv"
 under
 .BR "[paths] run_logs" ,
 default
@@ -208,7 +208,7 @@ Pacman sync databases. Read-only by nog, for build-date lookup during
 Read-only. nog parses it for enabled repositories and their priority order.
 .TP
 .I ~/.local/share/nog/logs/
-Per-run CSV update logs (\fBYYYYMMDD nog-update.log\fR), one row per pending
+Per-run CSV update logs (\fBYYYYMMDD nog-update.csv\fR), one row per pending
 package per run plus the run's outcome. Location configurable via
 .B [paths] run_logs
 in
