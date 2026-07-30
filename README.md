@@ -502,6 +502,8 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ## Roadmap
 
 ### Future
+- [ ] **Zero-day lane for `archlinux-keyring`** (greenlit 2026-07-30, KognogOS audit finding) — a held keyring is itself the breakage: signatures fail on every later update until it lands. Add a special-case hold class (0-day / always-release) for keyring packages, likely a `[tier0]`-style list defaulting to `archlinux-keyring` + `chaotic-keyring`.
+- [ ] **Depends-graph coupling (rule d)** — generalize the name-pattern couplings: an exact-version dependency (`pkg=ver`) hold-couples the depender to its target, subsuming the headers/lib32/pkgbase rules. Evidence: the 2026-07-30 KognogOS dep-chain audit found 736 exact-version pairs repo-wide, 2 unrescued (`dahdi-linux-git`, `wanpipe` → `linux=…`). Note: complete fix is hold-release coupling (v1.0.6 style), since same tier ≠ same release day.
 - [ ] **First-run wizard** — on first `nog update`, ask the user whether Tier 1 should auto-update after 30 days (default, novice-friendly) or require manual `unlock --promote` per kernel/glibc/systemd upgrade (expert mode). Writes the chosen value to `tier-pins.toml [tier1] manual_signoff`.
 - [ ] Chaotic-AUR binary package (submit once v1.0 is stable)
 - [ ] `nog history` — log of all tier changes and package actions
