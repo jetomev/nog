@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "July 2026" "nog v1.0.7" "User Commands"
+.TH NOG 1 "July 2026" "nog v1.0.8" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -99,6 +99,20 @@ The final transaction invokes
 or the helper with
 .B --ignore=
 listing all held and user-skipped packages.
+Every run is appended to a per-day CSV log
+.RB ( "YYYYMMDD nog-update.log"
+under
+.BR "[paths] run_logs" ,
+default
+.IR ~/.local/share/nog/logs )
+mirroring the report tables plus the run's outcome
+.RB ( installed ,
+.BR cancelled ,
+.BR "all held" ,
+.BR "up to date" ,
+.BR "handoff failed" );
+logs older than 90 days are pruned automatically. Logging soft-fails with a
+warning and never blocks an update.
 .PP
 Before the buckets render,
 .B nog update
@@ -192,6 +206,14 @@ Pacman sync databases. Read-only by nog, for build-date lookup during
 .TP
 .I /etc/pacman.conf
 Read-only. nog parses it for enabled repositories and their priority order.
+.TP
+.I ~/.local/share/nog/logs/
+Per-run CSV update logs (\fBYYYYMMDD nog-update.log\fR), one row per pending
+package per run plus the run's outcome. Location configurable via
+.B [paths] run_logs
+in
+.IR nog.conf ;
+files older than 90 days are pruned after each run.
 .TP
 .I /usr/bin/nog
 The nog binary.

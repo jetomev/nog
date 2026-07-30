@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.7](https://img.shields.io/badge/Version-1.0.7-purple.svg)
+![Version: 1.0.8](https://img.shields.io/badge/Version-1.0.8-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1800)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -38,6 +38,7 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🕒 **Date-based hold windows** — 30 / 15 / 7 day holds let community testing surface regressions before updates land on your machine
 - 🔒 **Tier 1 protection** — kernel, bootloader, glibc, systemd, mesa held for 30 days by default; expert mode swaps to manual-only promotion
 - 📦 **Status-grouped update output** — every `nog update` groups pending upgrades into **Ready / Held / Unknown** with Catppuccin Mocha tier colors
+- 🗒 **CSV run logs** — every `nog update` run is appended to a per-day CSV log (`YYYYMMDD nog-update.log`) mirroring the report tables plus the run's outcome; 3-month retention, pruned automatically
 - 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified, date-evaluated (via the helper's cached metadata), and bucketed alongside official repo packages; transactions are handed off to the helper for combined `-Syu`
 - ❓ **Interactive Unknown handling** — packages with no resolvable build date (locally-built, disabled-repo, or AUR query failure) are prompted case-by-case
 - 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman` and `sudo tee /etc/nog/tier-pins.toml`. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
@@ -184,6 +185,7 @@ When you run `nog update`, nog:
    - With helper: `<helper> -Syu --ignore=<held + skipped-unknowns>` — one combined upgrade for official + AUR. The helper runs as your user and sudo-s pacman internally for the pacman step.
    - Without helper: `sudo pacman -Syu --ignore=<...>` — official repos only.
 8. If everything is held, exits cleanly without invoking anything.
+9. Logs the run to `[paths] run_logs` (default `~/.local/share/nog/logs/YYYYMMDD nog-update.log`) — one CSV row per package, mirroring the report tables, tagged with the run's outcome (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`) — then prunes logs older than 90 days. Logging soft-fails with a warning; it never blocks an update.
 
 All classification happens before the transaction, so you always see the plan before anything is touched.
 
@@ -200,32 +202,60 @@ extra/htop 3.4.1-1 [installed] [Tier 3 — 7d hold]
 
 ### Example: `nog update`
 
+Captured from a live run (v1.0.8), Held section trimmed for brevity:
+
 ```
-nog: checking for pending updates...
+nog - Update!
+=============
+Date: 07/29/2026
+Time: 08:52 PM
+User: jetomev
 
-Ready to install (2):
-  libmpc          1.4.0-1  -> 1.4.1-1   [Tier 3 · 24 days past window]
-  lib32-libngtcp2 1.22.0-1 -> 1.22.1-1  [Tier 3 · 14 days past window]
+nog: Checking for pending updates ...
 
-Held (3):
-  linux             6.19.10-1 -> 6.19.11-1 [Tier 1 · 22 days remaining]
-  firefox           138.0-1   -> 138.0.2-1 [Tier 2 · 11 days remaining]
-  fresh-editor-bin  0.2.24-1  -> 0.2.25-1  [Tier 3 · 6 days remaining]
+nog: 75 official repository update(s) reported by pacman.
+nog: 1 AUR update(s) reported by yay.
 
-Unknown (1):
-  my-local-pkg    0.9-1 -> 1.0-1 [Tier 3 · no build date in sync DB]
+READY TO INSTALL:
+-----------------
 
-nog: 1 package(s) have no usable build date in any sync DB.
-      Usually an AUR-only, locally-built, or disabled-repo package — or a
-      DB entry that doesn't match the pending candidate's version.
+Package (3)     Old Version   New Version   Tier  Note
 
-  my-local-pkg (Tier 3 0.9-1 -> 1.0-1) — update anyway? [y/N] n
+libraqm         0.10.5-1      0.11.0-1      3     hold just expired
+plasma-desktop  6.7.2-1       6.7.3-1       2     hold just expired
+python-certifi  2026.06.17-1  2026.07.22-1  3     1 day past window
 
-nog: handing off to yay...
+ON HOLD FROM INSTALL:
+---------------------
+
+Package (73)            Old Version                  New Version                  Tier  Note
+
+archlinux-keyring       20260707.1-1                 20260727-1                   3     4 days remaining
+glibc                   2.43+r37+gfdf10644d6ee-1     2.44+r5+g7cba77790f32-1      1     28 days remaining
+libnm                   1.56.1-2                     1.58.0-1                     2     5 days remaining
+linux-zen               7.0.5.zen1-1                 7.1.5.zen1-2                 1     28 days remaining
+linux-zen-headers       7.0.5.zen1-1                 7.1.5.zen1-2                 1     28 days remaining
+lib32-libnm             1.56.1-1                     1.58.0-1                     3     coupled to libnm · 5 days
+  ⋮                     (67 more)
+
+UNKNOWN:
+--------
+
+(none)
+
+nog: Proceed with installation? [Y/n] y
+
+nog: Handing off to yay ...
 :: Starting full system upgrade...
+   (the yay/pacman transaction runs here)
+
+nog: Update finished!
+nog: run logged to /home/jetomev/.local/share/nog/logs/20260729 nog-update.log
+
+Thank you for using nog!
 ```
 
-(Package names are tier-colored — Tier 1 red, Tier 2 yellow, Tier 3 green — using the Catppuccin Mocha palette.)
+(The `Tier` digit is tier-colored — Tier 1 red, Tier 2 yellow, Tier 3 green — using the Catppuccin Mocha palette. Note the `coupled to libnm` row: v1.0.6's lib32/base coupling holding a version-locked pair together, and the closing `run logged to` line: v1.0.8's CSV run log.)
 
 ---
 
@@ -239,13 +269,17 @@ General nog settings — version, logging, paths, and **the authoritative hold d
 
 ```toml
 [general]
-version = "1.0.7"
+version = "1.0.8"
 log_level = "info"
 
 [paths]
 tier_pins = "/etc/nog/tier-pins.toml"
 pacman_conf = "/etc/pacman.conf"
 log_file = "/var/log/nog.log"
+# v1.0.8: per-run CSV update logs ("YYYYMMDD nog-update.log", 90-day
+# retention). nog runs unprivileged, so this lives in user space; a leading
+# ~/ expands against $HOME. Key is optional — this is also the default.
+run_logs = "~/.local/share/nog/logs"
 
 [holds]
 tier1_days = 30
@@ -474,7 +508,9 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [ ] `nog status` — dashboard showing what's held, what's ready, what's overdue
 - [ ] `nog rollback` — revert a recent update using pacman cache
 - [ ] Hook support for notifying a GUI companion like `nogforge`
-- [ ] **`nog` run logging** — write each run to a CSV log (`nog-logs/YYYYMMDD nog-update.log`) mirroring the update-table columns; keep 3 months of history (planned v1.0.8).
+
+### v1.0.8 — Released
+- [x] **CSV run logging** — every `nog update` run appends to a per-day CSV log (`YYYYMMDD nog-update.log` under `[paths] run_logs`, default `~/.local/share/nog/logs`) mirroring the update-table columns (bucket / package / old / new / tier / note) plus the banner context (date / time / user) and the run's **outcome** (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`). Retention: logs older than 90 days pruned after each write. Logging soft-fails with a warning — it never blocks an update. New pure `runlog` module with unit tests; 35 → 42.
 
 ### v1.0.7 — Released
 - [x] **Reformatted `nog update` output** — a banner header (name / Date / Time / User), **per-source counts** (official via pacman + AUR via the helper), and the Ready / Held / Unknown buckets rendered as aligned **tables** (`Package (N) | Old Version | New Version | Tier | Note`; empty sections show `(none)`). Tier is a bare per-tier-colored digit; terminal width is intentionally ignored so long version strings just widen the columns. New pre-handoff **`Proceed? [Y/n]`** review gate (yay/pacman still confirms after — two deliberate layers). New pure `format_table()` with unit tests; 33 → 35.
@@ -535,6 +571,20 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.8 — July 29, 2026
+**CSV run logging — nog remembers every update run**
+
+The follow-through on v1.0.7's closing hint: every `nog update` now writes a history record you can grep, sort, or open in a spreadsheet.
+
+- 🗒 **Per-day CSV log** — `YYYYMMDD nog-update.log` under `[paths] run_logs` (default `~/.local/share/nog/logs`; leading `~/` expands against `$HOME`). One header line per file; runs on the same day append.
+- 🪞 **Faithful mirror** — one row per package with the exact table columns the report showed (`bucket, package, old_version, new_version, tier, note`), snapshotted after the realign and lib32-coupling passes, plus the banner context (`date, time, user`) on every line so files stay self-describing under `cat`/`grep`.
+- 🏁 **Outcome column** — how the run ended: `installed`, `cancelled` (the Proceed gate), `all held`, `up to date` (logged as a marker line, so no-op runs still count), or `handoff failed (status N)`. The log answers "did I actually install that day?" — not just "what did nog show me?"
+- 🧹 **3-month retention** — files dated older than 90 days are pruned after each successful write, cutoff computed via the system `date` (still no datetime crate).
+- 🛟 **Soft-fail discipline** — unwritable directory, missing `date`, failed prune: all warn and continue. Logging never blocks or aborts an update.
+- ⚙️ **New config key** — `[paths] run_logs`, optional; existing `nog.conf` files keep working via a serde default. nog runs unprivileged, so the log lives in user space — `/var/log` was never an option.
+
+Internals: new pure `runlog` module (RFC-4180 escaping, rendering, retention decision) mirroring the `format_table()` philosophy — pure core, thin soft-failing IO wrappers. Unit tests 35 → 42; warnings unchanged at 7. Also refreshed the README's `Example: nog update` block, which had missed the v1.0.7 reformat.
 
 ### v1.0.7 — July 18, 2026
 **`nog update` output, reformatted**
