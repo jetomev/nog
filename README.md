@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.8](https://img.shields.io/badge/Version-1.0.8-purple.svg)
+![Version: 1.0.9](https://img.shields.io/badge/Version-1.0.9-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 ---
@@ -41,7 +41,9 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🗒 **CSV run logs** — every `nog update` run is appended to a per-day CSV log (`YYYYMMDD nog-update.csv`) mirroring the report tables plus the run's outcome; 3-month retention, pruned automatically
 - 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified, date-evaluated (via the helper's cached metadata), and bucketed alongside official repo packages; transactions are handed off to the helper for combined `-Syu`
 - ❓ **Interactive Unknown handling** — packages with no resolvable build date (locally-built, disabled-repo, or AUR query failure) are prompted case-by-case
-- 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman` and `sudo tee /etc/nog/tier-pins.toml`. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
+- 🛡 **Foreign fence (v1.0.9)** — the upgrade handoff can only touch AUR/local packages nog explicitly cleared **this run**; a failed or empty AUR query can never silently release a hold. Born from the August 2026 AUR supply-chain attacks, when exactly that bypass happened live.
+- 🔌 **Source kill switches (v1.0.9)** — `nog deactivate aur` / `nog deactivate chaotic-aur` sever a supply chain in one command during an incident; `nog activate <source>` restores it (byte-exact for pacman.conf, timestamped backups first). State persists in `/etc/nog/sources.toml`.
+- 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman`, `sudo tee` for its own config files, and `sudo cp` for pacman.conf backups. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
 - ⚡ **Tier 3 fast track** — everything else flows through pacman on a short hold
 - 🎨 **Color-coded search** — every `nog search` result tagged with its tier
 - 📌 **Persistent tier pinning** — `nog pin <pkg> --tier=<N>` writes to `/etc/nog/tier-pins.toml`
@@ -157,6 +159,12 @@ nog pin <package> --tier=<1|2|3>
 
 # Force-upgrade a held Tier 1 package
 nog unlock <package> --promote
+
+# Source kill switches (incident response): sever a supply chain in one command
+nog deactivate aur           # every AUR path refuses until reactivated
+nog deactivate chaotic-aur   # repo commented out of pacman.conf (backup first)
+nog activate aur             # restore — configured helper resumes
+nog activate chaotic-aur     # restore — byte-exact, then DB refresh
 
 # Remove a package
 nog remove <package>
@@ -295,6 +303,20 @@ tier3_days = 7
 helper = "auto"
 ```
 
+### `sources.toml` (v1.0.9)
+
+`/etc/nog/sources.toml` holds the source kill-switch state — managed by `nog activate` / `nog deactivate`, never hand-edited (though nothing breaks if you do):
+
+```toml
+# Managed by `nog activate <source>` / `nog deactivate <source>`.
+# A missing file or missing key means the source is ACTIVE.
+[sources]
+aur = true
+"chaotic-aur" = true
+```
+
+A missing file means everything is active (installs older than v1.0.9 are unaffected). An **unreadable** file fails **closed**: every source is treated as deactivated, with a loud warning — a corrupted kill switch must never silently re-open a supply chain. Running any `nog activate`/`deactivate` rewrites the file cleanly.
+
 ### `tier-pins.toml`
 
 The tier assignment file — who goes in Tier 1, Tier 2, or Tier 3. Anything not listed here falls into Tier 3 by default. As of v0.8.0, the obsolete `hold_days` field has been removed — hold durations are owned by `nog.conf`'s `[holds]` section (single source of truth).
@@ -410,15 +432,19 @@ All of these are world-readable on a standard Arch install, so nog reads them as
 
 ### Files nog writes (elevated)
 
-Exactly one file is ever written by nog itself:
+Three files, each with a single well-defined writer:
 
-- `/etc/nog/tier-pins.toml` — written via `sudo tee` during `nog pin`. No other persistent file is created or modified by nog.
+- `/etc/nog/tier-pins.toml` — written via `sudo tee` during `nog pin`.
+- `/etc/nog/sources.toml` — written via `sudo tee` during `nog activate` / `nog deactivate` (v1.0.9 kill-switch state).
+- `/etc/pacman.conf` — written **only** by `nog activate/deactivate chaotic-aur` (v1.0.9): the `[chaotic-aur]` section is commented in/out with a `#nog# ` marker, always preceded by a timestamped `sudo cp` backup (`pacman.conf.nog-bak-<stamp>`), and the restore is byte-exact. No other command touches it.
+
+No other persistent file is created or modified by nog.
 
 ### What nog does NOT touch
 
 The entire rest of your system is out of scope:
 
-- `/etc/pacman.conf` — never modified
+- `/etc/pacman.conf` outside the `[chaotic-aur]` section toggle above — never modified; every other byte of the file survives untouched (unit-tested)
 - `/etc/pacman.d/**` (mirrorlists, etc.) — never modified
 - `/var/lib/pacman/local/**` — pacman's own installed-package state; nog never touches it
 - `/var/lib/pacman/sync/**` — read-only access for date lookups
@@ -442,7 +468,7 @@ nog never invokes `sudo yay` or `sudo paru`. That is a deliberate refusal — bo
 
 ### In one paragraph
 
-nog runs as your user. It escalates exactly twice: `sudo pacman` for package transactions, and `sudo tee /etc/nog/tier-pins.toml` for the one file it ever writes. It never modifies any other file on your system, never bypasses pacman's signature verification, and never runs as root itself. If a helper is configured, transactions are handed off to `yay` or `paru` as your user, and those helpers escalate themselves.
+nog runs as your user. It escalates for exactly three purposes: `sudo pacman` for package transactions, `sudo tee` for its own two config files (`tier-pins.toml`, `sources.toml`), and — only during a `chaotic-aur` toggle — `sudo cp` for a pacman.conf backup followed by `sudo tee` for the marker-commented rewrite of that one section. It never modifies any other file on your system, never bypasses pacman's signature verification, and never runs as root itself. If a helper is configured, transactions are handed off to `yay` or `paru` as your user, and those helpers escalate themselves.
 
 ---
 
@@ -499,6 +525,10 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 
 ---
 
+### `nog: warning — /etc/nog/sources.toml is unreadable`
+
+The kill-switch state file failed to parse (usually a hand-edit). nog fails **closed** — every source is treated as deactivated until the file is rewritten — so `nog update` will skip the AUR and warn. Fix: run `nog activate aur` (and/or `nog activate chaotic-aur`); each command rewrites the file in its canonical form.
+
 ## Roadmap
 
 ### Future
@@ -510,6 +540,17 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 - [ ] `nog status` — dashboard showing what's held, what's ready, what's overdue
 - [ ] `nog rollback` — revert a recent update using pacman cache
 - [ ] Hook support for notifying a GUI companion like `nogforge`
+
+### v1.0.9 — Released ("Ironhold" security cycle)
+
+Built during the July–August 2026 AUR supply-chain attacks (malicious orphan adoptions, `-bin` typosquats with sudo-time malware; the AUR froze all pushes on Aug 2), as Phase A of the cross-project [Operation Ironhold](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md). Every item was field-verified live on the reference machine the day it was built.
+
+- [x] **The foreign fence ([#2](https://github.com/jetomev/nog/issues/2))** — fixes a fail-open hole caught by nog's own CSV run logs: on 2026-08-01, with the AUR mid-lockdown, `yay -Qua` returned empty, two held AUR packages vanished from the report, and the handoff's own resolution upgraded them anyway. Now every installed foreign package is ignored at handoff unless nog explicitly cleared it **this run** (Ready, or a user-approved Unknown) — "couldn't check" and "all quiet" are treated identically, and holds survive an AUR blackout. The bypass is reproduced as a unit test.
+- [x] **AUR kill switch ([#3](https://github.com/jetomev/nog/issues/3))** — `nog deactivate aur` / `nog activate aur`: persisted in the new nog-owned `/etc/nog/sources.toml`, gated upstream of helper detection (helper-agnostic), turns off every AUR-aware path at once; the handoff runs pacman-only. `nog.conf` is never rewritten — the configured helper resumes exactly on activation. Unreadable state fails closed.
+- [x] **chaotic-aur kill switch ([#4](https://github.com/jetomev/nog/issues/4))** — `nog deactivate chaotic-aur` / `activate chaotic-aur`: nog comments the `[chaotic-aur]` section in/out of `/etc/pacman.conf` itself (`#nog# ` marker; timestamped backup first; user comments inside the section survive; restore is byte-exact — proven by unit test *and* a live `diff` against the pre-toggle backup), then refreshes the sync DBs. The repo definition is the gate: nothing on the system can resolve from a deactivated chaotic-aur, and installed chaotic packages sit frozen.
+- [x] **Held table sorted by days remaining ([#6](https://github.com/jetomev/nog/issues/6))** — soonest-to-release first, ties alphabetical; the table now reads as a release calendar and visualizes the tier gradient (1-day Tier 3 movers on top, 23-day Tier 1 kernels at the bottom). The CSV run log mirrors the same order.
+- [x] **Test surface** — 42 → 54 (three fence tests incl. the Aug-1 replay, four `sources` state tests, five pacman.conf toggle tests incl. the byte-exact roundtrip).
+- [x] ⚠️ *AUR note: released during the AUR push freeze — the AUR package updates to 1.0.9 the moment Arch reopens pushes; until then, install from source (`cargo build --release`).*
 
 ### v1.0.8 — Released
 - [x] **CSV run logging** — every `nog update` run appends to a per-day CSV log (`YYYYMMDD nog-update.csv` under `[paths] run_logs`, default `~/.local/share/nog/logs`) mirroring the update-table columns (bucket / package / old / new / tier / note) plus the banner context (date / time / user) and the run's **outcome** (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`). Retention: logs older than 90 days pruned after each write. Logging soft-fails with a warning — it never blocks an update. New pure `runlog` module with unit tests; 35 → 42.
@@ -574,6 +615,19 @@ Expected. v1.0.3 re-tiers `linux-headers`, `linux-zen-headers`, `linux-lts-heade
 ---
 
 ## Changelog
+
+### v1.0.9 — August 5, 2026
+**The "Ironhold" security cycle — holds that fail closed, and supply chains you can sever in one command**
+
+Built live during the July–August 2026 AUR supply-chain attacks, as Phase A of [Operation Ironhold](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md). The trigger was nog's own CSV run log catching a real bypass on this machine: on Aug 1, with the AUR mid-lockdown, the AUR query silently returned empty, two packages that had been *held with 5 days remaining the night before* vanished from the report — and the handoff upgraded them anyway. (Both proved clean. The hole didn't.)
+
+- 🛡 **The foreign fence ([#2](https://github.com/jetomev/nog/issues/2))** — the handoff's `--ignore` list now always includes **every** installed foreign package except the ones nog explicitly cleared this run (Ready, or a user-approved Unknown). "Couldn't check the AUR" and "no AUR updates" are treated identically — the fence stands either way, so a hold can never again evaporate because a query failed. Healthy runs behave exactly as before (ignoring an up-to-date package is a no-op). The Aug-1 bypass is now a unit test.
+- 🔌 **`nog deactivate aur` / `nog activate aur` ([#3](https://github.com/jetomev/nog/issues/3))** — the AUR kill switch. One command turns off every AUR-aware path — update detection, install routing, handoff (pacman-only) — for incident response during an active attack. State persists in the new nog-owned `/etc/nog/sources.toml` (written via `sudo tee`, tier-pins style); your `nog.conf` helper setting is never touched and resumes exactly on activation. An unreadable state file fails **closed**.
+- 🔌 **`nog deactivate chaotic-aur` / `activate chaotic-aur` ([#4](https://github.com/jetomev/nog/issues/4))** — the binary-repo kill switch. nog comments the `[chaotic-aur]` section in/out of `/etc/pacman.conf` itself: timestamped backup first, `#nog# ` marker so activation restores exactly and only what nog disabled (your comments inside the section survive), DB refresh after. With the section out, *nothing* on the system — pacman, helpers, libalpm GUIs — can resolve from the repo; installed chaotic packages sit frozen. Restore verified byte-exact live (`diff` against the pre-toggle backup: identical).
+- 📅 **Held table sorted by days remaining ([#6](https://github.com/jetomev/nog/issues/6))** — soonest-to-release on top, Tier 1 heavyweights at the bottom: the hold list now reads as a release calendar, and — a happy accident — visualizes the tier gradient itself. The CSV log mirrors the order.
+- ⚠️ **Released during the AUR push freeze** — the AUR package updates to 1.0.9 the moment Arch reopens pushes ([context](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md)); until then: `git clone https://github.com/jetomev/nog.git && cd nog && cargo build --release`.
+
+Internals: new pure `sources` module (state parse/render + the pacman.conf section toggler) and `holds::foreign_fence()` + `pacman::foreign_package_names()`. Every feature was field-verified on the reference machine the day it was built — including one full 176-update run with the fence live and both kill-switch round trips. Unit tests 42 → 54; warnings unchanged at 7.
 
 ### v1.0.8 — July 29, 2026
 **CSV run logging — nog remembers every update run**

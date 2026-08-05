@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "July 2026" "nog v1.0.8" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.0.9" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -173,6 +173,36 @@ force-upgrade the package immediately via
 .BR pacman (8)
 or the configured helper, bypassing the hold window and any sign-off policy.
 This is the escape hatch for a held Tier 1 package.
+.TP
+.B nog deactivate \fIsource\fR
+Source kill switch (v1.0.9). Valid sources:
+.B aur
+and
+.BR chaotic-aur .
+Deactivating
+.B aur
+persists a flag in
+.I /etc/nog/sources.toml
+and turns off every AUR-aware path at once — update detection, install
+routing, and the upgrade handoff (which then runs through
+.BR pacman (8)
+only, so foreign packages cannot move). The configured helper in
+.I nog.conf
+is left untouched and resumes on activation. Deactivating
+.B chaotic-aur
+comments the \fB[chaotic-aur]\fR section out of
+.I /etc/pacman.conf
+(timestamped backup first, marker \fB#nog#\fR), then refreshes the sync
+databases: no tool on the system can resolve from the repository until it is
+reactivated, and installed chaotic packages stay installed but frozen.
+Intended for incident response — e.g. an active AUR supply-chain attack.
+.TP
+.B nog activate \fIsource\fR
+Reverse of
+.BR "nog deactivate" .
+Restores the AUR paths, or uncomments exactly the pacman.conf lines nog
+disabled (hand-written comments survive byte-for-byte) and refreshes the
+databases.
 .
 .SH OPTIONS
 .TP
@@ -204,8 +234,22 @@ controls whether Tier 1 auto-releases (default) or stays wholesale held
 Pacman sync databases. Read-only by nog, for build-date lookup during
 .BR "nog update" .
 .TP
+.I /etc/nog/sources.toml
+Source kill-switch state, managed by
+.B nog activate
+/
+.BR "nog deactivate" ;
+written via
+.BR "sudo tee" .
+A missing file or missing key means the source is active. An unreadable file
+fails CLOSED — every source is treated as deactivated until the file is
+rewritten by an activate/deactivate command.
+.TP
 .I /etc/pacman.conf
-Read-only. nog parses it for enabled repositories and their priority order.
+Parsed for enabled repositories. Written only by
+.B nog activate/deactivate chaotic-aur
+(section toggle with a \fB#nog#\fR marker), always preceded by a timestamped
+backup (\fIpacman.conf.nog-bak-<stamp>\fR).
 .TP
 .I ~/.local/share/nog/logs/
 Per-run CSV update logs (\fBYYYYMMDD nog-update.csv\fR), one row per pending
