@@ -10,6 +10,8 @@
 ![Version: 1.0.9](https://img.shields.io/badge/Version-1.0.9-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
+> ⚠️ **AUR freeze notice (Aug 2026):** the AUR is not accepting package pushes during the [supply-chain-attack lockdown](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md), so the AUR package lags at the badge's version until pushes reopen. **v1.0.9 is available now from source** (see [Installation](#installation)); the AUR update is staged and ships the day the freeze lifts.
+
 ---
 
 ## Why nog?
