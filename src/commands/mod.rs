@@ -129,21 +129,22 @@ pub fn activate(source: &str) {
 }
 
 /// Shared body of `nog activate/deactivate <source>`. Validates the source
-/// name, flips the persisted flag in /etc/nog/sources.toml (written via
-/// `sudo tee` — nog itself stays unprivileged), and explains the consequences.
+/// name and dispatches: "aur" flips the persisted flag in
+/// /etc/nog/sources.toml; "chaotic-aur" additionally performs the
+/// pacman.conf section toggle (backup first). Everything root-owned is
+/// written via `sudo tee`/`sudo cp` — nog itself stays unprivileged.
 fn set_source(source: &str, enable: bool) {
     match source {
-        "aur" => {}
-        "chaotic-aur" => {
-            eprintln!("nog: chaotic-aur toggling arrives later in the v1.0.9 cycle (issue #4).");
-            std::process::exit(1);
-        }
+        "aur" => set_aur(enable),
+        "chaotic-aur" => set_chaotic(enable),
         other => {
             eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur", other);
             std::process::exit(1);
         }
     }
+}
 
+fn set_aur(enable: bool) {
     let mut state = sources::load(sources::DEFAULT_PATH);
     if state.aur == enable {
         println!(
@@ -171,6 +172,100 @@ fn set_source(source: &str, enable: bool) {
         println!("       will not resolve until reactivated.");
         println!("     Re-enable with: nog activate aur");
     }
+}
+
+/// v1.0.9 (A3): toggle the [chaotic-aur] section of pacman.conf. The repo
+/// definition IS the gate — once commented out, no tool on the system
+/// (pacman, helpers, libalpm GUIs) can resolve from chaotic-aur. Installed
+/// chaotic packages stay installed but sit frozen: no repo, no updates.
+fn set_chaotic(enable: bool) {
+    let cfg = load_config();
+    let conf_path = &cfg.paths.pacman_conf;
+    let text = match std::fs::read_to_string(conf_path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("nog: could not read {}: {}", conf_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    match sources::toggle_repo_section(&text, "chaotic-aur", enable) {
+        sources::RepoToggle::NotFound => {
+            eprintln!("nog: no [chaotic-aur] section found in {} (neither active nor nog-disabled).", conf_path);
+            if enable {
+                eprintln!("     Nothing to restore — if you want chaotic-aur, add the repo per its docs first.");
+            }
+            std::process::exit(1);
+        }
+        sources::RepoToggle::AlreadyInState => {
+            println!(
+                "nog: chaotic-aur is already {}.",
+                if enable { "active" } else { "deactivated" }
+            );
+        }
+        sources::RepoToggle::Changed(new_text) => {
+            // 1. Timestamped backup of pacman.conf before we touch it.
+            let stamp = timestamp_for_backup();
+            let backup = format!("{}.nog-bak-{}", conf_path, stamp);
+            let cp = std::process::Command::new("sudo")
+                .args(["cp", "--preserve=all", conf_path, &backup])
+                .status();
+            match cp {
+                Ok(s) if s.success() => {}
+                _ => {
+                    eprintln!("nog: could not back up {} — aborting without changes.", conf_path);
+                    std::process::exit(1);
+                }
+            }
+
+            // 2. Write the toggled pacman.conf.
+            if let Err(e) = crate::tiers::write_as_root(conf_path, &new_text) {
+                eprintln!("nog: could not write {}: {}", conf_path, e);
+                eprintln!("     your original is safe at {}", backup);
+                std::process::exit(1);
+            }
+
+            // 3. Mirror the state in sources.toml (informational — pacman.conf
+            //    is the enforcing artifact for this source).
+            let mut state = sources::load(sources::DEFAULT_PATH);
+            state.chaotic_aur = enable;
+            if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
+                eprintln!("nog: warning — pacman.conf updated but sources.toml not saved: {}", e);
+            }
+
+            if enable {
+                println!("nog: chaotic-aur ACTIVATED.");
+                println!("     • [chaotic-aur] restored in {} (backup: {})", conf_path, backup);
+            } else {
+                println!("nog: chaotic-aur DEACTIVATED.");
+                println!("     • [chaotic-aur] commented out in {} (backup: {})", conf_path, backup);
+                println!("     • installed chaotic packages stay installed but frozen — no repo, no updates.");
+                println!("     Re-enable with: nog activate chaotic-aur");
+            }
+
+            // 4. Refresh the sync DBs so the change takes effect immediately.
+            println!();
+            println!("nog: refreshing package databases ...");
+            let status = pacman::run(&["-Sy"]);
+            if !status.success() {
+                eprintln!("nog: warning — database refresh failed; run `sudo pacman -Sy` manually.");
+            }
+        }
+    }
+}
+
+/// Timestamp for backup filenames via the system `date` (the runlog
+/// precedent — no chrono dependency). Falls back to a constant suffix if
+/// `date` is unavailable; a stable-named backup beats no backup.
+fn timestamp_for_backup() -> String {
+    std::process::Command::new("date")
+        .arg("+%Y%m%d-%H%M%S")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "undated".to_string())
 }
 
 /// Why this package landed in the Ready bucket. Distinguishes the normal
