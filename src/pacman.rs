@@ -111,6 +111,33 @@ pub fn update_excluding(excluded: &[String]) -> ExitStatus {
     run(&["-Syu", "--ignore", &ignore_list])
 }
 
+/// List installed foreign packages (`pacman -Qmq`) — everything that did not
+/// come from a sync repo, i.e. AUR builds and local installs. Feeds the
+/// v1.0.9 foreign fence: the update handoff may only touch foreign packages
+/// nog explicitly cleared this run, so a failed AUR query can never silently
+/// release a hold.
+///
+/// A failure here would weaken that fence, so it is loud: the caller receives
+/// an empty list only after a warning has been printed. (`pacman -Qmq` is a
+/// purely local query; failure is practically limited to pacman itself being
+/// broken.)
+pub fn foreign_package_names() -> Vec<String> {
+    let output = match Command::new("pacman").arg("-Qmq").output() {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("nog: warning — could not list foreign packages (pacman -Qmq): {}", e);
+            eprintln!("     the foreign fence is DOWN for this run.");
+            return Vec::new();
+        }
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 pub fn search(query: &str) -> ExitStatus {
     run(&["-Ss", query])
 }

@@ -170,7 +170,8 @@ pub fn update(realign: bool) {
             }
             Err(e) => {
                 eprintln!("nog: warning — could not query AUR updates from {}: {}", h, e);
-                eprintln!("     proceeding with official repo updates only.");
+                eprintln!("     proceeding with official repo updates only; the foreign fence");
+                eprintln!("     will shield ALL foreign packages from this run's handoff.");
             }
         }
     }
@@ -422,6 +423,33 @@ pub fn update(realign: bool) {
         println!("nog: Nothing to install — every pending update is held.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "all held");
         return;
+    }
+
+    // v1.0.9 (Ironhold): the foreign fence. The helper's -Syu resolves AUR
+    // updates on its own at handoff time, so it can upgrade a held AUR package
+    // whenever our earlier query failed to name it — the 2026-08-01 bypass.
+    // Fence rule: every foreign package is ignored unless nog cleared it THIS
+    // run (Ready, or an Unknown the user answered yes to). See holds::foreign_fence.
+    if helper.is_some() {
+        let mut cleared: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+        cleared.extend(
+            unknown.iter()
+                .map(|(u, _)| u.name.clone())
+                .filter(|n| !ignore.contains(n)),
+        );
+        let fence = holds::foreign_fence(&pacman::foreign_package_names(), &cleared, &ignore);
+        if !fence.is_empty() {
+            println!();
+            println!(
+                "{}nog: foreign fence — {} AUR/local package(s) shielded from the handoff{}",
+                C_SUBTEXT, fence.len(), C_RESET
+            );
+            println!(
+                "{}     (only AUR updates cleared by nog can install, even if the AUR query failed).{}",
+                C_SUBTEXT, C_RESET
+            );
+            ignore.extend(fence);
+        }
     }
 
     // First review gate. yay/pacman will present its own transaction detail and

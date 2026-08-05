@@ -133,6 +133,39 @@ pub fn lib32_coupling_demotions(ready: &[String], held: &[String]) -> Vec<(Strin
     demotions
 }
 
+/// v1.0.9 (Operation Ironhold, finding 2026-08-04): the foreign fence.
+///
+/// The update handoff (`yay -Syu --ignore <list>`) can only respect holds on
+/// packages the ignore list *names*. When the AUR update query fails or comes
+/// back empty — precisely what happened during the August 2026 AUR lockdown —
+/// held AUR packages vanish from the report, never make the list, and the
+/// helper's own resolution upgrades them anyway: the hold fails OPEN.
+///
+/// The fence closes that door structurally instead of trying to distinguish
+/// "no updates" from "couldn't check": every installed foreign package is
+/// ignored by default, and only the AUR packages nog explicitly cleared this
+/// run (Ready, or a user-approved Unknown) are let through. When everything is
+/// healthy the extra ignores are no-ops — a package with no pending update is
+/// unaffected by `--ignore`. When the AUR is dark, every foreign package stays
+/// exactly where it is.
+///
+/// Returns the fence additions: foreign names that are neither cleared nor
+/// already on the ignore list.
+pub fn foreign_fence(
+    foreign: &[String],
+    cleared: &[String],
+    already_ignored: &[String],
+) -> Vec<String> {
+    let cleared_set: HashSet<&str> = cleared.iter().map(String::as_str).collect();
+    let ignored_set: HashSet<&str> = already_ignored.iter().map(String::as_str).collect();
+    foreign
+        .iter()
+        .filter(|name| !cleared_set.contains(name.as_str()))
+        .filter(|name| !ignored_set.contains(name.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// The shared date math: elapsed days since `build_ts` (rounded up) compared
 /// against the tier's hold window.
 fn evaluate_ts(build_ts: u64, tier: Tier, holds: &HoldsConfig, now: SystemTime) -> HoldStatus {
@@ -415,5 +448,42 @@ mod tests {
         let ready = owned(&["firefox"]);
         let held = owned(&["nvidia-utils"]);
         assert!(lib32_coupling_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn fence_replays_the_august_first_bypass() {
+        // 2026-08-01: the AUR was mid-lockdown, `yay -Qua` came back empty, and
+        // sparrow-wallet + fresh-editor-bin — held with 5 days remaining the
+        // night before — vanished from the report and were upgraded by the
+        // handoff anyway. With the fence, an empty detection clears nothing, so
+        // every foreign package lands on the ignore list.
+        let foreign = owned(&["sparrow-wallet", "fresh-editor-bin", "nog", "yay-bin"]);
+        let cleared: Vec<String> = Vec::new(); // detection saw nothing
+        let ignored: Vec<String> = Vec::new(); // so nothing was held either
+        let fence = foreign_fence(&foreign, &cleared, &ignored);
+        assert_eq!(fence, foreign);
+    }
+
+    #[test]
+    fn fence_lets_cleared_aur_packages_through() {
+        // A healthy run: detection saw sparrow-wallet, its hold expired, nog
+        // marked it Ready. The fence must not re-ignore it — only the foreign
+        // packages nog did NOT clear stay fenced.
+        let foreign = owned(&["sparrow-wallet", "fresh-editor-bin", "nog"]);
+        let cleared = owned(&["sparrow-wallet"]);
+        let ignored: Vec<String> = Vec::new();
+        let fence = foreign_fence(&foreign, &cleared, &ignored);
+        assert_eq!(fence, owned(&["fresh-editor-bin", "nog"]));
+    }
+
+    #[test]
+    fn fence_skips_names_already_on_the_ignore_list() {
+        // A held AUR package is already ignored by the normal hold path; the
+        // fence adds only what is missing, so the final list stays duplicate-free.
+        let foreign = owned(&["sparrow-wallet", "fresh-editor-bin"]);
+        let cleared: Vec<String> = Vec::new();
+        let ignored = owned(&["sparrow-wallet"]);
+        let fence = foreign_fence(&foreign, &cleared, &ignored);
+        assert_eq!(fence, owned(&["fresh-editor-bin"]));
     }
 }
