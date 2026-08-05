@@ -537,6 +537,12 @@ pub fn update(realign: bool) {
         }
     }
 
+    // v1.0.9 (A4, issue #6): Held reads soonest-to-release first. Ties break
+    // alphabetically so the order is stable run-to-run. ManualSignoff rows
+    // carry the placeholder 0 and surface at the top — they need the user's
+    // attention anyway. The CSV snapshot below mirrors this order.
+    held.sort_by(|(a, _, ar, _), (b, _, br, _)| ar.cmp(br).then_with(|| a.name.cmp(&b.name)));
+
     print_buckets(&ready, &held, &unknown);
 
     // v1.0.8: snapshot the final buckets for the run log. Taken after the
