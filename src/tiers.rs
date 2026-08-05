@@ -311,7 +311,7 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
 /// atomic in practice. A crash during the write would corrupt the file, but
 /// the same was true of the previous `fs::write` path, so we're not
 /// regressing.
-fn write_as_root(path: &str, contents: &str) -> Result<(), String> {
+pub(crate) fn write_as_root(path: &str, contents: &str) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 

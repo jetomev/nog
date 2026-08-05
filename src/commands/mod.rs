@@ -4,6 +4,7 @@ use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
 use crate::runlog;
+use crate::sources;
 use crate::sync_db;
 
 // Catppuccin Mocha palette — true-color ANSI. Centralized so every tier-colored
@@ -29,6 +30,18 @@ fn tier_color(tier: &Tier) -> &'static str {
 /// errors (invalid config value, explicit helper missing) exit the process so
 /// every caller gets the same failure semantics.
 fn resolve_helper(cfg: &NogConfig) -> Option<Helper> {
+    // v1.0.9 (Ironhold): the source kill switch outranks the configured
+    // helper. While the AUR is deactivated, every AUR-aware path behaves as
+    // if no helper were installed — detection, install routing, and the
+    // upgrade handoff (which then runs through pacman, so foreign packages
+    // are structurally untouchable).
+    if !sources::load(sources::DEFAULT_PATH).aur {
+        println!(
+            "{}nog: AUR is DEACTIVATED (kill switch) — official repos only. `nog activate aur` re-enables.{}",
+            C_SUBTEXT, C_RESET
+        );
+        return None;
+    }
     match aur::detect_helper(&cfg.aur.helper) {
         Ok(opt) => opt,
         Err(e) => {
@@ -104,6 +117,59 @@ pub fn remove(packages: &[String]) {
     if !status.success() {
         eprintln!("nog: pacman exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+pub fn deactivate(source: &str) {
+    set_source(source, false);
+}
+
+pub fn activate(source: &str) {
+    set_source(source, true);
+}
+
+/// Shared body of `nog activate/deactivate <source>`. Validates the source
+/// name, flips the persisted flag in /etc/nog/sources.toml (written via
+/// `sudo tee` — nog itself stays unprivileged), and explains the consequences.
+fn set_source(source: &str, enable: bool) {
+    match source {
+        "aur" => {}
+        "chaotic-aur" => {
+            eprintln!("nog: chaotic-aur toggling arrives later in the v1.0.9 cycle (issue #4).");
+            std::process::exit(1);
+        }
+        other => {
+            eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur", other);
+            std::process::exit(1);
+        }
+    }
+
+    let mut state = sources::load(sources::DEFAULT_PATH);
+    if state.aur == enable {
+        println!(
+            "nog: AUR is already {}.",
+            if enable { "active" } else { "deactivated" }
+        );
+        return;
+    }
+    state.aur = enable;
+
+    if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
+        eprintln!("nog: could not save source state: {}", e);
+        std::process::exit(1);
+    }
+
+    if enable {
+        let cfg = load_config();
+        println!("nog: AUR ACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        println!("     Helper setting '{}' (nog.conf) is back in service.", cfg.aur.helper);
+    } else {
+        println!("nog: AUR DEACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        println!("     • `nog update` will not query or install AUR updates;");
+        println!("       the handoff runs through pacman, so foreign packages cannot move.");
+        println!("     • `nog install` routes through pacman only — AUR-only packages");
+        println!("       will not resolve until reactivated.");
+        println!("     Re-enable with: nog activate aur");
     }
 }
 

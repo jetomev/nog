@@ -4,6 +4,7 @@ mod config;
 mod holds;
 mod pacman;
 mod runlog;
+mod sources;
 mod sync_db;
 mod tiers;
 
@@ -88,6 +89,21 @@ enum Commands {
         #[arg(long)]
         promote: bool,
     },
+    /// Deactivate a package source (kill switch; persists to /etc/nog/sources.toml)
+    ///
+    /// `nog deactivate aur` — every AUR-aware path refuses until reactivated:
+    /// update detection skips the AUR, installs route through pacman only, and
+    /// the upgrade handoff runs via pacman (foreign packages stay fenced).
+    /// Intended for incident response — e.g. an active AUR supply-chain attack.
+    Deactivate {
+        /// Source to deactivate: "aur" or "chaotic-aur"
+        source: String,
+    },
+    /// Reactivate a package source previously disabled with `nog deactivate`
+    Activate {
+        /// Source to activate: "aur" or "chaotic-aur"
+        source: String,
+    },
     /// Internal: dump the build date for a package from the sync DB
     #[command(name = "_debug-dates", hide = true)]
     DebugDates {
@@ -109,6 +125,8 @@ fn main() {
         Commands::Search { query } => commands::search(&query),
         Commands::Pin { package, tier } => commands::pin(&package, tier),
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
+        Commands::Deactivate { source } => commands::deactivate(&source),
+        Commands::Activate { source } => commands::activate(&source),
         Commands::DebugDates { package } => debug_dates(&package),
         Commands::DebugHold { package } => debug_hold(&package),
     }
