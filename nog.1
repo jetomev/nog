@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.1.0" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.2.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -175,11 +175,13 @@ or the configured helper, bypassing the hold window and any sign-off policy.
 This is the escape hatch for a held Tier 1 package.
 .TP
 .B nog deactivate \fIsource\fR
-Source kill switch (v1.0.9; \fBflatpak\fR added v1.1.0). Valid sources:
+Source kill switch (v1.0.9; \fBflatpak\fR v1.1.0, \fBsnap\fR v1.2.0). Valid
+sources:
 .BR aur ,
 .BR chaotic-aur ,
+.BR flatpak ,
 and
-.BR flatpak .
+.BR snap .
 Deactivating
 .B flatpak
 persists a flag in
@@ -244,6 +246,28 @@ flatpak has no
 option, nog enforces holds by naming: it passes exactly the refs it cleared
 this run and nothing else. A failed remote query is reported and the run
 continues with flatpak untouched \(em never assumed quiet.
+.
+.SH SNAP SUPPORT
+Since v1.2.0
+.B nog update
+also reports and refreshes Snap packages, under the same tier hold windows.
+The hold clock for a snap is the publish date of the pending revision in the
+snap's tracked channel, read from
+.BR "snap info" .
+Rows carry a
+.B "\(bu snap"
+marker in the Note column.
+.PP
+snapd is packaged only in the AUR on Arch, so nog never requires it: without
+the
+.B snap
+binary the source is dormant and silent, never an error. Unlike every other
+nog operation,
+.B "snap refresh"
+requires root \(em nog stays unprivileged and escalates through
+.BR sudo (8)
+for that step alone. Holds are enforced the same way as flatpak: nog names
+exactly the snaps it cleared this run and nothing else.
 .
 .SH FILES
 .TP

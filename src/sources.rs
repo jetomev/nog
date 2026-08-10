@@ -27,11 +27,12 @@ pub struct SourceState {
     pub aur: bool,
     pub chaotic_aur: bool,
     pub flatpak: bool,
+    pub snap: bool,
 }
 
 impl Default for SourceState {
     fn default() -> Self {
-        SourceState { aur: true, chaotic_aur: true, flatpak: true }
+        SourceState { aur: true, chaotic_aur: true, flatpak: true, snap: true }
     }
 }
 
@@ -51,11 +52,13 @@ struct SourcesSection {
     chaotic_aur: bool,
     #[serde(default = "default_true")]
     flatpak: bool,
+    #[serde(default = "default_true")]
+    snap: bool,
 }
 
 impl Default for SourcesSection {
     fn default() -> Self {
-        SourcesSection { aur: true, chaotic_aur: true, flatpak: true }
+        SourcesSection { aur: true, chaotic_aur: true, flatpak: true, snap: true }
     }
 }
 
@@ -68,6 +71,7 @@ pub fn parse(text: &str) -> Result<SourceState, String> {
         aur: parsed.sources.aur,
         chaotic_aur: parsed.sources.chaotic_aur,
         flatpak: parsed.sources.flatpak,
+        snap: parsed.sources.snap,
     })
 }
 
@@ -79,8 +83,9 @@ pub fn render(state: &SourceState) -> String {
          [sources]\n\
          aur = {}\n\
          \"chaotic-aur\" = {}\n\
-         flatpak = {}\n",
-        state.aur, state.chaotic_aur, state.flatpak
+         flatpak = {}\n\
+         snap = {}\n",
+        state.aur, state.chaotic_aur, state.flatpak, state.snap
     )
 }
 
@@ -98,7 +103,7 @@ pub fn load(path: &str) -> SourceState {
             eprintln!("nog: warning — {} is unreadable ({})", path, e);
             eprintln!("     failing CLOSED: treating every source as DEACTIVATED.");
             eprintln!("     `nog activate aur` (etc.) rewrites the file cleanly.");
-            SourceState { aur: false, chaotic_aur: false, flatpak: false }
+            SourceState { aur: false, chaotic_aur: false, flatpak: false, snap: false }
         }
     }
 }
@@ -188,25 +193,27 @@ mod tests {
         assert!(s.aur);
         assert!(s.chaotic_aur);
         assert!(s.flatpak);
+        assert!(s.snap);
         let s = parse("").unwrap();
         assert_eq!(s, SourceState::default());
     }
 
     #[test]
     fn deactivation_roundtrips_through_render() {
-        let state = SourceState { aur: false, chaotic_aur: true, flatpak: true };
+        let state = SourceState { aur: false, chaotic_aur: true, flatpak: true, snap: true };
         let s = parse(&render(&state)).unwrap();
         assert_eq!(s, state);
-        let state = SourceState { aur: true, chaotic_aur: false, flatpak: false };
+        let state = SourceState { aur: true, chaotic_aur: false, flatpak: false, snap: true };
         assert_eq!(parse(&render(&state)).unwrap(), state);
     }
 
     #[test]
     fn explicit_flags_are_read() {
-        let s = parse("[sources]\naur = false\n\"chaotic-aur\" = false\nflatpak = false\n").unwrap();
+        let s = parse("[sources]\naur = false\n\"chaotic-aur\" = false\nflatpak = false\nsnap = false\n").unwrap();
         assert!(!s.aur);
         assert!(!s.chaotic_aur);
         assert!(!s.flatpak);
+        assert!(!s.snap);
     }
 
     const CONF: &str = "\

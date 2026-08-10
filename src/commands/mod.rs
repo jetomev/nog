@@ -5,6 +5,7 @@ use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
 use crate::runlog;
 use crate::flatpak;
+use crate::snap;
 use crate::sources;
 use crate::sync_db;
 
@@ -139,8 +140,9 @@ fn set_source(source: &str, enable: bool) {
         "aur" => set_aur(enable),
         "chaotic-aur" => set_chaotic(enable),
         "flatpak" => set_flatpak(enable),
+        "snap" => set_snap(enable),
         other => {
-            eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur, flatpak", other);
+            eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur, flatpak, snap", other);
             std::process::exit(1);
         }
     }
@@ -207,6 +209,39 @@ fn set_flatpak(enable: bool) {
         println!("     • `nog update` will not query or apply flatpak updates;");
         println!("       installed flatpak apps stay installed but frozen.");
         println!("     Re-enable with: nog activate flatpak");
+    }
+}
+
+/// v1.2.0 (C2): flip the snap flag in sources.toml. Same pure-state shape as
+/// flatpak — snapd itself is never installed, removed, or stopped by nog.
+fn set_snap(enable: bool) {
+    let mut state = sources::load(sources::DEFAULT_PATH);
+    if state.snap == enable {
+        println!(
+            "nog: snap is already {}.",
+            if enable { "active" } else { "deactivated" }
+        );
+        return;
+    }
+    state.snap = enable;
+
+    if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
+        eprintln!("nog: could not save source state: {}", e);
+        std::process::exit(1);
+    }
+
+    if enable {
+        println!("nog: snap ACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        if !snap::is_available() {
+            println!("     Note: snapd is not installed — the source stays dormant");
+            println!("     until it is. snapd lives on the AUR; nog can install it on");
+            println!("     demand (C3), or `yay -S snapd` + `systemctl enable --now snapd.socket`.");
+        }
+    } else {
+        println!("nog: snap DEACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        println!("     • `nog update` will not query or refresh snaps;");
+        println!("       installed snaps stay installed but frozen.");
+        println!("     Re-enable with: nog activate snap");
     }
 }
 
@@ -399,6 +434,31 @@ pub fn update(realign: bool) {
         }
     }
 
+    // v1.2.0 (C2): snap, same pattern as flatpak. snapd is AUR-only on Arch,
+    // so absence is normal and silent — never an error (ruling #4).
+    let snap_active = sources::load(sources::DEFAULT_PATH).snap;
+    let mut snap_names: Vec<String> = Vec::new();
+    let mut snap_dates: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut snap_count = 0usize;
+    let snap_present = snap_active && snap::is_available();
+    if snap_present {
+        match snap::pending_updates() {
+            Ok(sn_list) => {
+                snap_count = sn_list.len();
+                let installed = snap::installed_versions();
+                snap_dates = snap::publish_dates_for(&sn_list);
+                for u in &sn_list {
+                    snap_names.push(u.name.clone());
+                    pending.push(snap::to_pending(u, &installed));
+                }
+            }
+            Err(e) => {
+                eprintln!("nog: warning — could not query snap updates: {}", e);
+                eprintln!("     proceeding without snap; nothing snap will be touched this run.");
+            }
+        }
+    }
+
     // Per-source counts.
     println!();
     println!("nog: {} official repository update(s) reported by pacman.", official_count);
@@ -407,6 +467,9 @@ pub fn update(realign: bool) {
     }
     if flatpak_present {
         println!("nog: {} flatpak update(s) reported by flatpak.", flatpak_count);
+    }
+    if snap_present {
+        println!("nog: {} snap update(s) reported by snapd.", snap_count);
     }
 
     if pending.is_empty() {
@@ -459,6 +522,15 @@ pub fn update(realign: bool) {
     // Apps whose date could not be resolved stay absent → Unknown bucket.
     for (app_id, ts) in &flatpak_dates {
         packages.entry(app_id.clone()).or_insert(sync_db::PackageDesc {
+            builddate: *ts,
+            pkgbase: None,
+            version: None,
+        });
+    }
+
+    // Snap publish dates → the same builddate map.
+    for (name, ts) in &snap_dates {
+        packages.entry(name.clone()).or_insert(sync_db::PackageDesc {
             builddate: *ts,
             pkgbase: None,
             version: None,
@@ -617,7 +689,7 @@ pub fn update(realign: bool) {
     // attention anyway. The CSV snapshot below mirrors this order.
     held.sort_by(|(a, _, ar, _), (b, _, br, _)| ar.cmp(br).then_with(|| a.name.cmp(&b.name)));
 
-    print_buckets(&ready, &held, &unknown, &flatpak_names);
+    print_buckets(&ready, &held, &unknown, &flatpak_names, &snap_names);
 
     // v1.0.8: snapshot the final buckets for the run log. Taken after the
     // realign/coupling passes so the CSV mirrors the printed tables exactly.
@@ -740,6 +812,28 @@ pub fn update(realign: bool) {
                 write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
                     &format!("flatpak apply failed (status {})", code));
                 std::process::exit(fp_status.code().unwrap_or(1));
+            }
+        }
+    }
+
+    // v1.2.0 (C2): snap apply — same naming rule as flatpak. `snap refresh`
+    // needs root, so nog escalates through sudo for this step only.
+    if !snap_names.is_empty() {
+        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+        let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
+        let sn_apply = snap::apply_list(&snap_names, &ready_names, &unknown_names, &ignore);
+        if !sn_apply.is_empty() {
+            println!();
+            println!("{}nog: Handing off {} snap(s) to snapd ...{}", C_BOLD, sn_apply.len(), C_RESET);
+            println!("{}     (snap refresh needs root — sudo may prompt; snap shows its own progress){}",
+                C_SUBTEXT, C_RESET);
+            let sn_status = snap::refresh(&sn_apply);
+            if !sn_status.success() {
+                let code = sn_status.code().unwrap_or(-1);
+                eprintln!("nog: snap refresh exited with status {}", code);
+                write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+                    &format!("snap apply failed (status {})", code));
+                std::process::exit(sn_status.code().unwrap_or(1));
             }
         }
     }
@@ -957,14 +1051,23 @@ fn print_buckets(
     held: &[(PendingUpdate, Tier, u64, HeldReason)],
     unknown: &[(PendingUpdate, Tier)],
     flatpak_names: &[String],
+    snap_names: &[String],
 ) {
     // Ruling #2 of the v2 arc: the user always sees WHERE a package comes
-    // from. Flatpak rows carry the tag in the Note column.
+    // from. Non-pacman rows carry their source in the Note column.
     let tag = |name: &str, note: String| -> String {
-        if flatpak_names.iter().any(|n| n == name) {
-            if note.is_empty() { "flatpak".to_string() }
-            else { format!("{} · flatpak", note) }
-        } else { note }
+        let src = if flatpak_names.iter().any(|n| n == name) {
+            Some("flatpak")
+        } else if snap_names.iter().any(|n| n == name) {
+            Some("snap")
+        } else {
+            None
+        };
+        match src {
+            None => note,
+            Some(s) if note.is_empty() => s.to_string(),
+            Some(s) => format!("{} · {}", note, s),
+        }
     };
     let ready_rows: Vec<TableRow> = ready.iter()
         .map(|(upd, tier, reason)| TableRow::from(upd, tier, tag(&upd.name, ready_note(reason))))
