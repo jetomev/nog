@@ -52,7 +52,12 @@ whole chain works.
 | **C7** | nog v2.0.0 | Crown release: docs sweep, man page, Tier Reference update, announcement |
 
 Open items carried alongside (slot into cycles when natural): #5 tier-ABI-skew
-linchpin heuristic, promote-family gap, first-run wizard.
+linchpin heuristic, promote-family gap, first-run wizard, **#9 reboot
+recommendation** (Javier, 2026-08-10 — after installing kernel / systemd /
+glibc / mesa / nvidia / dkms packages, end the run with
+`IMPORTANT: It is highly recommended to reboot the system!` and say why;
+Tier 1 already *is* most of that list. Found the hard way: an nvidia update
+silently broke every 3D app until reboot).
 
 ## Maintenance — what "cleanup" means per source (C5)
 
