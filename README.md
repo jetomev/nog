@@ -7,12 +7,12 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.0.9](https://img.shields.io/badge/Version-1.0.9-purple.svg)
+![Version: 1.1.0](https://img.shields.io/badge/Version-1.1.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security:** every release is GPG-signed and every commit GitHub-Verified. Read **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** — our response to the 2026 AUR supply-chain attacks, what is current during the AUR freeze, and how to verify us instead of trusting us.
 
-> ⚠️ **AUR freeze notice (Aug 2026):** the AUR is not accepting package pushes during the [supply-chain-attack lockdown](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md), so the AUR package lags at the badge's version until pushes reopen. **v1.0.9 is available now from source** (see [Installation](#installation)); the AUR update is staged and ships the day the freeze lifts.
+> ⚠️ **AUR freeze notice (Aug 2026):** the AUR is not accepting package pushes during the [supply-chain-attack lockdown](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md), so the AUR package lags at the badge's version until pushes reopen. **v1.1.0 is available now from source** (see [Installation](#installation)); the AUR update is staged and ships the day the freeze lifts.
 
 ---
 
@@ -46,6 +46,7 @@ nog was born from a simple frustration: why does Arch give you everything except
 - 🧩 **AUR helper integration** — auto-detects `yay` or `paru`; AUR pending upgrades are classified, date-evaluated (via the helper's cached metadata), and bucketed alongside official repo packages; transactions are handed off to the helper for combined `-Syu`
 - ❓ **Interactive Unknown handling** — packages with no resolvable build date (locally-built, disabled-repo, or AUR query failure) are prompted case-by-case
 - 🛡 **Foreign fence (v1.0.9)** — the upgrade handoff can only touch AUR/local packages nog explicitly cleared **this run**; a failed or empty AUR query can never silently release a hold. Born from the August 2026 AUR supply-chain attacks, when exactly that bypass happened live.
+- 📦 **Flatpak, under the same rules (v1.1.0)** — `nog update` reports and applies Flatpak app updates alongside pacman and AUR, aged through the same tier hold windows (clock = the pending remote commit's publish date). Every row shows its source in the Note column, so you always know where an update comes from. Optional backend: no flatpak binary, no problem — the source is simply dormant. Toggle with `nog activate|deactivate flatpak`.
 - 🔌 **Source kill switches (v1.0.9)** — `nog deactivate aur` / `nog deactivate chaotic-aur` sever a supply chain in one command during an incident; `nog activate <source>` restores it (byte-exact for pacman.conf, timestamped backups first). State persists in `/etc/nog/sources.toml`.
 - 🧑 **No-sudo rule** — run `nog` as your user; it escalates to root only via `sudo pacman`, `sudo tee` for its own config files, and `sudo cp` for pacman.conf backups. See [Privilege model](#privilege-model--what-nog-touches-and-when) below.
 - ⚡ **Tier 3 fast track** — everything else flows through pacman on a short hold
@@ -317,6 +318,7 @@ helper = "auto"
 [sources]
 aur = true
 "chaotic-aur" = true
+flatpak = true
 ```
 
 A missing file means everything is active (installs older than v1.0.9 are unaffected). An **unreadable** file fails **closed**: every source is treated as deactivated, with a loud warning — a corrupted kill switch must never silently re-open a supply chain. Running any `nog activate`/`deactivate` rewrites the file cleanly.
@@ -545,6 +547,22 @@ The kill-switch state file failed to parse (usually a hand-edit). nog fails **cl
 - [ ] `nog rollback` — revert a recent update using pacman cache
 - [ ] Hook support for notifying a GUI companion like `nogforge`
 
+### The v2 arc — multi-source nog ([design](docs/v2-design.md) · [tracking issue #7](https://github.com/jetomev/nog/issues/7))
+- [x] **C1 · v1.1.0 — Flatpak backend** *(below)*
+- [ ] C2 · v1.2.0 — Snap backend (detect-if-present; snapd offered, never demanded)
+- [ ] C3 · v1.3.0 — Install chain: pacman (+chaotic) → AUR → Flatpak → Snap, source always shown before installing
+- [ ] C4 · v1.4.0 — Command surface + `--json`: info, search, remove, reinstall, tier, lock, status, history
+- [ ] C5 — nogForge on forgekit: the visual handler
+- [ ] C6 · v2.0.0 — crown release
+
+### v1.1.0 — Released (C1: Flatpak backend)
+- [x] `flatpak` joins `sources.toml` with `nog activate|deactivate flatpak`
+- [x] Flatpak updates folded into `nog update`: own source count, rows in the Ready/Held/Unknown tables, `· flatpak` tag in the Note column
+- [x] Tier hold windows applied to flatpak refs via the pending commit's publish date (`flatpak remote-info`)
+- [x] Holds enforced by naming (flatpak has no `--ignore`) — pure `apply_list()` with tests proving held/skipped refs can never be applied
+- [x] Fail-closed on an unreachable remote; dormant when the flatpak binary is absent
+- [x] [#8](https://github.com/jetomev/nog/issues/8) the flatpak handoff shows its own transaction (dogfood finding — "show the work", now a rule for every backend)
+
 ### v1.0.9 — Released ("Ironhold" security cycle)
 
 Built during the July–August 2026 AUR supply-chain attacks (malicious orphan adoptions, `-bin` typosquats with sudo-time malware; the AUR froze all pushes on Aug 2), as Phase A of the cross-project [Operation Ironhold](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md). Every item was field-verified live on the reference machine the day it was built.
@@ -619,6 +637,18 @@ Built during the July–August 2026 AUR supply-chain attacks (malicious orphan a
 ---
 
 ## Changelog
+
+### v1.1.0 — August 10, 2026
+
+**C1 of the [v2 multi-source arc](docs/v2-design.md): nog speaks Flatpak.**
+
+Flatpak becomes a first-class source rather than a parallel universe you update separately. `nog update` now queries flatpak alongside pacman and the AUR, reports its own per-source count, and folds every pending app into the same Ready / On-hold / Unknown tables — aged by the same tier windows, with the clock set by the pending remote commit's publish date (the build-date analogue). Rows carry a `· flatpak` marker so the source of every update is visible before you say yes.
+
+Holds work differently under the hood because flatpak has no `--ignore`: nog enforces them **by naming**, passing exactly the refs it cleared this run. That rule lives in one pure function (`flatpak::apply_list`) with tests proving a held or skipped ref can never reach the transaction.
+
+The backend is optional in both directions — a missing `flatpak` binary leaves the source dormant (never an error), and `nog deactivate flatpak` freezes it by choice. A failed remote query is reported and skipped, never assumed quiet (the fail-closed doctrine from v1.0.9).
+
+Dogfooded live on 2026-08-10 across the full pipeline: detection, date resolution, tier bucketing, the source tag, the kill switch, and a real apply. One finding came out of it and shipped in the same release — [#8](https://github.com/jetomev/nog/issues/8): the flatpak handoff now shows flatpak's own transaction instead of a single silent line. *Show the work* is now a requirement for every future backend.
 
 ### v1.0.9 — August 5, 2026
 **The "Ironhold" security cycle — holds that fail closed, and supply chains you can sever in one command**

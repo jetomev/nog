@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.0.9" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.1.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -175,10 +175,19 @@ or the configured helper, bypassing the hold window and any sign-off policy.
 This is the escape hatch for a held Tier 1 package.
 .TP
 .B nog deactivate \fIsource\fR
-Source kill switch (v1.0.9). Valid sources:
-.B aur
+Source kill switch (v1.0.9; \fBflatpak\fR added v1.1.0). Valid sources:
+.BR aur ,
+.BR chaotic-aur ,
 and
-.BR chaotic-aur .
+.BR flatpak .
+Deactivating
+.B flatpak
+persists a flag in
+.I /etc/nog/sources.toml
+so
+.B nog update
+neither queries nor applies flatpak updates; installed apps stay installed
+but frozen. The flatpak binary itself is never touched.
 Deactivating
 .B aur
 persists a flag in
@@ -211,6 +220,30 @@ Print help information.
 .TP
 .B \-V, \-\-version
 Print version information.
+.
+.SH FLATPAK SUPPORT
+Since v1.1.0
+.B nog update
+also reports and applies Flatpak app updates, under the same tier hold
+windows as everything else. The hold clock for a flatpak ref is the
+publish date of the pending remote commit (from
+.BR "flatpak remote-info" ),
+the analogue of a package's build date. Flatpak refs classify as Tier 3 by
+default and can be pinned like any package with
+.BR "nog pin" .
+Rows carry a
+.B "\(bu flatpak"
+marker in the Note column so the source of every update is visible before
+you confirm.
+.PP
+Flatpak is an optional backend: if the
+.B flatpak
+binary is absent the source is simply dormant, never an error. Because
+flatpak has no
+.B \-\-ignore
+option, nog enforces holds by naming: it passes exactly the refs it cleared
+this run and nothing else. A failed remote query is reported and the run
+continues with flatpak untouched \(em never assumed quiet.
 .
 .SH FILES
 .TP

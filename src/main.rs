@@ -1,3 +1,4 @@
+mod flatpak;
 mod aur;
 mod commands;
 mod config;
@@ -96,12 +97,12 @@ enum Commands {
     /// the upgrade handoff runs via pacman (foreign packages stay fenced).
     /// Intended for incident response — e.g. an active AUR supply-chain attack.
     Deactivate {
-        /// Source to deactivate: "aur" or "chaotic-aur"
+        /// Source to deactivate: "aur", "chaotic-aur", or "flatpak"
         source: String,
     },
     /// Reactivate a package source previously disabled with `nog deactivate`
     Activate {
-        /// Source to activate: "aur" or "chaotic-aur"
+        /// Source to activate: "aur", "chaotic-aur", or "flatpak"
         source: String,
     },
     /// Internal: dump the build date for a package from the sync DB

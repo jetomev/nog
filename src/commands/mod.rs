@@ -4,6 +4,7 @@ use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
 use crate::runlog;
+use crate::flatpak;
 use crate::sources;
 use crate::sync_db;
 
@@ -137,8 +138,9 @@ fn set_source(source: &str, enable: bool) {
     match source {
         "aur" => set_aur(enable),
         "chaotic-aur" => set_chaotic(enable),
+        "flatpak" => set_flatpak(enable),
         other => {
-            eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur", other);
+            eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur, flatpak", other);
             std::process::exit(1);
         }
     }
@@ -171,6 +173,40 @@ fn set_aur(enable: bool) {
         println!("     • `nog install` routes through pacman only — AUR-only packages");
         println!("       will not resolve until reactivated.");
         println!("     Re-enable with: nog activate aur");
+    }
+}
+
+/// v1.1.0 (C1): flip the flatpak flag in sources.toml. Pure state — flatpak
+/// itself stays installed and untouched; nog simply stops (or resumes)
+/// querying and applying flatpak updates. The on-demand install offer for a
+/// MISSING flatpak binary belongs to the install chain (C3), not here.
+fn set_flatpak(enable: bool) {
+    let mut state = sources::load(sources::DEFAULT_PATH);
+    if state.flatpak == enable {
+        println!(
+            "nog: flatpak is already {}.",
+            if enable { "active" } else { "deactivated" }
+        );
+        return;
+    }
+    state.flatpak = enable;
+
+    if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
+        eprintln!("nog: could not save source state: {}", e);
+        std::process::exit(1);
+    }
+
+    if enable {
+        println!("nog: flatpak ACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        if !flatpak::is_available() {
+            println!("     Note: the flatpak binary is not installed — the source stays");
+            println!("     dormant until it is (nog can install it on demand: C3).");
+        }
+    } else {
+        println!("nog: flatpak DEACTIVATED — saved to {}.", sources::DEFAULT_PATH);
+        println!("     • `nog update` will not query or apply flatpak updates;");
+        println!("       installed flatpak apps stay installed but frozen.");
+        println!("     Re-enable with: nog activate flatpak");
     }
 }
 
@@ -337,12 +373,40 @@ pub fn update(realign: bool) {
         }
     }
 
-    // Per-source counts. (Future sources — flatpak, etc. — slot in here as
-    // additional lines once nog learns to query them.)
+    // v1.1.0 (C1): fold flatpak pending updates into the same list. The
+    // source is active by default; missing binary = dormant, query failure =
+    // fail CLOSED for this source (report + skip apply; nothing assumed quiet).
+    let flatpak_active = sources::load(sources::DEFAULT_PATH).flatpak;
+    let mut flatpak_names: Vec<String> = Vec::new();
+    let mut flatpak_dates: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut flatpak_count = 0usize;
+    let flatpak_present = flatpak_active && flatpak::is_available();
+    if flatpak_present {
+        match flatpak::pending_updates() {
+            Ok(fp_list) => {
+                flatpak_count = fp_list.len();
+                let installed = flatpak::installed_versions();
+                flatpak_dates = flatpak::commit_dates_for(&fp_list);
+                for u in &fp_list {
+                    flatpak_names.push(u.app_id.clone());
+                    pending.push(flatpak::to_pending(u, &installed));
+                }
+            }
+            Err(e) => {
+                eprintln!("nog: warning — could not query flatpak updates: {}", e);
+                eprintln!("     proceeding without flatpak; nothing flatpak will be touched this run.");
+            }
+        }
+    }
+
+    // Per-source counts.
     println!();
     println!("nog: {} official repository update(s) reported by pacman.", official_count);
     if let Some(h) = helper {
         println!("nog: {} AUR update(s) reported by {}.", aur_count, h);
+    }
+    if flatpak_present {
+        println!("nog: {} flatpak update(s) reported by flatpak.", flatpak_count);
     }
 
     if pending.is_empty() {
@@ -389,6 +453,16 @@ pub fn update(realign: bool) {
                 });
             }
         }
+    }
+
+    // Flatpak commit dates → the same builddate map the hold windows read.
+    // Apps whose date could not be resolved stay absent → Unknown bucket.
+    for (app_id, ts) in &flatpak_dates {
+        packages.entry(app_id.clone()).or_insert(sync_db::PackageDesc {
+            builddate: *ts,
+            pkgbase: None,
+            version: None,
+        });
     }
 
     let now = std::time::SystemTime::now();
@@ -543,7 +617,7 @@ pub fn update(realign: bool) {
     // attention anyway. The CSV snapshot below mirrors this order.
     held.sort_by(|(a, _, ar, _), (b, _, br, _)| ar.cmp(br).then_with(|| a.name.cmp(&b.name)));
 
-    print_buckets(&ready, &held, &unknown);
+    print_buckets(&ready, &held, &unknown, &flatpak_names);
 
     // v1.0.8: snapshot the final buckets for the run log. Taken after the
     // realign/coupling passes so the CSV mirrors the printed tables exactly.
@@ -645,6 +719,29 @@ pub fn update(realign: bool) {
         write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
             &format!("handoff failed (status {})", code));
         std::process::exit(status.code().unwrap_or(1));
+    }
+
+    // v1.1.0 (C1): flatpak apply — only the refs nog cleared THIS run
+    // (Ready, or an Unknown the user approved). flatpak has no --ignore, so
+    // listing exactly the cleared app IDs IS the hold mechanism: held
+    // flatpaks are simply never named.
+    if !flatpak_names.is_empty() {
+        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+        let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
+        let fp_apply = flatpak::apply_list(&flatpak_names, &ready_names, &unknown_names, &ignore);
+        if !fp_apply.is_empty() {
+            println!();
+            println!("{}nog: Handing off {} app(s) to flatpak ...{}", C_BOLD, fp_apply.len(), C_RESET);
+            println!("{}     (flatpak shows its own transaction below){}", C_SUBTEXT, C_RESET);
+            let fp_status = flatpak::update(&fp_apply);
+            if !fp_status.success() {
+                let code = fp_status.code().unwrap_or(-1);
+                eprintln!("nog: flatpak update exited with status {}", code);
+                write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+                    &format!("flatpak apply failed (status {})", code));
+                std::process::exit(fp_status.code().unwrap_or(1));
+            }
+        }
     }
 
     println!();
@@ -859,15 +956,24 @@ fn print_buckets(
     ready: &[(PendingUpdate, Tier, ReadyReason)],
     held: &[(PendingUpdate, Tier, u64, HeldReason)],
     unknown: &[(PendingUpdate, Tier)],
+    flatpak_names: &[String],
 ) {
+    // Ruling #2 of the v2 arc: the user always sees WHERE a package comes
+    // from. Flatpak rows carry the tag in the Note column.
+    let tag = |name: &str, note: String| -> String {
+        if flatpak_names.iter().any(|n| n == name) {
+            if note.is_empty() { "flatpak".to_string() }
+            else { format!("{} · flatpak", note) }
+        } else { note }
+    };
     let ready_rows: Vec<TableRow> = ready.iter()
-        .map(|(upd, tier, reason)| TableRow::from(upd, tier, ready_note(reason)))
+        .map(|(upd, tier, reason)| TableRow::from(upd, tier, tag(&upd.name, ready_note(reason))))
         .collect();
     let held_rows: Vec<TableRow> = held.iter()
-        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, held_note(*remaining, reason)))
+        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, tag(&upd.name, held_note(*remaining, reason))))
         .collect();
     let unknown_rows: Vec<TableRow> = unknown.iter()
-        .map(|(upd, tier)| TableRow::from(upd, tier, "no build date in sync DB".to_string()))
+        .map(|(upd, tier)| TableRow::from(upd, tier, tag(&upd.name, "no build date in sync DB".to_string())))
         .collect();
 
     println!();
