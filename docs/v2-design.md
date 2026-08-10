@@ -47,11 +47,26 @@ whole chain works.
 | **C2** | v1.2.0 | **Snap backend**: same pattern, detect-if-present (snapd is AUR-only — offered, never demanded) |
 | **C3** | v1.3.0 | **The install chain**: `nog install` falls through pacman→AUR→Flatpak→Snap, pre-install table shows source, first-need backend offers |
 | **C4** | v1.4.0 | **Command surface + JSON**: `info`, `search` (cross-source), `remove`, `reinstall`, `tier`, `lock`, `status`, `history` (reads the v1.0.8 CSVs) — every one with `--json` |
-| **C5** | nogForge v0.2.0 | **The visual handler** on forgekit: Dashboard (tier status, last run), Installed (details/reinstall/remove/tier-move/lock — staged, one Apply), Search (cross-source, target tier), Config (four source toggles). In-place editing design language throughout |
-| **C6** | nog v2.0.0 | Crown release: docs sweep, man page, Tier Reference update, announcement |
+| **C5** | v1.5.0 | **Maintenance & cleanup** (Javier, 2026-08-10): one command that reports reclaimable space per source and cleans on confirmation — pacman orphans + package cache, AUR helper build cache, **flatpak unused runtimes**, **snap old revisions**. Report-then-gate, like `nog update`; `--json` for the TUI |
+| **C6** | nogForge v0.2.0 | **The visual handler** on forgekit: Dashboard (tier status, last run), Installed (details/reinstall/remove/tier-move/lock — staged, one Apply), Search (cross-source, target tier), **Maintenance** (reclaimable space per category, pick what to clean, one Apply), Config (four source toggles). In-place editing design language throughout |
+| **C7** | nog v2.0.0 | Crown release: docs sweep, man page, Tier Reference update, announcement |
 
 Open items carried alongside (slot into cycles when natural): #5 tier-ABI-skew
 linchpin heuristic, promote-family gap, first-run wizard.
+
+## Maintenance — what "cleanup" means per source (C5)
+
+| Source | Garbage it accumulates | How nog reclaims it |
+|---|---|---|
+| pacman | orphaned dependencies; every downloaded package version, forever | `pacman -Qtdq` → remove; cache trimmed keeping the last N versions (never all — the last versions are the downgrade path) |
+| AUR helper | cloned build trees and built packages | helper cache directory |
+| flatpak | **unused runtimes** (a 400 MB GNOME platform can outlive the one app that needed it) | `flatpak uninstall --unused` |
+| snap | old disabled revisions (snapd keeps several by default) | remove revisions beyond the retain count |
+
+Rules: **report first, act on confirmation** (the `nog update` shape); never
+remove the newest cached version of anything; each category independently
+selectable; nothing outside package management (system logs, browser caches
+and friends are not nog's business).
 
 ## What nogForge is (and stays)
 
