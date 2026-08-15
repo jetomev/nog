@@ -537,6 +537,13 @@ The kill-switch state file failed to parse (usually a hand-edit). nog fails **cl
 
 ## Roadmap
 
+> **Parked at v1.2.0 (2026-08-15)** — the cycle is closed and development resumes after
+> the Orlando trip. The queue is priority-labelled on the
+> [issue tracker](https://github.com/jetomev/nog/issues): `priority-1` first.
+
+### Next — one package manager per source ([#10](https://github.com/jetomev/nog/issues/10) · `priority-1`)
+- [ ] **Split the update handoff** — `nog update` hands the whole repo+AUR upgrade to the AUR helper in a single `yay -Syu`, so yay drives the upgrade of ~140 official packages it has no business touching: noisy output, and the source boundary nog works to keep visible gets blurred. Each source should be handled by the manager that owns it, in nog's defined order — **pacman → AUR helper → Flatpak → Snap**. Flatpak and Snap already run as their own steps; only the first splits, into `sudo pacman -Syu --ignore <held>` followed by `<helper> -Sua --ignore <held>` (AUR-only, supported by both yay and paru). The foreign fence stays on the AUR step, and each step reports its own result. Side effect worth having: the per-source counts nog already prints will finally describe what actually runs.
+
 ### Future
 - [ ] **Zero-day lane for `archlinux-keyring`** (greenlit 2026-07-30, KognogOS audit finding) — a held keyring is itself the breakage: signatures fail on every later update until it lands. Add a special-case hold class (0-day / always-release) for keyring packages, likely a `[tier0]`-style list defaulting to `archlinux-keyring` + `chaotic-keyring`.
 - [ ] **Depends-graph coupling (rule d)** — generalize the name-pattern couplings: an exact-version dependency (`pkg=ver`) hold-couples the depender to its target, subsuming the headers/lib32/pkgbase rules. Evidence: the 2026-07-30 KognogOS dep-chain audit found 736 exact-version pairs repo-wide, 2 unrescued (`dahdi-linux-git`, `wanpipe` → `linux=…`). Note: complete fix is hold-release coupling (v1.0.6 style), since same tier ≠ same release day.
