@@ -2,6 +2,32 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.2.0 — Released (C2: Snap backend)
+- [x] `snap` joins `sources.toml` with `nog activate|deactivate snap`
+- [x] Snap updates in the same tables, `· snap` tag, tier windows clocked by the tracked channel's publish date (`snap info`)
+- [x] Same naming-based hold enforcement as flatpak, with its own `apply_list()` tests
+- [x] `snap refresh` escalates through sudo (snapd requires root) with snap's own progress shown
+- [x] Dormant when snapd is absent — never an error (snapd is AUR-only on Arch)
+
+### v1.1.0 — Released (C1: Flatpak backend)
+- [x] `flatpak` joins `sources.toml` with `nog activate|deactivate flatpak`
+- [x] Flatpak updates folded into `nog update`: own source count, rows in the Ready/Held/Unknown tables, `· flatpak` tag in the Note column
+- [x] Tier hold windows applied to flatpak refs via the pending commit's publish date (`flatpak remote-info`)
+- [x] Holds enforced by naming (flatpak has no `--ignore`) — pure `apply_list()` with tests proving held/skipped refs can never be applied
+- [x] Fail-closed on an unreachable remote; dormant when the flatpak binary is absent
+- [x] [#8](https://github.com/jetomev/nog/issues/8) the flatpak handoff shows its own transaction (dogfood finding — "show the work", now a rule for every backend)
+
+### v1.0.9 — Released ("Ironhold" security cycle)
+
+Built during the July–August 2026 AUR supply-chain attacks (malicious orphan adoptions, `-bin` typosquats with sudo-time malware; the AUR froze all pushes on Aug 2), as Phase A of the cross-project [Operation Ironhold](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md). Every item was field-verified live on the reference machine the day it was built.
+
+- [x] **The foreign fence ([#2](https://github.com/jetomev/nog/issues/2))** — fixes a fail-open hole caught by nog's own CSV run logs: on 2026-08-01, with the AUR mid-lockdown, `yay -Qua` returned empty, two held AUR packages vanished from the report, and the handoff's own resolution upgraded them anyway. Now every installed foreign package is ignored at handoff unless nog explicitly cleared it **this run** (Ready, or a user-approved Unknown) — "couldn't check" and "all quiet" are treated identically, and holds survive an AUR blackout. The bypass is reproduced as a unit test.
+- [x] **AUR kill switch ([#3](https://github.com/jetomev/nog/issues/3))** — `nog deactivate aur` / `nog activate aur`: persisted in the new nog-owned `/etc/nog/sources.toml`, gated upstream of helper detection (helper-agnostic), turns off every AUR-aware path at once; the handoff runs pacman-only. `nog.conf` is never rewritten — the configured helper resumes exactly on activation. Unreadable state fails closed.
+- [x] **chaotic-aur kill switch ([#4](https://github.com/jetomev/nog/issues/4))** — `nog deactivate chaotic-aur` / `activate chaotic-aur`: nog comments the `[chaotic-aur]` section in/out of `/etc/pacman.conf` itself (`#nog# ` marker; timestamped backup first; user comments inside the section survive; restore is byte-exact — proven by unit test *and* a live `diff` against the pre-toggle backup), then refreshes the sync DBs. The repo definition is the gate: nothing on the system can resolve from a deactivated chaotic-aur, and installed chaotic packages sit frozen.
+- [x] **Held table sorted by days remaining ([#6](https://github.com/jetomev/nog/issues/6))** — soonest-to-release first, ties alphabetical; the table now reads as a release calendar and visualizes the tier gradient (1-day Tier 3 movers on top, 23-day Tier 1 kernels at the bottom). The CSV run log mirrors the same order.
+- [x] **Test surface** — 42 → 54 (three fence tests incl. the Aug-1 replay, four `sources` state tests, five pacman.conf toggle tests incl. the byte-exact roundtrip).
+- [x] *AUR note: v1.0.9 was released **during** the AUR push freeze, so it shipped from source only. The freeze lifted on 2026-08-14 and the AUR caught up — `nog` is live there at v1.2.0.*
+
 ### v1.0.8 — Released
 - [x] **CSV run logging** — every `nog update` run appends to a per-day CSV log (`YYYYMMDD nog-update.csv` under `[paths] run_logs`, default `~/.local/share/nog/logs`) mirroring the update-table columns (bucket / package / old / new / tier / note) plus the banner context (date / time / user) and the run's **outcome** (`installed` / `cancelled` / `all held` / `up to date` / `handoff failed`). Retention: logs older than 90 days pruned after each write. Logging soft-fails with a warning — it never blocks an update. New pure `runlog` module with unit tests; 35 → 42.
 - [x] **Dogfooded on the AUR binary (2026-07-29)** — `makepkg -fsi` ran the suite (42/42) in `check()`, installed `1.0.7-1 → 1.0.8-1`; four runs accumulated in one day-file covering three outcome types (`cancelled` ×2 dev, `installed` — 76 rows, `all held` — 73 rows after the transaction: exactly the 3 Ready packages installed), header written once, appends clean across binaries; CSV imported cleanly into desktop apps — the `.csv`-extension fix (F-1) was made pre-ship at Javier's call. [Test Results](testing/20260729 - Test Results for nog v1-0-8.md).

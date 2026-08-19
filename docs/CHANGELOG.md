@@ -2,6 +2,41 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.2.0 — August 10, 2026
+
+**C2: nog speaks Snap.** The same shape as the Flatpak backend — snaps are detected, aged through the tier windows (clock = the publish date of the pending revision in the snap's *tracked channel*, read from `snap info`), tagged `· snap` in the tables, and refreshed only when nog has cleared them. Holds are enforced by naming, as with flatpak, and pinned by their own tests.
+
+Two structural differences from flatpak, both deliberate: `snap refresh` requires root, so nog escalates through `sudo` for that step alone (staying unprivileged everywhere else); and because snapd is AUR-only on Arch, its absence is *normal* — the source sits dormant and silent, never an error. Snap is expected to serve the tail: most software is covered long before the chain reaches it, but when it's the only home for something, nog can now manage it like everything else.
+
+Dogfooded live on 2026-08-10 with `hello` installed at an old revision — detection, channel-date resolution (1663 days past window, honestly reported), the source tag, and a real sudo-escalated refresh.
+
+Also in this release: the README's Roadmap and Changelog now keep only the upcoming work and the two most recent releases, with full history in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CHANGELOG.md](docs/CHANGELOG.md) — the file had grown to a thousand lines, which serves archaeologists better than newcomers.
+
+### v1.1.0 — August 10, 2026
+
+**C1 of the [v2 multi-source arc](docs/v2-design.md): nog speaks Flatpak.**
+
+Flatpak becomes a first-class source rather than a parallel universe you update separately. `nog update` now queries flatpak alongside pacman and the AUR, reports its own per-source count, and folds every pending app into the same Ready / On-hold / Unknown tables — aged by the same tier windows, with the clock set by the pending remote commit's publish date (the build-date analogue). Rows carry a `· flatpak` marker so the source of every update is visible before you say yes.
+
+Holds work differently under the hood because flatpak has no `--ignore`: nog enforces them **by naming**, passing exactly the refs it cleared this run. That rule lives in one pure function (`flatpak::apply_list`) with tests proving a held or skipped ref can never reach the transaction.
+
+The backend is optional in both directions — a missing `flatpak` binary leaves the source dormant (never an error), and `nog deactivate flatpak` freezes it by choice. A failed remote query is reported and skipped, never assumed quiet (the fail-closed doctrine from v1.0.9).
+
+Dogfooded live on 2026-08-10 across the full pipeline: detection, date resolution, tier bucketing, the source tag, the kill switch, and a real apply. One finding came out of it and shipped in the same release — [#8](https://github.com/jetomev/nog/issues/8): the flatpak handoff now shows flatpak's own transaction instead of a single silent line. *Show the work* is now a requirement for every future backend.
+
+### v1.0.9 — August 5, 2026
+**The "Ironhold" security cycle — holds that fail closed, and supply chains you can sever in one command**
+
+Built live during the July–August 2026 AUR supply-chain attacks, as Phase A of [Operation Ironhold](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md). The trigger was nog's own CSV run log catching a real bypass on this machine: on Aug 1, with the AUR mid-lockdown, the AUR query silently returned empty, two packages that had been *held with 5 days remaining the night before* vanished from the report — and the handoff upgraded them anyway. (Both proved clean. The hole didn't.)
+
+- 🛡 **The foreign fence ([#2](https://github.com/jetomev/nog/issues/2))** — the handoff's `--ignore` list now always includes **every** installed foreign package except the ones nog explicitly cleared this run (Ready, or a user-approved Unknown). "Couldn't check the AUR" and "no AUR updates" are treated identically — the fence stands either way, so a hold can never again evaporate because a query failed. Healthy runs behave exactly as before (ignoring an up-to-date package is a no-op). The Aug-1 bypass is now a unit test.
+- 🔌 **`nog deactivate aur` / `nog activate aur` ([#3](https://github.com/jetomev/nog/issues/3))** — the AUR kill switch. One command turns off every AUR-aware path — update detection, install routing, handoff (pacman-only) — for incident response during an active attack. State persists in the new nog-owned `/etc/nog/sources.toml` (written via `sudo tee`, tier-pins style); your `nog.conf` helper setting is never touched and resumes exactly on activation. An unreadable state file fails **closed**.
+- 🔌 **`nog deactivate chaotic-aur` / `activate chaotic-aur` ([#4](https://github.com/jetomev/nog/issues/4))** — the binary-repo kill switch. nog comments the `[chaotic-aur]` section in/out of `/etc/pacman.conf` itself: timestamped backup first, `#nog# ` marker so activation restores exactly and only what nog disabled (your comments inside the section survive), DB refresh after. With the section out, *nothing* on the system — pacman, helpers, libalpm GUIs — can resolve from the repo; installed chaotic packages sit frozen. Restore verified byte-exact live (`diff` against the pre-toggle backup: identical).
+- 📅 **Held table sorted by days remaining ([#6](https://github.com/jetomev/nog/issues/6))** — soonest-to-release on top, Tier 1 heavyweights at the bottom: the hold list now reads as a release calendar, and — a happy accident — visualizes the tier gradient itself. The CSV log mirrors the order.
+- 📦 **Released during the AUR push freeze** — v1.0.9 could only be installed from source at the time ([context](https://github.com/jetomev/KognogOS/blob/main/docs/operation-ironhold.md)). Arch reopened pushes on 2026-08-14 and every staged package shipped; `yay -S nog` now gets v1.2.0, signature-verified at build time.
+
+Internals: new pure `sources` module (state parse/render + the pacman.conf section toggler) and `holds::foreign_fence()` + `pacman::foreign_package_names()`. Every feature was field-verified on the reference machine the day it was built — including one full 176-update run with the fence live and both kill-switch round trips. Unit tests 42 → 54; warnings unchanged at 7.
+
 ### v1.0.8 — July 29, 2026
 **CSV run logging — nog remembers every update run**
 
