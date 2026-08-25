@@ -2,6 +2,24 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.2.1 — August 25, 2026
+
+**A hotfix, and the most serious bug nog has shipped.** nog could release most of a version-locked family while holding one member back, handing pacman a set that does not hold together.
+
+Twice in three days on the maintainer's own machine. On the 23rd it split `elfutils` from `libelf`; pacman spotted the broken `libelf=0.196` dependency and refused, which was noisy but harmless. On the 25th it split the Qt6 stack — nineteen modules moved to 6.11.2 while `qt6-base` stayed at 6.11.1. Nothing objected, because nothing could: Qt modules depend on `qt6-base` with no version attached, so as far as pacman is concerned the set was fine. The upgrade succeeded. The next boot reached a black screen, the display manager dead on a missing symbol, and recovery meant a text console.
+
+Three things were wrong, and all three are fixed.
+
+**Packages built from the same PKGBUILD now stay together.** They share a `%BASE%` and Arch joins them with exact-version dependencies, but nog only used that grouping to decide a package's *tier* — never to decide when it was released from hold.
+
+**Demotions now propagate.** The rule that keeps a `lib32-` package with its base ran exactly once. When it pulled `libelf` back, nothing re-checked what `libelf` was itself attached to, so `elfutils` was left behind. That pass now repeats until nothing more moves, which means any rule added later is transitive without anyone having to remember to make it so.
+
+**And nog now notices families that no metadata describes.** This is the Qt6 case, and it is the reason the black screen happened: those twenty packages share no pkgbase, no versioned dependency, and no soname — their lockstep is a build-time convention that exists nowhere pacman can see. What *is* visible is that they all sit on one version and all move to the next together. So when three or more packages share that pattern and nog is about to release some while holding others, it now holds the whole group instead.
+
+That last rule is a judgement call rather than a certainty, and it is deliberately cautious — it will sometimes keep a family waiting that would have been fine. Replaying the 25 August run through it produced four correct catches and no false alarms across 221 packages, including a sixty-seven-package font group and a thirty-four-package VLC group that it correctly left alone. When it does err, it errs by making you wait a few days, which is the whole idea of a tool built on the premise that packages should settle before they land.
+
+Tests: 69 → 80.
+
 ### v1.2.0 — August 10, 2026
 
 **C2: nog speaks Snap.** The same shape as the Flatpak backend — snaps are detected, aged through the tier windows (clock = the publish date of the pending revision in the snap's *tracked channel*, read from `snap info`), tagged `· snap` in the tables, and refreshed only when nog has cleared them. Holds are enforced by naming, as with flatpak, and pinned by their own tests.

@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.2.0](https://img.shields.io/badge/Version-1.2.0-purple.svg)
+![Version: 1.2.1](https://img.shields.io/badge/Version-1.2.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -288,7 +288,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.2.0"
+version = "1.2.1"
 log_level = "info"
 
 [paths]
@@ -491,7 +491,11 @@ If it shows green Tier 3, you're on an old nog — upgrade before your next upda
 
 ### More packages are Held than before I upgraded
 
-Expected, in two cases.
+Expected, in three cases.
+
+**Coming from v1.2.0 or earlier:** nog now keeps version-locked families together. If a group of packages all sit on one version and all move to the next, and even one of them is still inside its window, the whole group waits. You'll see rows marked `coupled to <package>`, all showing the same countdown, and they'll clear together on a later run.
+
+This is the fix for [#11](https://github.com/jetomev/nog/issues/11), and it is deliberately cautious. Some families — the Qt6 stack is the reference case — are version-locked by a build convention that appears nowhere in the package metadata, so there is nothing to check against; nog goes on the pattern instead. That means it will occasionally hold a group that would have been fine. The alternative is what v1.2.0 did on 25 August: release nineteen Qt modules, hold `qt6-base`, and leave the machine unable to reach a login screen. A few extra days is the cheaper mistake.
 
 **Coming from v1.0.2 or earlier:** kernel headers moved from Tier 3 to Tier 1 to match their kernels. They'll release in lockstep from now on. This is the protection working.
 
@@ -509,7 +513,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **Parked at v1.2.0 (2026-08-15).** This cycle is closed; work resumes after a planned trip. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.2.1 shipped 2026-08-25** — a hotfix for family coupling ([#11](https://github.com/jetomev/nog/issues/11)), after a split Qt6 stack left a desktop unable to reach a login screen. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
 ### Next — one package manager per source ([#10](https://github.com/jetomev/nog/issues/10) · `priority-1`)
 
@@ -522,7 +526,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ### Later
 
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
-- [ ] **Automatic dependency coupling** — generalise the current name-based rules. If a package depends on an exact version of another, hold them together. An audit found 736 such pairs across the repos.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog status` — a dashboard of what's held, ready, and overdue
 - [ ] `nog history` — a log of every tier change and package action
@@ -545,6 +549,24 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.2.1 — August 25, 2026
+
+**A hotfix, and the most serious bug nog has shipped.** nog could release most of a version-locked family while holding one member back, handing pacman a set that does not hold together.
+
+Twice in three days on the maintainer's own machine. On the 23rd it split `elfutils` from `libelf`; pacman spotted the broken `libelf=0.196` dependency and refused, which was noisy but harmless. On the 25th it split the Qt6 stack — nineteen modules moved to 6.11.2 while `qt6-base` stayed at 6.11.1. Nothing objected, because nothing could: Qt modules depend on `qt6-base` with no version attached, so as far as pacman is concerned the set was fine. The upgrade succeeded. The next boot reached a black screen, the display manager dead on a missing symbol, and recovery meant a text console.
+
+Three things were wrong, and all three are fixed.
+
+**Packages built from the same PKGBUILD now stay together.** They share a `%BASE%` and Arch joins them with exact-version dependencies, but nog only used that grouping to decide a package's *tier* — never to decide when it was released from hold.
+
+**Demotions now propagate.** The rule that keeps a `lib32-` package with its base ran exactly once. When it pulled `libelf` back, nothing re-checked what `libelf` was itself attached to, so `elfutils` was left behind. That pass now repeats until nothing more moves, which means any rule added later is transitive without anyone having to remember to make it so.
+
+**And nog now notices families that no metadata describes.** This is the Qt6 case, and it is the reason the black screen happened: those twenty packages share no pkgbase, no versioned dependency, and no soname — their lockstep is a build-time convention that exists nowhere pacman can see. What *is* visible is that they all sit on one version and all move to the next together. So when three or more packages share that pattern and nog is about to release some while holding others, it now holds the whole group instead.
+
+That last rule is a judgement call rather than a certainty, and it is deliberately cautious — it will sometimes keep a family waiting that would have been fine. Replaying the 25 August run through it produced four correct catches and no false alarms across 221 packages, including a sixty-seven-package font group and a thirty-four-package VLC group that it correctly left alone. When it does err, it errs by making you wait a few days, which is the whole idea of a tool built on the premise that packages should settle before they land.
+
+Tests: 69 → 80.
+
 ### v1.2.0 — August 10, 2026
 
 **nog speaks Snap.** Snaps are detected, aged through the same tier windows, tagged `· snap` in the tables, and refreshed only once nog has cleared them. The clock is the publish date of the pending revision in the channel you actually track.
@@ -556,18 +578,6 @@ Snap is expected to serve the tail end: most software is covered long before the
 Dogfooded on a snap deliberately left 1,663 days out of date, which it reported honestly.
 
 Also in this release: the README's roadmap and changelog now keep only the upcoming work and the two most recent releases. The file had grown past a thousand lines, which serves archaeologists better than newcomers.
-
-### v1.1.0 — August 10, 2026
-
-**nog speaks Flatpak.** Flatpak becomes a real source rather than a parallel universe you update separately. `nog update` queries it alongside pacman and the AUR, reports its own count, and folds every pending app into the same Ready / Held / Unknown tables — aged by the same tier windows, with each row marked `· flatpak` so you know where an update comes from before you agree to it.
-
-Holds work differently underneath, because Flatpak has no equivalent of pacman's `--ignore`. nog enforces them **by naming**: it passes exactly the apps it cleared this run, and nothing else. That rule lives in a single function with tests proving a held app can never reach the transaction.
-
-The backend is optional both ways — no flatpak installed means the source is dormant, and `nog deactivate flatpak` switches it off by choice. A failed lookup is reported and skipped, never mistaken for silence.
-
-One finding came out of dogfooding and shipped in the same release ([#8](https://github.com/jetomev/nog/issues/8)): the Flatpak step now shows its own transaction instead of a single silent line. *Show the work* is now a requirement for every backend we add.
-
-*The complete history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md).*
 
 ---
 

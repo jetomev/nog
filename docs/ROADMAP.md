@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.2.1 — Released (hotfix: family coupling, #11)
+- [x] `pkgbase_coupling_demotions()` — packages sharing a `%BASE%` release together
+- [x] Demotion pass iterates to a fixpoint (capped at 16) so every rule is transitive
+- [x] `cohort_coupling_demotions()` — holds a split `(pkgver -> pkgver)` group of 3+, for families with no metadata to couple on (the Qt6 case)
+- [x] Validated by replaying the 08-25 run: 4 true positives, 0 false positives across 221 packages
+- [x] Tests 69 -> 80
+
 ### v1.2.0 — Released (C2: Snap backend)
 - [x] `snap` joins `sources.toml` with `nog activate|deactivate snap`
 - [x] Snap updates in the same tables, `· snap` tag, tier windows clocked by the tracked channel's publish date (`snap info`)
