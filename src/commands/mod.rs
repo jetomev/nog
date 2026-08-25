@@ -646,18 +646,53 @@ pub fn update(realign: bool) {
         }
     }
 
-    // v1.0.6 (issue #1): couple split lib32/base pairs. A lib32-<X> and its base
-    // <X> are version-locked, but their hold windows are dated independently, so
-    // one can land in Ready while the other is Held. Releasing half the pair
-    // makes pacman's exact-version dependency unsatisfiable and aborts the whole
-    // transaction. Demote the Ready member of any split pair into Held (inheriting
-    // the held partner's countdown) so the pair releases together. Runs last, so
-    // it sees the post-realign buckets and feeds the ignore list below.
+    // v1.0.6 (issue #1) / v1.2.1 (issue #11): couple split package families.
+    //
+    // Version-locked packages have their hold windows dated independently, so
+    // they can expire on different days and land in opposite buckets. Releasing
+    // half a family either aborts the transaction (when pacman can see the
+    // lockstep, via a versioned `=` dep) or — far worse — succeeds and leaves a
+    // broken system (when it cannot: the Qt6 stack shares no pkgbase and carries
+    // no version constraint, and splitting it took a desktop to a black screen).
+    //
+    // Three rules now apply — lib32 pairs, pkgbase siblings, and version cohorts;
+    // see `holds::coupling_demotions`. Runs last, so it sees the post-realign
+    // buckets and feeds the ignore list below.
+    //
+    // The loop is the other half of issue #11. A single pass is not enough: when
+    // one rule demotes a package, that package's *own* coupling relationships are
+    // then evaluated against a bucket state that no longer matches what the pass
+    // was computed from. The v1.0.6 code demoted `libelf` for its lib32 partner
+    // and never revisited `elfutils`, which shares libelf's pkgbase. Iterating to
+    // a fixpoint makes every rule transitive, including any added later.
     {
-        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
-        let held_names: Vec<String> = held.iter().map(|(u, _, _, _)| u.name.clone()).collect();
-        let demotions = holds::lib32_coupling_demotions(&ready_names, &held_names);
-        if !demotions.is_empty() {
+        // Ready only ever shrinks, so this must converge; the cap turns "must"
+        // into something the code actually enforces rather than assumes.
+        const MAX_PASSES: usize = 16;
+        let mut passes = 0;
+
+        loop {
+            let to_coupling = |name: &str, upd: &PendingUpdate, remaining: u64| holds::CouplingPkg {
+                name: name.to_string(),
+                old_version: upd.old_version.clone(),
+                new_version: upd.new_version.clone(),
+                pkgbase: packages.get(name).and_then(|d| d.pkgbase.clone()),
+                remaining,
+            };
+            let ready_pkgs: Vec<holds::CouplingPkg> = ready
+                .iter()
+                .map(|(u, _, _)| to_coupling(&u.name, u, 0))
+                .collect();
+            let held_pkgs: Vec<holds::CouplingPkg> = held
+                .iter()
+                .map(|(u, _, r, _)| to_coupling(&u.name, u, *r))
+                .collect();
+
+            let demotions = holds::coupling_demotions(&ready_pkgs, &held_pkgs);
+            if demotions.is_empty() {
+                break;
+            }
+
             let mut kept: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
             for entry in ready.drain(..) {
                 let (upd, tier, _) = &entry;
@@ -665,7 +700,8 @@ pub fn update(realign: bool) {
                     Some((_, partner)) => {
                         // Inherit the partner's remaining days so both rows show
                         // the same countdown and clear together.
-                        let remaining = held.iter()
+                        let remaining = held
+                            .iter()
                             .find(|(u, _, _, _)| &u.name == partner)
                             .map(|(_, _, r, _)| *r)
                             .unwrap_or(0);
@@ -680,6 +716,23 @@ pub fn update(realign: bool) {
                 }
             }
             ready = kept;
+
+            passes += 1;
+            if passes >= MAX_PASSES {
+                // Reaching this means a rule is oscillating rather than settling.
+                // Stop with the buckets as they stand — over-holding is the safe
+                // direction — but say so, because it is a bug in a rule.
+                eprintln!(
+                    "{}nog: coupling did not converge after {} passes; \
+                     proceeding with the current plan.{}",
+                    C_SUBTEXT, MAX_PASSES, C_RESET
+                );
+                eprintln!(
+                    "{}     Please report this at https://github.com/jetomev/nog/issues{}",
+                    C_SUBTEXT, C_RESET
+                );
+                break;
+            }
         }
     }
 

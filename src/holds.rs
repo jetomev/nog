@@ -197,6 +197,181 @@ fn evaluate_ts(build_ts: u64, tier: Tier, holds: &HoldsConfig, now: SystemTime) 
     }
 }
 
+/// One package as the coupling rules see it (issue #11).
+///
+/// Deliberately owns its strings: the caller rebuilds this list on every
+/// fixpoint iteration as packages move between buckets, and borrowing from
+/// the buckets it is about to mutate is more trouble than the allocation is
+/// worth for a list this size.
+#[derive(Debug, Clone)]
+pub struct CouplingPkg {
+    pub name: String,
+    pub old_version: String,
+    pub new_version: String,
+    pub pkgbase: Option<String>,
+    /// Days left on the hold. Meaningless for Ready entries (pass 0); for Held
+    /// entries it is what a demoted package inherits so both rows show the same
+    /// countdown and clear on the same run.
+    pub remaining: u64,
+}
+
+/// Strip epoch and pkgrel from a pacman version string, leaving the upstream
+/// version: `1:6.11.2-2` -> `6.11.2`.
+///
+/// pkgrel is what makes the Qt6 case invisible to a naive comparison — Arch
+/// shipped the modules as `6.11.2-1` and rebuilt the base as `6.11.2-2` two days
+/// later. Both are the same upstream release and must move together.
+fn pkgver(version: &str) -> &str {
+    let no_epoch = match version.split_once(':') {
+        Some((_, rest)) => rest,
+        None => version,
+    };
+    match no_epoch.rsplit_once('-') {
+        Some((v, _)) => v,
+        None => no_epoch,
+    }
+}
+
+/// Of the held packages named in `group`, the one a demoted sibling should wait
+/// on: the longest remaining countdown, ties broken by name so the choice is
+/// stable run-to-run.
+fn longest_held<'a>(group: &[&'a CouplingPkg]) -> Option<&'a CouplingPkg> {
+    group
+        .iter()
+        .copied()
+        .max_by(|a, b| a.remaining.cmp(&b.remaining).then_with(|| b.name.cmp(&a.name)))
+}
+
+/// Couple packages built from the same PKGBUILD (issue #11, defect 1).
+///
+/// Packages sharing a `%BASE%` are produced by one PKGBUILD and Arch enforces
+/// their lockstep with versioned `=` dependencies (`elfutils` depends on
+/// `libelf=0.196`). Their hold windows are dated per-package from first
+/// sighting, so they can expire on different days and land in different
+/// buckets. Releasing half the group makes the `=` dependency unsatisfiable
+/// and pacman aborts the whole transaction.
+///
+/// `tiers.rs` already couples pkgbase siblings, but only to resolve *which
+/// tier* a package belongs to. Nothing carried that grouping into the
+/// hold-window decision until this rule.
+pub fn pkgbase_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+) -> Vec<(String, String)> {
+    let mut held_by_base: HashMap<&str, Vec<&CouplingPkg>> = HashMap::new();
+    for pkg in held {
+        if let Some(base) = pkg.pkgbase.as_deref() {
+            held_by_base.entry(base).or_default().push(pkg);
+        }
+    }
+
+    let mut demotions = Vec::new();
+    for pkg in ready {
+        let Some(base) = pkg.pkgbase.as_deref() else {
+            continue;
+        };
+        if let Some(group) = held_by_base.get(base) {
+            if let Some(partner) = longest_held(group) {
+                demotions.push((pkg.name.clone(), partner.name.clone()));
+            }
+        }
+    }
+    demotions
+}
+
+/// Minimum members before a shared version is treated as a family rather than a
+/// coincidence. Pairs are left to the pkgbase and lib32 rules, which are exact.
+const COHORT_MIN: usize = 3;
+
+/// Couple version cohorts across pkgbase boundaries (issue #11, defect 3).
+///
+/// Some families are version-locked by build-time convention with **nothing in
+/// the package metadata to prove it**. The Qt6 stack is the reference case:
+/// every module is its own pkgbase, and `qt6-declarative` depends on `qt6-base`
+/// with no version constraint at all. Yet `libQt6Qml` from 6.11.2 asks qt6-base
+/// for a private symbol (`QtPrivate_6_11_2`) that only exists in 6.11.2 — so
+/// releasing the modules while holding the base leaves every Qt application
+/// unable to start, including the display manager. pacman has no grounds to
+/// object and does not.
+///
+/// The only signal actually present in the data is the version cohort: a set of
+/// packages currently on the same upstream version and all moving to the same
+/// new one. If such a group is split across buckets, hold the whole group.
+///
+/// This is a **heuristic**, unlike the other two rules, and it is deliberately
+/// conservative — it will sometimes hold a family that did not need holding, at
+/// a cost of a few days. That trade is the point of a tool whose premise is that
+/// packages should settle before they land.
+pub fn cohort_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+) -> Vec<(String, String)> {
+    // Key on (current upstream version -> new upstream version). Both halves
+    // matter: packages sitting on the same version that are moving to *different*
+    // versions are not a family moving in step.
+    let mut cohorts: HashMap<(&str, &str), (Vec<&CouplingPkg>, Vec<&CouplingPkg>)> = HashMap::new();
+    for pkg in ready {
+        cohorts
+            .entry((pkgver(&pkg.old_version), pkgver(&pkg.new_version)))
+            .or_default()
+            .0
+            .push(pkg);
+    }
+    for pkg in held {
+        cohorts
+            .entry((pkgver(&pkg.old_version), pkgver(&pkg.new_version)))
+            .or_default()
+            .1
+            .push(pkg);
+    }
+
+    let mut demotions = Vec::new();
+    for (ready_members, held_members) in cohorts.values() {
+        if held_members.is_empty() || ready_members.is_empty() {
+            continue; // uniform cohort — nothing is split
+        }
+        if ready_members.len() + held_members.len() < COHORT_MIN {
+            continue; // a pair is the exact rules' business, not ours
+        }
+        let Some(partner) = longest_held(held_members) else {
+            continue;
+        };
+        for pkg in ready_members {
+            demotions.push((pkg.name.clone(), partner.name.clone()));
+        }
+    }
+    demotions
+}
+
+/// Every coupling rule, applied to one snapshot of the buckets (issue #11).
+///
+/// Returns the Ready names that must move into Held, each paired with the held
+/// package it is waiting on. A name appears at most once even when several rules
+/// claim it; the first rule to claim it wins, in the order lib32 -> pkgbase ->
+/// cohort (exact rules before the heuristic, so the displayed partner is the
+/// most defensible one available).
+///
+/// This is a single pass and does **not** converge on its own — a demotion made
+/// here can create a new split that only a re-run will see. Callers must loop
+/// until this returns empty; see `commands::update`.
+pub fn coupling_demotions(ready: &[CouplingPkg], held: &[CouplingPkg]) -> Vec<(String, String)> {
+    let ready_names: Vec<String> = ready.iter().map(|p| p.name.clone()).collect();
+    let held_names: Vec<String> = held.iter().map(|p| p.name.clone()).collect();
+
+    let mut claimed: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for (name, partner) in lib32_coupling_demotions(&ready_names, &held_names)
+        .into_iter()
+        .chain(pkgbase_coupling_demotions(ready, held))
+        .chain(cohort_coupling_demotions(ready, held))
+    {
+        if claimed.insert(name.clone()) {
+            out.push((name, partner));
+        }
+    }
+    out
+}
+
 /// Convert seconds to days, rounding **up**. 0s -> 0d, 1s -> 1d, 86400s -> 1d,
 /// 86401s -> 2d. Matches the spec's "4.x is 5 automatically" rule.
 fn days_ceil(seconds: u64) -> u64 {
@@ -485,5 +660,212 @@ mod tests {
         let ignored = owned(&["sparrow-wallet"]);
         let fence = foreign_fence(&foreign, &cleared, &ignored);
         assert_eq!(fence, owned(&["fresh-editor-bin"]));
+    }
+
+    // ---- issue #11: family coupling at hold-release time -------------------
+
+    /// Terse constructor: `pkg("qt6-base", "6.11.1-1", "6.11.2-2", None, 1)`.
+    fn pkg(
+        name: &str,
+        old: &str,
+        new: &str,
+        base: Option<&str>,
+        remaining: u64,
+    ) -> CouplingPkg {
+        CouplingPkg {
+            name: name.to_string(),
+            old_version: old.to_string(),
+            new_version: new.to_string(),
+            pkgbase: base.map(str::to_string),
+            remaining,
+        }
+    }
+
+    fn demoted_names(mut d: Vec<(String, String)>) -> Vec<String> {
+        d.sort();
+        d.into_iter().map(|(n, _)| n).collect()
+    }
+
+    #[test]
+    fn pkgver_strips_epoch_and_pkgrel() {
+        assert_eq!(pkgver("6.11.2-2"), "6.11.2");
+        assert_eq!(pkgver("1:3.6.4-1"), "3.6.4");
+        assert_eq!(pkgver("26.04.3-1"), "26.04.3");
+        // The Qt6 case turns on this: -1 and -2 are the same upstream release.
+        assert_eq!(pkgver("6.11.2-1"), pkgver("6.11.2-2"));
+        // Degenerate inputs must not panic or truncate wrongly.
+        assert_eq!(pkgver("1.0"), "1.0");
+        assert_eq!(pkgver(""), "");
+    }
+
+    #[test]
+    fn pkgbase_rule_couples_same_pkgbase_siblings() {
+        // The 2026-08-23 incident: elfutils and libelf share pkgbase `elfutils`
+        // and are joined by `libelf=0.196`. Holding one must hold the other.
+        let ready = vec![pkg("elfutils", "0.195-1", "0.196-1", Some("elfutils"), 0)];
+        let held = vec![pkg("libelf", "0.195-1", "0.196-1", Some("elfutils"), 6)];
+        assert_eq!(demoted_names(pkgbase_coupling_demotions(&ready, &held)), vec!["elfutils"]);
+    }
+
+    #[test]
+    fn pkgbase_rule_ignores_packages_without_a_pkgbase() {
+        // Sync-DB entries can lack %BASE%. They simply do not participate.
+        let ready = vec![pkg("orphan", "1.0-1", "1.1-1", None, 0)];
+        let held = vec![pkg("other", "1.0-1", "1.1-1", None, 3)];
+        assert!(pkgbase_coupling_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn cohort_rule_catches_the_qt6_split() {
+        // The 2026-08-25 incident, reduced. Every qt6 package is its own
+        // pkgbase and the dependency on qt6-base is unversioned, so neither
+        // exact rule sees anything. Only the shared 6.11.1 -> 6.11.2 move does.
+        let ready = vec![
+            pkg("qt6-declarative", "6.11.1-3", "6.11.2-1", Some("qt6-declarative"), 0),
+            pkg("qt6-svg", "6.11.1-1", "6.11.2-1", Some("qt6-svg"), 0),
+            pkg("qt6-5compat", "6.11.1-1", "6.11.2-1", Some("qt6-5compat"), 0),
+        ];
+        let held = vec![pkg("qt6-base", "6.11.1-1", "6.11.2-2", Some("qt6-base"), 1)];
+
+        // The exact rules are blind to this — that is the whole point of the bug.
+        assert!(pkgbase_coupling_demotions(&ready, &held).is_empty());
+
+        assert_eq!(
+            demoted_names(cohort_coupling_demotions(&ready, &held)),
+            vec!["qt6-5compat", "qt6-declarative", "qt6-svg"]
+        );
+    }
+
+    #[test]
+    fn cohort_rule_is_silent_on_a_uniform_cohort() {
+        // Regression fixture from the 08-25 run: 67 nerd fonts all moving
+        // 3.5.0 -> 3.5.1, none held. A rule that fired here would be useless.
+        let ready: Vec<CouplingPkg> = (0..67)
+            .map(|i| pkg(&format!("ttf-{i}-nerd"), "3.5.0-1", "3.5.1-2", None, 0))
+            .collect();
+        assert!(cohort_coupling_demotions(&ready, &[]).is_empty());
+
+        // ...and the same set entirely held is equally uninteresting.
+        assert!(cohort_coupling_demotions(&[], &ready).is_empty());
+    }
+
+    #[test]
+    fn cohort_rule_leaves_pairs_to_the_exact_rules() {
+        // Two packages sharing a version is a coincidence often enough that the
+        // heuristic stays out of it; pkgbase and lib32 handle real pairs exactly.
+        let ready = vec![pkg("alpha", "1.0-1", "1.1-1", Some("alpha"), 0)];
+        let held = vec![pkg("beta", "1.0-1", "1.1-1", Some("beta"), 4)];
+        assert!(cohort_coupling_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn cohort_rule_requires_the_same_destination() {
+        // Three packages on 1.0 but heading to different releases are not a
+        // family moving in step, however alike their current versions look.
+        let ready = vec![
+            pkg("a", "1.0-1", "1.1-1", None, 0),
+            pkg("b", "1.0-1", "1.2-1", None, 0),
+        ];
+        let held = vec![pkg("c", "1.0-1", "1.3-1", None, 5)];
+        assert!(cohort_coupling_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn demoted_package_waits_on_the_longest_held_partner() {
+        // Inheriting the *longest* countdown is what makes the group clear on a
+        // single later run instead of dribbling out over several.
+        let ready = vec![pkg("app", "5.0-1", "5.1-1", None, 0)];
+        let held = vec![
+            pkg("lib-a", "5.0-1", "5.1-1", None, 2),
+            pkg("lib-b", "5.0-1", "5.1-1", None, 9),
+            pkg("lib-c", "5.0-1", "5.1-1", None, 6),
+        ];
+        let d = cohort_coupling_demotions(&ready, &held);
+        assert_eq!(d, vec![("app".to_string(), "lib-b".to_string())]);
+    }
+
+    #[test]
+    fn a_package_is_claimed_by_only_one_rule() {
+        // libelf is a lib32 partner *and* a pkgbase sibling *and* a cohort
+        // member. It must appear once, or it would be demoted repeatedly.
+        let ready = vec![
+            pkg("libelf", "0.195-1", "0.196-1", Some("elfutils"), 0),
+            pkg("elfutils", "0.195-1", "0.196-1", Some("elfutils"), 0),
+        ];
+        let held = vec![pkg("lib32-libelf", "0.195-1", "0.196-2", Some("lib32-libelf"), 3)];
+
+        let d = coupling_demotions(&ready, &held);
+        let names = demoted_names(d.clone());
+        assert_eq!(names, vec!["elfutils", "libelf"]);
+        assert_eq!(d.len(), 2, "each package demoted exactly once");
+        // The exact lib32 rule wins the name over the cohort heuristic.
+        assert_eq!(
+            d.iter().find(|(n, _)| n == "libelf").map(|(_, p)| p.as_str()),
+            Some("lib32-libelf")
+        );
+    }
+
+    #[test]
+    fn one_pass_is_not_enough_to_converge() {
+        // The structural half of #11. `bar` is coupled to `foo` by pkgbase, but
+        // on the first pass `foo` is still in Ready, so nothing links them. Only
+        // after `foo` is demoted does `bar`'s coupling become visible. Versions
+        // are chosen so the cohort rule cannot short-circuit the chain.
+        let held = vec![pkg("lib32-foo", "1.0-1", "1.1-1", Some("lib32-foo"), 5)];
+        let ready = vec![
+            pkg("foo", "2.0-1", "2.1-1", Some("foo-base"), 0),
+            pkg("bar", "3.0-1", "3.1-1", Some("foo-base"), 0),
+        ];
+
+        let first = coupling_demotions(&ready, &held);
+        assert_eq!(demoted_names(first), vec!["foo"], "pass 1 sees only the lib32 pair");
+
+        // Apply it, exactly as commands::update does, and look again.
+        let held2 = vec![
+            held[0].clone(),
+            pkg("foo", "2.0-1", "2.1-1", Some("foo-base"), 5),
+        ];
+        let ready2 = vec![ready[1].clone()];
+
+        let second = coupling_demotions(&ready2, &held2);
+        assert_eq!(
+            demoted_names(second),
+            vec!["bar"],
+            "pass 2 finds what the demotion in pass 1 created"
+        );
+    }
+
+    #[test]
+    fn coupling_reaches_a_fixpoint() {
+        // Whatever the rules do, iterating must terminate with Ready and Held
+        // partitioning the original set — no package lost, none duplicated.
+        let mut ready = vec![
+            pkg("qt6-declarative", "6.11.1-3", "6.11.2-1", Some("qt6-declarative"), 0),
+            pkg("qt6-svg", "6.11.1-1", "6.11.2-1", Some("qt6-svg"), 0),
+            pkg("qt6-tools", "6.11.1-4", "6.11.2-1", Some("qt6-tools"), 0),
+            pkg("unrelated", "9.9-1", "9.9-2", Some("unrelated"), 0),
+        ];
+        let mut held = vec![pkg("qt6-base", "6.11.1-1", "6.11.2-2", Some("qt6-base"), 1)];
+        let total = ready.len() + held.len();
+
+        let mut passes = 0;
+        loop {
+            let d = coupling_demotions(&ready, &held);
+            if d.is_empty() {
+                break;
+            }
+            passes += 1;
+            assert!(passes < 16, "coupling failed to converge");
+            let names: HashSet<&str> = d.iter().map(|(n, _)| n.as_str()).collect();
+            let (move_out, keep): (Vec<_>, Vec<_>) =
+                ready.drain(..).partition(|p| names.contains(p.name.as_str()));
+            ready = keep;
+            held.extend(move_out);
+        }
+
+        assert_eq!(ready.len() + held.len(), total, "no package lost or duplicated");
+        assert_eq!(demoted_names(ready.iter().map(|p| (p.name.clone(), String::new())).collect()),
+                   vec!["unrelated"], "only the unrelated package still releases");
+        assert_eq!(held.len(), 4, "the whole qt6 cohort moved together");
     }
 }
