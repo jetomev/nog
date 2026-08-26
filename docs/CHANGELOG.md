@@ -2,6 +2,31 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.3.0 — August 25, 2026
+
+**One package manager per source.** Until now `nog update` handed the entire upgrade — official repositories *and* AUR — to your AUR helper in a single command. So yay drove the upgrade of some hundred and forty official packages it had no business touching, announced every held package once during its own search and then again through pacman's warnings, and blurred the source boundary that the whole report above it exists to make visible.
+
+The handoff is now four steps, each run by the tool that owns that source:
+
+```
+pacman     official repositories, including binary repos like chaotic-aur
+<helper>   the AUR packages nog cleared, by name
+flatpak    unchanged
+snap       unchanged
+```
+
+A source with nothing cleared is skipped entirely, so a run with no AUR updates never invokes your helper at all.
+
+**The AUR step names its packages.** This is worth explaining, because the obvious alternative would have been to ask the helper for an AUR-only upgrade and pass it a list of exclusions. Naming turned out to be better in three ways. It is already how nog drives Flatpak and Snap, so there is now one idiom across every source instead of two. It uses only the part of the command surface that yay and paru implement identically, rather than a flag whose behaviour differs between them. And it is a stronger guarantee: a package nog does not name cannot move, whatever happens, so a failed AUR lookup can no longer release a hold simply by forgetting to mention it. That was a real bypass, caught on the maintainer's own machine in August, and it is now closed by the shape of the thing rather than by a rule guarding it.
+
+The foreign fence that originally patched that bypass stays, demoted to a second layer and relabelled to say what it now actually does — it blocks held packages from being dragged in as build dependencies, which is a different hole and still an open one.
+
+**Failures now behave differently depending on where they happen.** If pacman fails, nog cancels and touches nothing else: AUR packages are compiled against official libraries, and building them on a system whose repository upgrade did not finish is how you turn one problem into several. If a later step fails, nog reports it and asks whether to continue, defaulting to no. Flatpak and Snap moved to this model too, having previously stopped the run outright. A run you carry through after a failure is recorded as `installed with failures: …`, so the log describes what happened rather than implying a clean install or a cancellation.
+
+Care, safety and control are the premise; they just do not mean the same thing at every step.
+
+Tests: 80 → 84. `aur.rs` had no test module before this release.
+
 ### v1.2.1 — August 25, 2026
 
 **A hotfix, and the most serious bug nog has shipped.** nog could release most of a version-locked family while holding one member back, handing pacman a set that does not hold together.

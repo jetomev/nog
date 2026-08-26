@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.2.1" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.3.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -59,10 +59,15 @@ Remove one or more packages via
 Works uniformly for packages originally installed from official repos or AUR.
 .TP
 .B nog update
-Compute a tier-aware system upgrade plan and hand it off to
+Compute a tier-aware system upgrade plan and hand each source to the tool
+that owns it \(em
 .BR pacman (8)
-or the configured AUR helper. Every pending upgrade is shown before any
-transaction starts, classified into one of three buckets:
+for the official repositories, then the configured AUR helper, then
+.BR flatpak (1)
+and
+.BR snap (8).
+Every pending upgrade is shown before any transaction starts, classified into
+one of three buckets:
 .RS
 .IP \(bu 2
 .B Ready to install
@@ -94,11 +99,24 @@ missing, nog falls back to \fB/var/lib/pacman/sync\fR with a warning; holds
 may then be dated from stale build dates. A hold is only ever dated from a DB
 entry matching the pending candidate's exact version \(em mismatches bucket
 as Unknown.
-The final transaction invokes
-.B pacman
-or the helper with
+The handoff runs in four steps, skipping any source with nothing cleared.
+.B pacman -Syu
+upgrades the official repositories with
 .B --ignore=
-listing all held and user-skipped packages.
+listing all held and user-skipped packages; the helper is then invoked as
+.B "<helper> -S"
+with the cleared AUR package names only, so a held AUR package is never named
+and cannot move. Flatpak and snap follow, unchanged.
+.PP
+Failure handling differs by step. If
+.B pacman
+fails, nog cancels without touching another source \(em AUR packages are
+compiled against official libraries and must not be built on a system whose
+repository upgrade did not complete. If a later step fails, nog reports it and
+asks whether to continue, defaulting to
+.BR no ;
+a non-interactive run stops.
+.PP
 Every run is appended to a per-day CSV log
 .RB ( "YYYYMMDD nog-update.csv"
 under
@@ -110,7 +128,8 @@ mirroring the report tables plus the run's outcome
 .BR cancelled ,
 .BR "all held" ,
 .BR "up to date" ,
-.BR "handoff failed" );
+.BR "pacman handoff failed" ,
+.BR "installed with failures: ..." );
 logs older than 90 days are pruned automatically. Logging soft-fails with a
 warning and never blocks an update.
 .PP

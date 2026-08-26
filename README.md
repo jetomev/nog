@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.2.1](https://img.shields.io/badge/Version-1.2.1-purple.svg)
+![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -60,7 +60,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days
 
 **Security**
-- **The foreign fence** *(v1.0.9)* — an update can only touch AUR or local packages nog explicitly cleared **this run**. A failed AUR lookup can never silently release a hold. This one was born from a real bypass we caught on our own machine.
+- **One manager per source** *(v1.3.0)* — pacman upgrades official packages; your AUR helper is handed only the AUR packages nog cleared, **by name**. Nothing unnamed can move, so a failed AUR lookup cannot release a hold by omission. Born from a real bypass we caught on our own machine, originally patched by the foreign fence *(v1.0.9)*, which now backs it up as a second layer.
 - **Kill switches** *(v1.0.9)* — `nog deactivate aur` or `nog deactivate chaotic-aur` cuts off a supply chain in one command during an incident. `nog activate` puts it back exactly as it was.
 - **Runs as you, not as root** — nog escalates only at the specific moments root is genuinely needed, and you see every prompt. See [Privilege model](#privilege-model).
 - **Holds use pacman's own `--ignore`**, so there's no mechanism by which nog could quietly skip one.
@@ -264,9 +264,12 @@ UNKNOWN:
 
 nog: Proceed with installation? [Y/n] y
 
-nog: Handing off to yay ...
+nog: Handing off official packages to pacman ...
 :: Starting full system upgrade...
-   (the yay/pacman transaction runs here)
+   (the pacman transaction runs here)
+
+nog: Handing off 2 AUR package(s) to yay ...
+     (yay shows its own build and transaction below)
 
 nog: Update finished!
 nog: run logged to /home/jetomev/.local/share/nog/logs/20260729 nog-update.csv
@@ -288,7 +291,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.2.1"
+version = "1.3.0"
 log_level = "info"
 
 [paths]
@@ -513,15 +516,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.2.1 shipped 2026-08-25** — a hotfix for family coupling ([#11](https://github.com/jetomev/nog/issues/11)), after a split Qt6 stack left a desktop unable to reach a login screen. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.3.0 shipped 2026-08-25.** Two releases in one evening: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — one package manager per source ([#10](https://github.com/jetomev/nog/issues/10) · `priority-1`)
+### Next — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
 
-- [ ] **Split the update handoff.** Right now `nog update` hands the entire upgrade — official repos *and* AUR — to the AUR helper in one command. So yay drives the upgrade of ~140 official packages it has no business touching. The output is noisy, and the source boundaries nog works to keep visible get blurred.
-
-  Each source should be handled by the tool that owns it, in nog's own order: **pacman → AUR helper → Flatpak → Snap**. Flatpak and Snap already run as separate steps, so only the first needs splitting — pacman for official packages, then the helper for AUR packages only. The foreign fence stays on the AUR step, and each step reports its own result.
-
-  A welcome side effect: the per-source counts nog already prints will finally describe what actually runs.
+- [ ] **Say when a reboot is needed.** Found live: a kernel or driver upgrade can leave the running system and the installed modules out of step, and nothing tells you until something breaks. nog knows exactly what it just installed, so it is the right place to say "reboot before you next use this".
 
 ### Later
 
@@ -537,9 +536,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [x] **C1 · v1.1.0** — Flatpak
 - [x] **C2 · v1.2.0** — Snap
-- [ ] **C3 · v1.3.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
-- [ ] **C4 · v1.4.0** — Full command surface plus `--json` output
-- [ ] **C5 · v1.5.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
+- [ ] **C3 · v1.4.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
+- [ ] **C4 · v1.5.0** — Full command surface plus `--json` output
+- [ ] **C5 · v1.6.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
 - [ ] **C6** — nogForge, the visual companion, built on forgekit
 - [ ] **C7 · v2.0.0** — the crown release
 
@@ -548,6 +547,31 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.3.0 — August 25, 2026
+
+**One package manager per source.** Until now `nog update` handed the entire upgrade — official repositories *and* AUR — to your AUR helper in a single command. So yay drove the upgrade of some hundred and forty official packages it had no business touching, announced every held package once during its own search and then again through pacman's warnings, and blurred the source boundary that the whole report above it exists to make visible.
+
+The handoff is now four steps, each run by the tool that owns that source:
+
+```
+pacman     official repositories, including binary repos like chaotic-aur
+<helper>   the AUR packages nog cleared, by name
+flatpak    unchanged
+snap       unchanged
+```
+
+A source with nothing cleared is skipped entirely, so a run with no AUR updates never invokes your helper at all.
+
+**The AUR step names its packages.** This is worth explaining, because the obvious alternative would have been to ask the helper for an AUR-only upgrade and pass it a list of exclusions. Naming turned out to be better in three ways. It is already how nog drives Flatpak and Snap, so there is now one idiom across every source instead of two. It uses only the part of the command surface that yay and paru implement identically, rather than a flag whose behaviour differs between them. And it is a stronger guarantee: a package nog does not name cannot move, whatever happens, so a failed AUR lookup can no longer release a hold simply by forgetting to mention it. That was a real bypass, caught on the maintainer's own machine in August, and it is now closed by the shape of the thing rather than by a rule guarding it.
+
+The foreign fence that originally patched that bypass stays, demoted to a second layer and relabelled to say what it now actually does — it blocks held packages from being dragged in as build dependencies, which is a different hole and still an open one.
+
+**Failures now behave differently depending on where they happen.** If pacman fails, nog cancels and touches nothing else: AUR packages are compiled against official libraries, and building them on a system whose repository upgrade did not finish is how you turn one problem into several. If a later step fails, nog reports it and asks whether to continue, defaulting to no. Flatpak and Snap moved to this model too, having previously stopped the run outright. A run you carry through after a failure is recorded as `installed with failures: …`, so the log describes what happened rather than implying a clean install or a cancellation.
+
+Care, safety and control are the premise; they just do not mean the same thing at every step.
+
+Tests: 80 → 84. `aur.rs` had no test module before this release.
 
 ### v1.2.1 — August 25, 2026
 
@@ -566,18 +590,6 @@ Three things were wrong, and all three are fixed.
 That last rule is a judgement call rather than a certainty, and it is deliberately cautious — it will sometimes keep a family waiting that would have been fine. Replaying the 25 August run through it produced four correct catches and no false alarms across 221 packages, including a sixty-seven-package font group and a thirty-four-package VLC group that it correctly left alone. When it does err, it errs by making you wait a few days, which is the whole idea of a tool built on the premise that packages should settle before they land.
 
 Tests: 69 → 80.
-
-### v1.2.0 — August 10, 2026
-
-**nog speaks Snap.** Snaps are detected, aged through the same tier windows, tagged `· snap` in the tables, and refreshed only once nog has cleared them. The clock is the publish date of the pending revision in the channel you actually track.
-
-Two deliberate differences from Flatpak. Updating a snap requires root, so nog escalates for that one step and stays unprivileged everywhere else. And because snapd isn't in Arch's official repos, its absence is completely normal — the source sits dormant and silent rather than complaining.
-
-Snap is expected to serve the tail end: most software is covered long before the chain reaches it, but when a snap is the only home for something, nog can now manage it like anything else.
-
-Dogfooded on a snap deliberately left 1,663 days out of date, which it reported honestly.
-
-Also in this release: the README's roadmap and changelog now keep only the upcoming work and the two most recent releases. The file had grown past a thousand lines, which serves archaeologists better than newcomers.
 
 ---
 
