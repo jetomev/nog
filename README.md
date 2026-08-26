@@ -524,6 +524,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ### Later
 
+- [ ] **Validate against paru** ([#12](https://github.com/jetomev/nog/issues/12)) — nog has supported paru since v1.0.0 and has never been run against it; every release so far was built and dogfooded on a machine with yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
 - [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
@@ -539,7 +540,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [ ] **C3 · v1.4.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
 - [ ] **C4 · v1.5.0** — Full command surface plus `--json` output
 - [ ] **C5 · v1.6.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
-- [ ] **C6** — nogForge, the visual companion, built on forgekit
+- [ ] **C6** — nogForge, the visual companion, built on forgekit *(gated on [#12](https://github.com/jetomev/nog/issues/12) — validate against paru first)*
 - [ ] **C7 · v2.0.0** — the crown release
 
 *Every released version's roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).*
