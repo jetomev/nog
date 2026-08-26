@@ -791,11 +791,21 @@ pub fn update(realign: bool) {
         return;
     }
 
-    // v1.0.9 (Ironhold): the foreign fence. The helper's -Syu resolves AUR
-    // updates on its own at handoff time, so it can upgrade a held AUR package
-    // whenever our earlier query failed to name it — the 2026-08-01 bypass.
-    // Fence rule: every foreign package is ignored unless nog cleared it THIS
-    // run (Ready, or an Unknown the user answered yes to). See holds::foreign_fence.
+    // v1.0.9 (Ironhold): the foreign fence — every foreign package is ignored
+    // unless nog cleared it THIS run. See holds::foreign_fence.
+    //
+    // v1.3.0 (issue #10) demoted this from the primary defence to a second
+    // layer, and it is worth being honest about which it now is. The fence was
+    // built because the old `-Syu` handoff let the helper resolve AUR updates
+    // itself, so it could upgrade a held package our earlier query had failed to
+    // name — the 2026-08-01 bypass. The AUR step no longer works that way: it is
+    // handed an explicit list of cleared names, so an unnamed package cannot
+    // move whatever the query did.
+    //
+    // The fence stays because it still does real work. It rides along as
+    // `--ignore` on the AUR step, where dependency resolution during an AUR
+    // build can still reach for a held package. That is a different hole from
+    // the one it was built for, and it is still open.
     if helper.is_some() {
         let mut cleared: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
         cleared.extend(
@@ -807,19 +817,21 @@ pub fn update(realign: bool) {
         if !fence.is_empty() {
             println!();
             println!(
-                "{}nog: foreign fence — {} AUR/local package(s) shielded from the handoff{}",
+                "{}nog: foreign fence — {} AUR/local package(s) held back as a dependency{}",
                 C_SUBTEXT, fence.len(), C_RESET
             );
             println!(
-                "{}     (only AUR updates cleared by nog can install, even if the AUR query failed).{}",
+                "{}     (the AUR step installs only what nog named; this also blocks them as deps).{}",
                 C_SUBTEXT, C_RESET
             );
             ignore.extend(fence);
         }
     }
 
-    // First review gate. yay/pacman will present its own transaction detail and
-    // ask again — two deliberate layers so an expert can still catch and cancel.
+    // First review gate. Each source's own tool presents its transaction and
+    // asks again — deliberate layers, so an expert can still catch and cancel
+    // at the point where the detail is in front of them. One prompt per tool
+    // that actually runs; sources with nothing to do stay silent.
     println!();
     if !prompt_proceed() {
         println!("nog: Cancelled — nothing was installed.");
@@ -827,23 +839,60 @@ pub fn update(realign: bool) {
         return;
     }
 
+    // v1.3.0 (issue #10): one package manager per source, in nog's own order —
+    // pacman -> AUR helper -> flatpak -> snap.
+    //
+    // Until now the whole repo+AUR upgrade went to the AUR helper in a single
+    // `-Syu`, so yay rebuilt and re-narrated a plan pacman was about to execute
+    // anyway: every held package was announced twice, once by each tool. Worse,
+    // it blurred the source boundary nog spends the whole report making visible.
+    //
+    // Failure handling differs by step, deliberately. pacman is foundational —
+    // AUR packages are compiled against official libraries, so a failed repo
+    // upgrade must never be followed by builds against a half-upgraded system.
+    // That one cancels. Every later step is independent enough that a failure is
+    // worth reporting and asking about rather than deciding unilaterally.
+    let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+    let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
+    let mut step_failures: Vec<String> = Vec::new();
+
+    // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
-    let status = match helper {
-        Some(h) => {
-            println!("{}nog: Handing off to {} ...{}", C_BOLD, h, C_RESET);
-            aur::upgrade_excluding(h, &ignore)
-        }
-        None => {
-            println!("{}nog: Handing off to pacman ...{}", C_BOLD, C_RESET);
-            pacman::update_excluding(&ignore)
-        }
-    };
+    println!("{}nog: Handing off official packages to pacman ...{}", C_BOLD, C_RESET);
+    let status = pacman::update_excluding(&ignore);
     if !status.success() {
         let code = status.code().unwrap_or(-1);
-        eprintln!("nog: upgrade exited with status {}", code);
+        eprintln!();
+        eprintln!("{}nog: pacman exited with status {} — cancelling.{}", C_BOLD, code, C_RESET);
+        eprintln!("     No other source was touched. AUR packages are built against");
+        eprintln!("     official libraries, so nog will not build them on a system");
+        eprintln!("     whose repo upgrade did not complete.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-            &format!("handoff failed (status {})", code));
+            &format!("pacman handoff failed (status {})", code));
         std::process::exit(status.code().unwrap_or(1));
+    }
+
+    // Step 2 — the AUR, by name. Only what nog cleared this run is ever passed,
+    // so held AUR packages are not merely ignored, they are never mentioned.
+    if let Some(h) = helper {
+        let aur_apply = aur::apply_list(&aur_names, &ready_names, &unknown_names, &ignore);
+        if !aur_apply.is_empty() {
+            println!();
+            println!("{}nog: Handing off {} AUR package(s) to {} ...{}",
+                C_BOLD, aur_apply.len(), h, C_RESET);
+            println!("{}     ({} shows its own build and transaction below){}",
+                C_SUBTEXT, h, C_RESET);
+            let aur_status = aur::upgrade_cleared(h, &aur_apply, &ignore);
+            if !aur_status.success() {
+                let code = aur_status.code().unwrap_or(-1);
+                step_failures.push(format!("aur (status {})", code));
+                if !prompt_continue_after_failure(&h.to_string(), code) {
+                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+                        &format!("cancelled after aur step failed (status {})", code));
+                    return;
+                }
+            }
+        }
     }
 
     // v1.1.0 (C1): flatpak apply — only the refs nog cleared THIS run
@@ -851,8 +900,6 @@ pub fn update(realign: bool) {
     // listing exactly the cleared app IDs IS the hold mechanism: held
     // flatpaks are simply never named.
     if !flatpak_names.is_empty() {
-        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
-        let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
         let fp_apply = flatpak::apply_list(&flatpak_names, &ready_names, &unknown_names, &ignore);
         if !fp_apply.is_empty() {
             println!();
@@ -861,10 +908,12 @@ pub fn update(realign: bool) {
             let fp_status = flatpak::update(&fp_apply);
             if !fp_status.success() {
                 let code = fp_status.code().unwrap_or(-1);
-                eprintln!("nog: flatpak update exited with status {}", code);
-                write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                    &format!("flatpak apply failed (status {})", code));
-                std::process::exit(fp_status.code().unwrap_or(1));
+                step_failures.push(format!("flatpak (status {})", code));
+                if !prompt_continue_after_failure("flatpak", code) {
+                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+                        &format!("cancelled after flatpak step failed (status {})", code));
+                    return;
+                }
             }
         }
     }
@@ -872,8 +921,6 @@ pub fn update(realign: bool) {
     // v1.2.0 (C2): snap apply — same naming rule as flatpak. `snap refresh`
     // needs root, so nog escalates through sudo for this step only.
     if !snap_names.is_empty() {
-        let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
-        let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
         let sn_apply = snap::apply_list(&snap_names, &ready_names, &unknown_names, &ignore);
         if !sn_apply.is_empty() {
             println!();
@@ -883,17 +930,30 @@ pub fn update(realign: bool) {
             let sn_status = snap::refresh(&sn_apply);
             if !sn_status.success() {
                 let code = sn_status.code().unwrap_or(-1);
-                eprintln!("nog: snap refresh exited with status {}", code);
-                write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                    &format!("snap apply failed (status {})", code));
-                std::process::exit(sn_status.code().unwrap_or(1));
+                step_failures.push(format!("snap (status {})", code));
+                if !prompt_continue_after_failure("snap", code) {
+                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
+                        &format!("cancelled after snap step failed (status {})", code));
+                    return;
+                }
             }
         }
     }
 
     println!();
-    println!("nog: Update finished!");
-    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "installed");
+    // The log's outcome describes the run as a whole: a run the user chose to
+    // carry through after a step failed is neither a clean install nor a
+    // cancellation, and reading it back later should not suggest either.
+    let outcome = if step_failures.is_empty() {
+        println!("nog: Update finished!");
+        "installed".to_string()
+    } else {
+        println!("{}nog: Update finished, with {} failed step(s).{}",
+            C_BOLD, step_failures.len(), C_RESET);
+        println!("{}     Failed: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
+        format!("installed with failures: {}", step_failures.join("; "))
+    };
+    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, &outcome);
     println!();
     println!("Thank you for using nog!");
 }
@@ -972,6 +1032,39 @@ fn prompt_proceed() -> bool {
         Ok(_) => {
             let t = buf.trim().to_lowercase();
             t.is_empty() || t == "y" || t == "yes"
+        }
+        Err(_) => false,
+    }
+}
+
+/// v1.3.0 (issue #10): a source failed, and the remaining sources are
+/// independent of it. Report it and let the user decide.
+///
+/// Default is **no** — the opposite of the pre-handoff gate, and deliberately
+/// so. Agreeing to an update is not agreeing to push past a failure in it, and
+/// a non-interactive run must never carry on through an error it cannot show
+/// anyone. Ctrl-D stops, same as answering no.
+fn prompt_continue_after_failure(step: &str, code: i32) -> bool {
+    use std::io::{self, Write};
+    eprintln!();
+    eprintln!("{}nog: the {} step exited with status {}.{}", C_BOLD, step, code, C_RESET);
+    eprintln!("{}     Official packages already upgraded successfully; this failure{}",
+        C_SUBTEXT, C_RESET);
+    eprintln!("{}     is confined to {}. Remaining sources are independent of it.{}",
+        C_SUBTEXT, step, C_RESET);
+    print!("nog: Continue with the remaining sources? [y/N] ");
+    if io::stdout().flush().is_err() {
+        return false;
+    }
+    let mut buf = String::new();
+    match io::stdin().read_line(&mut buf) {
+        Ok(0) => {
+            eprintln!("nog: no input — stopping here.");
+            false
+        }
+        Ok(_) => {
+            let t = buf.trim().to_lowercase();
+            t == "y" || t == "yes"
         }
         Err(_) => false,
     }

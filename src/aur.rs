@@ -14,9 +14,15 @@
 //
 // Both yay and paru share the pacman CLI surface we care about:
 //   <helper> -Qua               list pending AUR updates (pkg oldver -> newver)
-//   <helper> -S <pkgs>          install, tries sync repos first then AUR
-//   <helper> -Syu [--ignore=…]  full upgrade, same ignore semantics as pacman
+//   <helper> -Sai <pkgs>        AUR package info, for build dates
+//   <helper> -S <pkgs>          install/rebuild, tries sync repos first then AUR
 // So once we pick a binary name, everything downstream is identical.
+//
+// Note what is NOT in that list: nog no longer asks a helper for a full `-Syu`
+// (issue #10). Official packages are pacman's own step, and the AUR step is
+// handed an explicit list of names. That keeps nog on the part of the surface
+// both helpers implement identically, and off flags like `-Sua` whose
+// sysupgrade-filtering behaviour is helper-specific and hard to verify.
 
 use std::collections::HashMap;
 use std::process::{Command, ExitStatus};
@@ -150,10 +156,27 @@ pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
         .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
 }
 
-/// Full-system upgrade via the helper, excluding the given package list.
-/// Covers both official repo and AUR packages in a single transaction.
-pub fn upgrade_excluding(helper: Helper, excluded: &[String]) -> ExitStatus {
-    let mut args: Vec<String> = vec!["-Syu".to_string()];
+/// Upgrade exactly the AUR packages nog cleared this run (v1.3.0, issue #10).
+///
+/// Replaces the old `-Syu` handoff, which asked the helper to drive the entire
+/// system upgrade — official repos included — and so had the helper rebuilding
+/// a plan pacman had already been given. Official packages are now pacman's
+/// step; this one is only ever handed AUR names.
+///
+/// Naming the packages explicitly, rather than relying on a helper flag to
+/// filter a sysupgrade down to the AUR, is the same mechanism flatpak and snap
+/// already use: **listing exactly what was cleared IS the hold**. Nothing
+/// unnamed can move, so a failed or empty AUR query cannot release a held
+/// package by omission — the hole the v1.0.9 foreign fence was built to cover
+/// is closed structurally here. It also keeps nog on bedrock pacman syntax
+/// that yay and paru implement identically, instead of a flag whose
+/// sysupgrade-filtering semantics differ between them.
+///
+/// `excluded` is still passed as `--ignore`: an AUR build can pull a repo
+/// package in as a dependency, and a held package must stay held even then.
+pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String]) -> ExitStatus {
+    let mut args: Vec<String> = vec!["-S".to_string()];
+    args.extend(packages.iter().cloned());
     if !excluded.is_empty() {
         args.push("--ignore".to_string());
         args.push(excluded.join(","));
@@ -163,6 +186,25 @@ pub fn upgrade_excluding(helper: Helper, excluded: &[String]) -> ExitStatus {
         .args(&str_args)
         .status()
         .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
+}
+
+/// Which AUR packages this run cleared: Ready ones, plus Unknowns the user
+/// answered yes to. Mirrors `flatpak::apply_list` and `snap::apply_list` — one
+/// idiom across every source nog drives.
+pub fn apply_list(
+    aur_names: &[String],
+    ready: &[String],
+    unknown: &[String],
+    ignore: &[String],
+) -> Vec<String> {
+    let is_aur = |n: &String| aur_names.iter().any(|a| a == n);
+    let mut out: Vec<String> = ready.iter().filter(|n| is_aur(n)).cloned().collect();
+    out.extend(
+        unknown.iter()
+            .filter(|n| is_aur(n) && !ignore.iter().any(|i| i == *n))
+            .cloned(),
+    );
+    out
 }
 
 /// Resolve AUR build dates for the given packages by delegating to the helper's
@@ -237,4 +279,59 @@ fn parse_date_to_unix(s: &str) -> Option<u64> {
         return None;
     }
     String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owned(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn apply_list_names_only_cleared_aur_packages() {
+        let aur = owned(&["fresh-editor-bin", "snapd", "sparrow-wallet"]);
+        let ready = owned(&["fresh-editor-bin", "vlc"]); // vlc is an official package
+        let unknown = owned(&["snapd", "sparrow-wallet"]);
+        // sparrow-wallet was skipped by the user at the Unknown prompt:
+        let ignore = owned(&["sparrow-wallet", "glibc"]);
+
+        let got = apply_list(&aur, &ready, &unknown, &ignore);
+        assert_eq!(got, owned(&["fresh-editor-bin", "snapd"]));
+        // Official Ready packages belong to pacman's step and must never leak here:
+        assert!(!got.contains(&"vlc".to_string()));
+        // A skipped Unknown is simply never named:
+        assert!(!got.contains(&"sparrow-wallet".to_string()));
+    }
+
+    #[test]
+    fn held_aur_packages_can_never_be_applied() {
+        // A held package appears in neither bucket — the caller's buckets are
+        // disjoint — so there is nothing to name and nothing can be built.
+        let aur = owned(&["fresh-editor-bin"]);
+        assert!(apply_list(&aur, &[], &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_failed_aur_query_cannot_release_a_hold() {
+        // Regression for the 2026-08-01 bypass, now closed structurally rather
+        // than by the foreign fence. If the AUR query returns nothing, no AUR
+        // package is classified, so none reaches Ready — and the helper is
+        // handed an empty list instead of being invited to resolve its own
+        // idea of what needs upgrading.
+        let aur: Vec<String> = Vec::new();
+        let ready = owned(&["fresh-editor-bin", "snapd"]);
+        let unknown = owned(&["sparrow-wallet"]);
+        assert!(apply_list(&aur, &ready, &unknown, &[]).is_empty());
+    }
+
+    #[test]
+    fn ready_comes_before_approved_unknowns() {
+        // Order is stable and meaningful: what cleared on its own, then what the
+        // user waved through. The run log and the helper both see the same shape.
+        let aur = owned(&["a-pkg", "z-pkg"]);
+        let got = apply_list(&aur, &owned(&["z-pkg"]), &owned(&["a-pkg"]), &[]);
+        assert_eq!(got, owned(&["z-pkg", "a-pkg"]));
+    }
 }
