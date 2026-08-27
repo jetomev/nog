@@ -25,7 +25,20 @@ The foreign fence that originally patched that bypass stays, demoted to a second
 
 Care, safety and control are the premise; they just do not mean the same thing at every step.
 
-Tests: 80 → 84. `aur.rs` had no test module before this release.
+**The report block got four small changes, one of which is not cosmetic.** The banner now carries the version:
+
+```
+=============
+nog v1.3.0
+Update!
+=============
+```
+
+Pasted output is the primary evidence in nog's own testing, and until now a transcript did not say which binary produced it — reconstructing that from a run log meant reading git history for an outcome string. Section titles are underlined with `=` to separate them from the rule that now runs under each table's column headers, and that rule is measured in characters rather than bytes, so a note carrying `·` or `—` cannot push it past the row it underlines.
+
+The fourth: a coupled package's note leads with its countdown, `3 days · coupled to lib32-libelf` rather than `coupled to lib32-libelf · 3 days`. Every other held row opens with `N day(s)`, so the Note column can be read straight down its left edge; the coupled rows were the only ones that broke that, and they are the rows most worth finding.
+
+Tests: 80 → 86. `aur.rs` had no test module before this release.
 
 ### v1.2.1 — August 25, 2026
 

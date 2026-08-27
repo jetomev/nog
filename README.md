@@ -224,8 +224,11 @@ extra/htop 3.4.1-1 [installed] [Tier 3 — 7d hold]
 From a real run, with the Held section trimmed:
 
 ```
-nog - Update!
 =============
+nog v1.3.0
+Update!
+=============
+
 Date: 07/29/2026
 Time: 08:52 PM
 User: jetomev
@@ -236,29 +239,29 @@ nog: 75 official repository update(s) reported by pacman.
 nog: 1 AUR update(s) reported by yay.
 
 READY TO INSTALL:
------------------
+=================
 
 Package (3)     Old Version   New Version   Tier  Note
-
+-------------------------------------------------------------------
 libraqm         0.10.5-1      0.11.0-1      3     hold just expired
 plasma-desktop  6.7.2-1       6.7.3-1       2     hold just expired
 python-certifi  2026.06.17-1  2026.07.22-1  3     1 day past window
 
 ON HOLD FROM INSTALL:
----------------------
+=====================
 
-Package (73)            Old Version                  New Version                  Tier  Note
-
-archlinux-keyring       20260707.1-1                 20260727-1                   3     4 days remaining
-glibc                   2.43+r37+gfdf10644d6ee-1     2.44+r5+g7cba77790f32-1      1     28 days remaining
-libnm                   1.56.1-2                     1.58.0-1                     2     5 days remaining
-linux-zen               7.0.5.zen1-1                 7.1.5.zen1-2                 1     28 days remaining
-linux-zen-headers       7.0.5.zen1-1                 7.1.5.zen1-2                 1     28 days remaining
-lib32-libnm             1.56.1-1                     1.58.0-1                     3     coupled to libnm · 5 days
-  ⋮                     (67 more)
+Package (73)       Old Version               New Version              Tier  Note
+-----------------------------------------------------------------------------------------------------
+archlinux-keyring  20260707.1-1              20260727-1               3     4 days remaining
+glibc              2.43+r37+gfdf10644d6ee-1  2.44+r5+g7cba77790f32-1  1     28 days remaining
+libnm              1.56.1-2                  1.58.0-1                 2     5 days remaining
+linux-zen          7.0.5.zen1-1              7.1.5.zen1-2             1     28 days remaining
+linux-zen-headers  7.0.5.zen1-1              7.1.5.zen1-2             1     28 days remaining
+lib32-libnm        1.56.1-1                  1.58.0-1                 3     5 days · coupled to libnm
+  ⋮                (67 more)
 
 UNKNOWN:
---------
+========
 
 (none)
 

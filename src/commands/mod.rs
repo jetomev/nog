@@ -995,8 +995,12 @@ fn print_update_header() -> (String, String, String) {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
-    println!("{}nog - Update!{}", C_BOLD, C_RESET);
+    println!();
     println!("=============");
+    println!("{}nog v{}{}", C_BOLD, env!("CARGO_PKG_VERSION"), C_RESET);
+    println!("{}Update!{}", C_BOLD, C_RESET);
+    println!("=============");
+    println!();
     println!("Date: {}", date);
     println!("Time: {}", time);
     println!("User: {}", user);
@@ -1118,7 +1122,7 @@ impl TableRow {
 /// intentionally ignored — long version strings simply widen the columns.
 fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
     let title_line = format!("{}:", title);
-    let mut out = format!("{}\n{}\n\n", title_line, "-".repeat(title_line.len()));
+    let mut out = format!("{}\n{}\n\n", title_line, "=".repeat(title_line.len()));
 
     if rows.is_empty() {
         out.push_str("(none)\n");
@@ -1139,6 +1143,12 @@ fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
         .max()
         .unwrap();
     let w_tier = "Tier".len(); // the tier digit is always a single char
+    // Notes are the one column that carries non-ASCII (`·`, `—`), so measure
+    // them in characters: `len()` counts bytes and would overshoot the rule.
+    let w_note = std::iter::once("Note".len())
+        .chain(rows.iter().map(|r| r.note.chars().count()))
+        .max()
+        .unwrap();
     let g = "  ";
 
     out.push_str(&format!(
@@ -1146,6 +1156,11 @@ fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
         pkg_hdr, "Old Version", "New Version", "Tier", "Note",
         wp = w_pkg, wo = w_old, wn = w_new, wt = w_tier, g = g,
     ));
+    // Rule under the column headers, sized to the table's real width so it
+    // never runs short of the Note column or past it.
+    let table_width =
+        w_pkg + w_old + w_new + w_tier + w_note + 4 * g.len();
+    out.push_str(&"-".repeat(table_width));
     out.push('\n');
 
     for r in rows {
@@ -1181,9 +1196,11 @@ fn held_note(remaining: u64, reason: &HeldReason) -> String {
     match reason {
         HeldReason::ManualSignoff =>
             "manual sign-off required — run `nog unlock` to release".to_string(),
+        // Countdown first, so the Note column stays scannable by its leading
+        // number: every held row begins with "N day(s)", coupled or not.
         HeldReason::CoupledTo(partner) => match remaining {
-            1 => format!("coupled to {} · 1 day", partner),
-            n => format!("coupled to {} · {} days", partner, n),
+            1 => format!("1 day · coupled to {}", partner),
+            n => format!("{} days · coupled to {}", n, partner),
         },
         HeldReason::Window => match remaining {
             1 => "1 day remaining".to_string(),
@@ -1318,14 +1335,20 @@ mod output_tests {
         let t = format_table("READY TO INSTALL", &rows, false);
         let lines: Vec<&str> = t.lines().collect();
         assert_eq!(lines[0], "READY TO INSTALL:");
-        assert_eq!(lines[1], "-".repeat("READY TO INSTALL:".len()));
+        assert_eq!(lines[1], "=".repeat("READY TO INSTALL:".len()));
         assert_eq!(lines[2], "");
         let hdr = lines[3];
         assert!(hdr.starts_with("Package (2)"));
         for label in ["Old Version", "New Version", "Tier", "Note"] {
             assert!(hdr.contains(label), "header missing {label}");
         }
-        assert_eq!(lines[4], "");
+        // The rule under the headers spans the whole table: never shorter than
+        // the header row, and exactly as wide as the widest Note cell reaches.
+        let rule = lines[4];
+        assert!(rule.chars().all(|c| c == '-'), "rule not a dashed rule: {rule:?}");
+        assert_eq!(rule.len(), hdr.find("Note").unwrap() + "9 days past window".len());
+        assert!(rule.len() >= hdr.len());
+
         // Alignment guarantee: every column's value begins exactly under its header.
         let (r0, r1) = (lines[5], lines[6]);
         assert!(r0.starts_with("libnm"));
@@ -1342,11 +1365,50 @@ mod output_tests {
         }
     }
 
+    /// The rule is measured in characters, not bytes: a note carrying `·` or
+    /// `—` must not push it past the row it is supposed to underline.
+    #[test]
+    fn rule_measures_notes_in_characters_not_bytes() {
+        let rows = vec![
+            TableRow { pkg: "elfutils".into(), old: "0.195-1".into(), new: "0.196-1".into(),
+                       tier: 3, note: "3 days · coupled to lib32-libelf".into() },
+        ];
+        let t = format_table("ON HOLD FROM INSTALL", &rows, false);
+        let lines: Vec<&str> = t.lines().collect();
+        let (rule, row) = (lines[4], lines[5]);
+        assert_eq!(
+            rule.chars().count(),
+            row.chars().count(),
+            "rule and its widest row disagree:\n{rule}\n{row}"
+        );
+    }
+
     #[test]
     fn empty_table_renders_none() {
         let t = format_table("UNKNOWN", &[], false);
         assert!(t.starts_with("UNKNOWN:\n"));
         assert!(t.contains("\n\n(none)\n"));
+    }
+
+    /// Every Held note opens with its countdown, so the Note column can be
+    /// scanned down its leading number. A coupled row is no exception — the
+    /// partner is the tail of the note, never its head.
+    #[test]
+    fn held_notes_all_lead_with_the_countdown() {
+        let cases = [
+            (1, HeldReason::Window, "1 day remaining"),
+            (12, HeldReason::Window, "12 days remaining"),
+            (1, HeldReason::CoupledTo("lib32-libelf".into()), "1 day · coupled to lib32-libelf"),
+            (3, HeldReason::CoupledTo("lib32-libelf".into()), "3 days · coupled to lib32-libelf"),
+        ];
+        for (remaining, reason, expected) in cases {
+            let note = held_note(remaining, &reason);
+            assert_eq!(note, expected);
+            assert!(
+                note.starts_with(&remaining.to_string()),
+                "note does not lead with its countdown: {note:?}"
+            );
+        }
     }
 }
 
