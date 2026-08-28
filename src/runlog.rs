@@ -38,7 +38,7 @@ pub struct RunRow {
 
 /// A full `nog update` run: the banner context, what the report showed, and
 /// how the run ended ("installed", "cancelled", "up to date", "all held",
-/// "handoff failed (status N)").
+/// "handoff did not complete (status N)").
 pub struct RunRecord {
     pub date: String,
     pub time: String,

@@ -864,11 +864,13 @@ pub fn update(realign: bool) {
         let code = status.code().unwrap_or(-1);
         eprintln!();
         eprintln!("{}nog: pacman exited with status {} — cancelling.{}", C_BOLD, code, C_RESET);
+        eprintln!("     That is either a declined prompt or a pacman error — the exit");
+        eprintln!("     status alone cannot tell the two apart.");
         eprintln!("     No other source was touched. AUR packages are built against");
         eprintln!("     official libraries, so nog will not build them on a system");
         eprintln!("     whose repo upgrade did not complete.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-            &format!("pacman handoff failed (status {})", code));
+            &format!("pacman handoff did not complete (status {})", code));
         std::process::exit(status.code().unwrap_or(1));
     }
 
@@ -888,7 +890,7 @@ pub fn update(realign: bool) {
                 step_failures.push(format!("aur (status {})", code));
                 if !prompt_continue_after_failure(&h.to_string(), code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after aur step failed (status {})", code));
+                        &format!("cancelled after the aur step did not complete (status {})", code));
                     return;
                 }
             }
@@ -911,7 +913,7 @@ pub fn update(realign: bool) {
                 step_failures.push(format!("flatpak (status {})", code));
                 if !prompt_continue_after_failure("flatpak", code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after flatpak step failed (status {})", code));
+                        &format!("cancelled after the flatpak step did not complete (status {})", code));
                     return;
                 }
             }
@@ -933,7 +935,7 @@ pub fn update(realign: bool) {
                 step_failures.push(format!("snap (status {})", code));
                 if !prompt_continue_after_failure("snap", code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after snap step failed (status {})", code));
+                        &format!("cancelled after the snap step did not complete (status {})", code));
                     return;
                 }
             }
@@ -944,14 +946,16 @@ pub fn update(realign: bool) {
     // The log's outcome describes the run as a whole: a run the user chose to
     // carry through after a step failed is neither a clean install nor a
     // cancellation, and reading it back later should not suggest either.
+    // "did not complete" rather than "failed": a non-zero exit is equally a
+    // user declining the tool's own prompt, and the run log is permanent.
     let outcome = if step_failures.is_empty() {
         println!("nog: Update finished!");
         "installed".to_string()
     } else {
-        println!("{}nog: Update finished, with {} failed step(s).{}",
+        println!("{}nog: Update finished, with {} step(s) that did not complete.{}",
             C_BOLD, step_failures.len(), C_RESET);
-        println!("{}     Failed: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
-        format!("installed with failures: {}", step_failures.join("; "))
+        println!("{}     Incomplete: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
+        format!("installed, incomplete steps: {}", step_failures.join("; "))
     };
     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, &outcome);
     println!();
@@ -1026,7 +1030,7 @@ fn now_date_time() -> (String, String) {
 /// stdin (EOF) declines rather than auto-installing.
 fn prompt_proceed() -> bool {
     use std::io::{self, Write};
-    print!("nog: Proceed with installation? [Y/n] ");
+    print!("nog: Begin the handoff? [Y/n] ");
     if io::stdout().flush().is_err() {
         return false;
     }
@@ -1052,10 +1056,13 @@ fn prompt_continue_after_failure(step: &str, code: i32) -> bool {
     use std::io::{self, Write};
     eprintln!();
     eprintln!("{}nog: the {} step exited with status {}.{}", C_BOLD, step, code, C_RESET);
-    eprintln!("{}     Official packages already upgraded successfully; this failure{}",
+    eprintln!("{}     That is either a declined prompt or an error — the exit status{}",
         C_SUBTEXT, C_RESET);
-    eprintln!("{}     is confined to {}. Remaining sources are independent of it.{}",
+    eprintln!("{}     alone cannot tell the two apart. Official packages already{}",
+        C_SUBTEXT, C_RESET);
+    eprintln!("{}     upgraded; either way it is confined to {}, and the remaining{}",
         C_SUBTEXT, step, C_RESET);
+    eprintln!("{}     sources are independent of it.{}", C_SUBTEXT, C_RESET);
     print!("nog: Continue with the remaining sources? [y/N] ");
     if io::stdout().flush().is_err() {
         return false;
