@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.3.0" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.3.1" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -570,7 +570,26 @@ back; the safe direction is forward, onto the version the repositories already
 carry. Waiting also works: the held package releases on its own schedule and
 the wall disappears with it.
 .PP
-nog does not yet detect this before handing off.
+As of v1.3.1
+.B nog
+holds the pair rather than letting you reach this: the row that would have
+been Ready moves to Held and names its partner, e.g.
+.RB \(dq "1 day \(bu coupled to ffmpeg4.4" \(dq,
+and both clear on the same run. When the partner has no pending update at all
+\(em a foreign or AUR package built against the old library \(em there is no
+countdown to inherit and the note reads
+.RB \(dq "blocked by <package>" \(dq,
+meaning the hold will not lift on its own: rebuild or update that package, or
+move the pair forward with
+.B nog install
+as above.
+.PP
+The raw pacman error is still reachable on v1.3.0 and earlier, or when the
+local package database at
+.I /var/lib/pacman/local
+cannot be read \(em
+.B nog
+says so and carries on without the rule.
 .SS pacman's log shows only one ignored package
 .B nog
 passes a single comma-joined

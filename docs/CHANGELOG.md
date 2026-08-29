@@ -2,7 +2,33 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
-### v1.3.0 — August 25, 2026
+### v1.3.1 — August 28, 2026
+
+**A package whose hold expires can no longer break one that is still waiting.**
+
+Found the same evening v1.3.0 shipped, during its own release dogfood. `libbluray` had cleared its hold and moves `libbluray.so` from version 3 to version 4. `ffmpeg4.4` still linked the old one and had a day left on its window. nog put one in Ready and the other in Held, and pacman refused the whole transaction — seventy-eight packages, of which seventy-six had nothing to do with either:
+
+```
+error: failed to prepare transaction (could not satisfy dependencies)
+:: installing libbluray (1.5.0-1) breaks dependency 'libbluray.so=3-64'
+   required by ffmpeg4.4
+```
+
+Nothing broke — pacman caught it and declined, which is the opposite of the Qt6 split that prompted v1.2.1. But nothing installed either, and nog is supposed to hand pacman a plan that works.
+
+**The three existing coupling rules all match on names** — a shared PKGBUILD, the `lib32-` prefix, a version cohort — and these two packages share none of them. The relationship exists only in the dependency graph, which nog had never had a reason to read. It does now: a new reader for pacman's local database supplies what is installed and what it requires, the repository metadata supplies what each pending package will provide, and the rule asks one question per candidate — *for each shared library this upgrade stops providing, will anything still provide it afterwards?* If nothing will, every installed package that still requires it would break, so the candidate waits and its row says who it is waiting for.
+
+**Sonames are compared as whole strings, architecture suffix included, and that detail is the whole rule.** On the machine this was written for, eleven library names exist at two versions simultaneously — `ffmpeg4.4` provides `libavcodec.so=58` while `ffmpeg-obs` provides `libavcodec.so=63`, `libxcrypt-compat` sits beside `libxcrypt` — and a further 118 differ only by `-32` against `-64`. A rule that compared library *names* would couple every one of those pairs to each other and wedge the update queue permanently. All eleven are now negative tests.
+
+**Dependents are drawn from every installed package, not just the pending ones.** A foreign or AUR package built against the old library has no repository update to wait for and breaks in exactly the same way. Such a partner has no countdown to inherit, so its row reads `blocked by <package>` rather than borrowing a countdown that would claim it releases today.
+
+If the local database cannot be read, the rule goes quiet and nog behaves exactly as v1.3.0 did. It only pre-empts a refusal pacman would issue anyway, so failing closed would cost more than it saves.
+
+Validated before a line of it was written, and again afterwards: the failure was replayed from the cached packages, a sweep of 161 pending updates against 1397 installed packages produced no false positives, and finally v1.3.0 and v1.3.1 were run against byte-identical restored state — the first putting `libbluray` in Ready, the second holding it, coupled, to clear with its partner.
+
+Tests: 86 → 100. Warnings unchanged at 6. No measurable runtime cost.
+
+### v1.3.0 — August 28, 2026
 
 **One package manager per source.** Until now `nog update` handed the entire upgrade — official repositories *and* AUR — to your AUR helper in a single command. So yay drove the upgrade of some hundred and forty official packages it had no business touching, announced every held package once during its own search and then again through pacman's warnings, and blurred the source boundary that the whole report above it exists to make visible.
 

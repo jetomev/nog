@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-purple.svg)
+![Version: 1.3.1](https://img.shields.io/badge/Version-1.3.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -294,7 +294,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.3.0"
+version = "1.3.1"
 log_level = "info"
 
 [paths]
@@ -525,8 +525,21 @@ the safe direction is always forward onto the version the repositories already
 carry. Waiting also works — the held package releases on its own schedule, and
 the wall disappears when it does.
 
-nog does not yet detect this before handing off; see **Automatic dependency
-coupling** in the roadmap.
+**As of v1.3.1, nog holds the pair rather than letting you reach this.** The
+row that would have been Ready moves to Held and names its partner:
+
+```
+libbluray  1.4.1-1  1.5.0-1  3  1 day · coupled to ffmpeg4.4
+```
+
+Both then clear on the same run. If the partner has no pending update at all —
+a foreign or AUR package built against the old library — there is no countdown
+to inherit and the note reads `blocked by <package>` instead, which means the
+hold will not lift on its own: rebuild or update that package, or move the pair
+forward with `nog install` as above.
+
+You can still hit the raw pacman error on v1.3.0 and earlier, or if nog cannot
+read `/var/lib/pacman/local` (it says so, and carries on without the rule).
 
 ### pacman's log shows only one ignored package
 
@@ -557,11 +570,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 > **v1.3.0 shipped 2026-08-28**, after a two-session dogfood that closed a 42-check matrix. v1.2.1 shipped 2026-08-25 alongside it: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — couple packages by what they link, not just by what they are named ([#13](https://github.com/jetomev/nog/issues/13) · `priority-1`)
-
-- [ ] **Hold a package when releasing it would break a held one.** Found live during the v1.3.0 dogfood: `libbluray` cleared its hold and moved `libbluray.so` from 3 to 4 while `ffmpeg4.4`, still linking the old one, had a day left on its window — and pacman refused all seventy-eight packages in the transaction. Nothing breaks, but nothing installs either. The sync DB's `%PROVIDES%` and the local DB's `%DEPENDS%` already carry everything needed to catch this before the handoff, using the same coupling machinery v1.2.1 built.
-
-### Then — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
+### Next — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
 
 - [ ] **Say when a reboot is needed.** Found live: a kernel or driver upgrade can leave the running system and the installed modules out of step, and nothing tells you until something breaks. nog knows exactly what it just installed, so it is the right place to say "reboot before you next use this".
 
@@ -569,7 +578,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [ ] **Validate against paru** ([#12](https://github.com/jetomev/nog/issues/12)) — nog has supported paru since v1.0.0 and has never been run against it; every release so far was built and dogfooded on a machine with yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
-- [ ] **Automatic dependency coupling** — read the exact-version dependencies and provided sonames out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **Reproduced live during the v1.3.0 dogfood**: `libbluray` cleared its hold and bumped `libbluray.so` from 3 to 4 while `ffmpeg4.4`, still linking the old soname, had a day left on its window — and pacman refused all seventy-eight packages. Neither shares a pkgbase, a `lib32-` name, or a version cohort, so all three current rules miss it; the sync DB's `%PROVIDES%` and the local DB's `%DEPENDS%` already carry everything needed to catch it.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held. What remains is the versioned `=` dependency case, where the declaration is exact rather than a soname.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog status` — a dashboard of what's held, ready, and overdue
 - [ ] `nog history` — a log of every tier change and package action
@@ -591,6 +600,32 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.3.1 — August 28, 2026
+
+**A package whose hold expires can no longer break one that is still waiting.**
+
+Found the same evening v1.3.0 shipped, during its own release dogfood. `libbluray` had cleared its hold and moves `libbluray.so` from version 3 to version 4. `ffmpeg4.4` still linked the old one and had a day left on its window. nog put one in Ready and the other in Held, and pacman refused the whole transaction — seventy-eight packages, of which seventy-six had nothing to do with either:
+
+```
+error: failed to prepare transaction (could not satisfy dependencies)
+:: installing libbluray (1.5.0-1) breaks dependency 'libbluray.so=3-64'
+   required by ffmpeg4.4
+```
+
+Nothing broke — pacman caught it and declined, which is the opposite of the Qt6 split that prompted v1.2.1. But nothing installed either, and nog is supposed to hand pacman a plan that works.
+
+**The three existing coupling rules all match on names** — a shared PKGBUILD, the `lib32-` prefix, a version cohort — and these two packages share none of them. The relationship exists only in the dependency graph, which nog had never had a reason to read. It does now: a new reader for pacman's local database supplies what is installed and what it requires, the repository metadata supplies what each pending package will provide, and the rule asks one question per candidate — *for each shared library this upgrade stops providing, will anything still provide it afterwards?* If nothing will, every installed package that still requires it would break, so the candidate waits and its row says who it is waiting for.
+
+**Sonames are compared as whole strings, architecture suffix included, and that detail is the whole rule.** On the machine this was written for, eleven library names exist at two versions simultaneously — `ffmpeg4.4` provides `libavcodec.so=58` while `ffmpeg-obs` provides `libavcodec.so=63`, `libxcrypt-compat` sits beside `libxcrypt` — and a further 118 differ only by `-32` against `-64`. A rule that compared library *names* would couple every one of those pairs to each other and wedge the update queue permanently. All eleven are now negative tests.
+
+**Dependents are drawn from every installed package, not just the pending ones.** A foreign or AUR package built against the old library has no repository update to wait for and breaks in exactly the same way. Such a partner has no countdown to inherit, so its row reads `blocked by <package>` rather than borrowing a countdown that would claim it releases today.
+
+If the local database cannot be read, the rule goes quiet and nog behaves exactly as v1.3.0 did. It only pre-empts a refusal pacman would issue anyway, so failing closed would cost more than it saves.
+
+Validated before a line of it was written, and again afterwards: the failure was replayed from the cached packages, a sweep of 161 pending updates against 1397 installed packages produced no false positives, and finally v1.3.0 and v1.3.1 were run against byte-identical restored state — the first putting `libbluray` in Ready, the second holding it, coupled, to clear with its partner.
+
+Tests: 86 → 100. Warnings unchanged at 6. No measurable runtime cost.
 
 ### v1.3.0 — August 28, 2026
 
@@ -620,26 +655,6 @@ The foreign fence that originally patched that bypass stays, demoted to a second
 Care, safety and control are the premise; they just do not mean the same thing at every step.
 
 Tests: 80 → 86. `aur.rs` had no test module before this release.
-
-### v1.2.1 — August 25, 2026
-
-**A hotfix, and the most serious bug nog has shipped.** nog could release most of a version-locked family while holding one member back, handing pacman a set that does not hold together.
-
-Twice in three days on the maintainer's own machine. On the 23rd it split `elfutils` from `libelf`; pacman spotted the broken `libelf=0.196` dependency and refused, which was noisy but harmless. On the 25th it split the Qt6 stack — nineteen modules moved to 6.11.2 while `qt6-base` stayed at 6.11.1. Nothing objected, because nothing could: Qt modules depend on `qt6-base` with no version attached, so as far as pacman is concerned the set was fine. The upgrade succeeded. The next boot reached a black screen, the display manager dead on a missing symbol, and recovery meant a text console.
-
-Three things were wrong, and all three are fixed.
-
-**Packages built from the same PKGBUILD now stay together.** They share a `%BASE%` and Arch joins them with exact-version dependencies, but nog only used that grouping to decide a package's *tier* — never to decide when it was released from hold.
-
-**Demotions now propagate.** The rule that keeps a `lib32-` package with its base ran exactly once. When it pulled `libelf` back, nothing re-checked what `libelf` was itself attached to, so `elfutils` was left behind. That pass now repeats until nothing more moves, which means any rule added later is transitive without anyone having to remember to make it so.
-
-**And nog now notices families that no metadata describes.** This is the Qt6 case, and it is the reason the black screen happened: those twenty packages share no pkgbase, no versioned dependency, and no soname — their lockstep is a build-time convention that exists nowhere pacman can see. What *is* visible is that they all sit on one version and all move to the next together. So when three or more packages share that pattern and nog is about to release some while holding others, it now holds the whole group instead.
-
-That last rule is a judgement call rather than a certainty, and it is deliberately cautious — it will sometimes keep a family waiting that would have been fine. Replaying the 25 August run through it produced four correct catches and no false alarms across 221 packages, including a sixty-seven-package font group and a thirty-four-package VLC group that it correctly left alone. When it does err, it errs by making you wait a few days, which is the whole idea of a tool built on the premise that packages should settle before they land.
-
-Tests: 69 → 80.
-
----
 
 ## Related Projects
 

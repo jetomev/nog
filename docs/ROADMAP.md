@@ -2,6 +2,15 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.3.1 — Released (soname coupling, #13)
+- [x] New `local_db` module reads `/var/lib/pacman/local` for `%PROVIDES%` and `%DEPENDS%` — nog's first look at the installed dependency graph
+- [x] `sync_db` parses `%PROVIDES%`, its first multi-value field
+- [x] Fourth coupling rule: hold a Ready package that would stop providing a soname something installed still requires
+- [x] Sonames matched as whole strings, architecture suffix included — 11 same-arch coexistences and 118 `-32`/`-64` pairs must not couple
+- [x] Dependents drawn from all installed packages, so a foreign/AUR package counts; such a row reads `blocked by <pkg>` rather than a false countdown
+- [x] Unreadable local database leaves the rule inert — v1.3.0 behaviour exactly
+- [x] Tests 86 -> 100
+
 ### v1.3.0 — Released (one package manager per source, #10)
 - [x] Handoff split: pacman -> AUR helper -> flatpak -> snap, each run by the tool that owns the source
 - [x] AUR step is handed cleared package names, not a filtered sysupgrade — same idiom as flatpak and snap
