@@ -3,6 +3,7 @@ use crate::tiers::{Tier, TierManager};
 use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
+use crate::local_db;
 use crate::runlog;
 use crate::flatpak;
 use crate::snap;
@@ -513,6 +514,7 @@ pub fn update(realign: bool) {
                     builddate,
                     pkgbase: None,
                     version: None,
+                    provides: Vec::new(),
                 });
             }
         }
@@ -525,6 +527,7 @@ pub fn update(realign: bool) {
             builddate: *ts,
             pkgbase: None,
             version: None,
+            provides: Vec::new(),
         });
     }
 
@@ -534,6 +537,7 @@ pub fn update(realign: bool) {
             builddate: *ts,
             pkgbase: None,
             version: None,
+            provides: Vec::new(),
         });
     }
 
@@ -655,9 +659,14 @@ pub fn update(realign: bool) {
     // broken system (when it cannot: the Qt6 stack shares no pkgbase and carries
     // no version constraint, and splitting it took a desktop to a black screen).
     //
-    // Three rules now apply — lib32 pairs, pkgbase siblings, and version cohorts;
-    // see `holds::coupling_demotions`. Runs last, so it sees the post-realign
-    // buckets and feeds the ignore list below.
+    // Four rules now apply — lib32 pairs, pkgbase siblings, version cohorts, and
+    // (v1.3.1, issue #13) dropped sonames; see `holds::coupling_demotions`. Runs
+    // last, so it sees the post-realign buckets and feeds the ignore list below.
+    //
+    // The fourth rule exists because the first three all match on *names*, and
+    // the fourth relationship is only visible in the dependency graph: a package
+    // whose hold expired can bump a shared library version out from under one
+    // still inside its window, and pacman refuses the entire transaction.
     //
     // The loop is the other half of issue #11. A single pass is not enough: when
     // one rule demotes a package, that package's *own* coupling relationships are
@@ -670,6 +679,43 @@ pub fn update(realign: bool) {
         // into something the code actually enforces rather than assumes.
         const MAX_PASSES: usize = 16;
         let mut passes = 0;
+
+        // v1.3.1 (issue #13): the soname rule reads the dependency graph, which
+        // lives in the *local* database — what is installed — rather than the
+        // sync database, which only describes what packages will become. Built
+        // once and shared by every pass: it describes the installed system, and
+        // nothing installs while nog is still deciding.
+        let soname_data = {
+            let installed = local_db::load_installed();
+            if installed.is_empty() {
+                eprintln!(
+                    "{}nog: warning — the local package database could not be read;{}",
+                    C_SUBTEXT, C_RESET
+                );
+                eprintln!(
+                    "{}     soname coupling is inactive for this run. pacman will still{}",
+                    C_SUBTEXT, C_RESET
+                );
+                eprintln!(
+                    "{}     refuse a transaction that would break a dependency.{}",
+                    C_SUBTEXT, C_RESET
+                );
+            }
+            holds::SonameData {
+                new_provides: packages
+                    .iter()
+                    .map(|(n, d)| (n.clone(), d.provides.clone()))
+                    .collect(),
+                installed_provides: installed
+                    .iter()
+                    .map(|(n, d)| (n.clone(), d.provides.clone()))
+                    .collect(),
+                installed_depends: installed
+                    .into_iter()
+                    .map(|(n, d)| (n, d.depends))
+                    .collect(),
+            }
+        };
 
         loop {
             let to_coupling = |name: &str, upd: &PendingUpdate, remaining: u64| holds::CouplingPkg {
@@ -688,7 +734,7 @@ pub fn update(realign: bool) {
                 .map(|(u, _, r, _)| to_coupling(&u.name, u, *r))
                 .collect();
 
-            let demotions = holds::coupling_demotions(&ready_pkgs, &held_pkgs);
+            let demotions = holds::coupling_demotions(&ready_pkgs, &held_pkgs, &soname_data);
             if demotions.is_empty() {
                 break;
             }
@@ -1206,6 +1252,13 @@ fn held_note(remaining: u64, reason: &HeldReason) -> String {
         // Countdown first, so the Note column stays scannable by its leading
         // number: every held row begins with "N day(s)", coupled or not.
         HeldReason::CoupledTo(partner) => match remaining {
+            // No countdown to inherit, so this is not a coupling that clears
+            // on a date — it is a block. v1.3.1: the soname rule can name a
+            // partner with no pending update at all (a foreign or AUR package
+            // built against the old library). "0 days" would read as "releases
+            // today", the exact opposite of the truth, so the row says what it
+            // means instead and drops the countdown vocabulary entirely.
+            0 => format!("blocked by {}", partner),
             1 => format!("1 day · coupled to {}", partner),
             n => format!("{} days · coupled to {}", n, partner),
         },
@@ -1397,9 +1450,9 @@ mod output_tests {
         assert!(t.contains("\n\n(none)\n"));
     }
 
-    /// Every Held note opens with its countdown, so the Note column can be
-    /// scanned down its leading number. A coupled row is no exception — the
-    /// partner is the tail of the note, never its head.
+    /// Every Held note that *has* a countdown opens with it, so the Note
+    /// column can be scanned down its leading number. A coupled row is no
+    /// exception — the partner is the tail of the note, never its head.
     #[test]
     fn held_notes_all_lead_with_the_countdown() {
         let cases = [
@@ -1416,6 +1469,18 @@ mod output_tests {
                 "note does not lead with its countdown: {note:?}"
             );
         }
+    }
+
+    /// The one row with no countdown (v1.3.1, issue #13): a soname coupling
+    /// whose partner has no pending update never clears on a date, so it must
+    /// not borrow the countdown vocabulary — and must not open with a digit,
+    /// which is what the scan-the-column habit reads as a countdown.
+    #[test]
+    fn a_block_with_no_end_date_says_so_instead_of_counting_down() {
+        let note = held_note(0, &HeldReason::CoupledTo("some-aur-pkg".into()));
+        assert_eq!(note, "blocked by some-aur-pkg");
+        assert!(!note.starts_with(|c: char| c.is_ascii_digit()));
+        assert!(!note.contains("day"));
     }
 }
 

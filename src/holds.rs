@@ -354,7 +354,158 @@ pub fn cohort_coupling_demotions(
 /// This is a single pass and does **not** converge on its own — a demotion made
 /// here can create a new split that only a re-run will see. Callers must loop
 /// until this returns empty; see `commands::update`.
-pub fn coupling_demotions(ready: &[CouplingPkg], held: &[CouplingPkg]) -> Vec<(String, String)> {
+/// Everything the soname rule needs out of the two pacman databases
+/// (issue #13, v1.3.1).
+///
+/// Owned rather than borrowed: it is built once per run from ~1400 installed
+/// packages and read by every fixpoint pass, and the lifetimes needed to
+/// borrow it through `coupling_demotions` would buy nothing at this size.
+///
+/// An empty `SonameData` makes the rule a no-op, which is how the other
+/// rules' unit tests opt out of it and how `nog update` behaves if the local
+/// database cannot be read.
+#[derive(Debug, Default)]
+pub struct SonameData {
+    /// installed package -> its `%PROVIDES%`
+    pub installed_provides: HashMap<String, Vec<String>>,
+    /// installed package -> its `%DEPENDS%`
+    pub installed_depends: HashMap<String, Vec<String>>,
+    /// candidate -> `%PROVIDES%` of the version that would be installed
+    pub new_provides: HashMap<String, Vec<String>>,
+}
+
+/// Is this dependency entry a versioned soname (`libbluray.so=3-64`)?
+///
+/// Matched on the **whole string**, deliberately. The architecture suffix is
+/// what separates `libEGL.so=1-32` from `libEGL.so=1-64`, and 118 soname bases
+/// exist at two versions at once on the machine this was written for. A rule
+/// that compared base names would couple every one of those pairs and wedge
+/// the update queue permanently.
+///
+/// Entries carrying `<` or `>` are ranges rather than exact soname matches and
+/// are left alone: pacman can satisfy those from more than one version, so a
+/// bump does not necessarily break them.
+fn is_soname(entry: &str) -> bool {
+    if entry.contains('<') || entry.contains('>') {
+        return false;
+    }
+    match entry.split_once('=') {
+        Some((base, _)) => base.ends_with(".so"),
+        None => false,
+    }
+}
+
+fn soname_set(list: Option<&Vec<String>>) -> HashSet<&str> {
+    list.map(|v| v.iter().map(|s| s.as_str()).filter(|s| is_soname(s)).collect())
+        .unwrap_or_default()
+}
+
+/// Couple a Ready package to a package it would break by dropping a soname
+/// (issue #13).
+///
+/// The failure this exists for, seen live on 2026-08-28:
+///
+/// ```text
+/// error: failed to prepare transaction (could not satisfy dependencies)
+/// :: installing libbluray (1.5.0-1) breaks dependency 'libbluray.so=3-64'
+///    required by ffmpeg4.4
+/// ```
+///
+/// `libbluray` had cleared its hold and moves `libbluray.so` from 3 to 4.
+/// `ffmpeg4.4` was still held with a day to run and still links the old one.
+/// pacman cannot split the pair, so it refused all seventy-eight packages in
+/// the transaction.
+///
+/// The other three rules cannot see this: the two packages share no pkgbase,
+/// no `lib32-` name pattern, and no version cohort. The relationship exists
+/// only in the dependency graph.
+///
+/// The test is: for each soname a Ready candidate would stop providing, will
+/// **anything** still provide it afterwards? A provider that is not itself
+/// moving keeps it, and so does one that moves but still provides it. If
+/// nothing will, every installed package that still requires it — and is not
+/// moving to a version that wants the new soname — would break, so the
+/// candidate is held back until they can move together.
+///
+/// Dependents are drawn from **all installed packages**, not just the pending
+/// ones. A foreign or AUR package built against the old soname has no
+/// repository update to wait for, and would break exactly the same way.
+pub fn soname_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    data: &SonameData,
+) -> Vec<(String, String)> {
+    if ready.is_empty() || data.installed_provides.is_empty() {
+        return Vec::new();
+    }
+    let moving: HashSet<&str> = ready.iter().map(|p| p.name.as_str()).collect();
+
+    // soname -> installed packages providing it / requiring it
+    let mut providers: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (pkg, list) in &data.installed_provides {
+        for s in list.iter().filter(|s| is_soname(s)) {
+            providers.entry(s.as_str()).or_default().push(pkg.as_str());
+        }
+    }
+    let mut requirers: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (pkg, list) in &data.installed_depends {
+        for s in list.iter().filter(|s| is_soname(s)) {
+            requirers.entry(s.as_str()).or_default().push(pkg.as_str());
+        }
+    }
+
+    let mut out: Vec<(String, String)> = Vec::new();
+    for cand in ready {
+        let before = soname_set(data.installed_provides.get(&cand.name));
+        let after = soname_set(data.new_provides.get(&cand.name));
+
+        for dropped in before.difference(&after) {
+            let survives = providers
+                .get(dropped)
+                .map(|ps| {
+                    ps.iter().any(|p| {
+                        !moving.contains(p) || soname_set(data.new_provides.get(*p)).contains(dropped)
+                    })
+                })
+                .unwrap_or(false);
+            if survives {
+                continue;
+            }
+
+            // Everyone still requiring it who is not moving alongside.
+            let mut broken: Vec<&str> = requirers
+                .get(dropped)
+                .map(|rs| rs.iter().copied().filter(|r| !moving.contains(r)).collect())
+                .unwrap_or_default();
+            if broken.is_empty() {
+                continue;
+            }
+            broken.sort_unstable();
+
+            // Name the partner the user can act on: prefer one that is itself
+            // a held candidate, so the row inherits a real countdown and both
+            // clear on the same run. Otherwise the first by name, which keeps
+            // the note stable run-to-run.
+            let held_match: Vec<&CouplingPkg> = held
+                .iter()
+                .filter(|h| broken.contains(&h.name.as_str()))
+                .collect();
+            let partner = longest_held(&held_match)
+                .map(|h| h.name.clone())
+                .unwrap_or_else(|| broken[0].to_string());
+
+            out.push((cand.name.clone(), partner));
+            break; // one note per candidate is enough to explain the hold
+        }
+    }
+    out
+}
+
+pub fn coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    soname: &SonameData,
+) -> Vec<(String, String)> {
     let ready_names: Vec<String> = ready.iter().map(|p| p.name.clone()).collect();
     let held_names: Vec<String> = held.iter().map(|p| p.name.clone()).collect();
 
@@ -364,6 +515,7 @@ pub fn coupling_demotions(ready: &[CouplingPkg], held: &[CouplingPkg]) -> Vec<(S
         .into_iter()
         .chain(pkgbase_coupling_demotions(ready, held))
         .chain(cohort_coupling_demotions(ready, held))
+        .chain(soname_coupling_demotions(ready, held, soname))
     {
         if claimed.insert(name.clone()) {
             out.push((name, partner));
@@ -504,6 +656,7 @@ mod tests {
             builddate,
             pkgbase: None,
             version: version.map(|v| v.to_string()),
+            provides: Vec::new(),
         });
         m
     }
@@ -686,6 +839,192 @@ mod tests {
         d.into_iter().map(|(n, _)| n).collect()
     }
 
+    // ---- issue #13: soname coupling -------------------------------------
+    //
+    // Every fixture below is real data taken from the machine where the bug
+    // was found, on 2026-08-28. The negative cases are not invented: eleven
+    // soname bases genuinely coexist at two versions on that system, and a
+    // rule matching base names rather than whole strings would couple all of
+    // them and wedge the update queue.
+
+    fn sd(
+        installed: &[(&str, &[&str], &[&str])],
+        new: &[(&str, &[&str])],
+    ) -> SonameData {
+        let mut d = SonameData::default();
+        for (n, prov, deps) in installed {
+            d.installed_provides.insert(
+                n.to_string(),
+                prov.iter().map(|s| s.to_string()).collect(),
+            );
+            d.installed_depends.insert(
+                n.to_string(),
+                deps.iter().map(|s| s.to_string()).collect(),
+            );
+        }
+        for (n, prov) in new {
+            d.new_provides.insert(
+                n.to_string(),
+                prov.iter().map(|s| s.to_string()).collect(),
+            );
+        }
+        d
+    }
+
+    #[test]
+    fn soname_rule_replays_the_libbluray_transaction_failure() {
+        // pacman's own words, 2026-08-28:
+        //   installing libbluray (1.5.0-1) breaks dependency
+        //   'libbluray.so=3-64' required by ffmpeg4.4
+        let data = sd(
+            &[
+                ("libbluray", &["libbluray.so=3-64"], &[]),
+                ("ffmpeg4.4", &["libavcodec.so=58-64"], &["libbluray.so=3-64"]),
+            ],
+            &[("libbluray", &["libbluray.so=4-64"])],
+        );
+        let ready = vec![pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0)];
+        let held = vec![pkg("ffmpeg4.4", "4.4.8-3", "4.4.8-5", None, 1)];
+        assert_eq!(
+            soname_coupling_demotions(&ready, &held, &data),
+            vec![("libbluray".to_string(), "ffmpeg4.4".to_string())]
+        );
+    }
+
+    #[test]
+    fn soname_rule_ignores_same_base_at_different_versions() {
+        // ffmpeg4.4 provides libavcodec.so=58, ffmpeg-obs provides =63, and
+        // both are installed side by side. Matching on the base name would
+        // couple them to each other forever.
+        let data = sd(
+            &[
+                ("ffmpeg4.4", &["libavcodec.so=58-64"], &[]),
+                ("ffmpeg-obs", &["libavcodec.so=63-64"], &[]),
+                ("obs-studio", &[], &["libavcodec.so=63-64"]),
+            ],
+            &[("ffmpeg4.4", &["libavcodec.so=58-64"])],
+        );
+        let ready = vec![pkg("ffmpeg4.4", "4.4.8-3", "4.4.8-5", None, 0)];
+        let held = vec![pkg("ffmpeg-obs", "9.0-1", "9.0.1-1.2", None, 4)];
+        assert!(soname_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn soname_rule_ignores_the_32_and_64_bit_pair() {
+        // 118 bases coexist as -32/-64 on the reference machine. The suffix is
+        // part of the string, so they never collide.
+        let data = sd(
+            &[
+                ("libglvnd", &["libEGL.so=1-64"], &[]),
+                ("lib32-libglvnd", &["libEGL.so=1-32"], &[]),
+                ("wine", &[], &["libEGL.so=1-32"]),
+            ],
+            &[("libglvnd", &["libEGL.so=2-64"])],
+        );
+        let ready = vec![pkg("libglvnd", "1.7-1", "1.8-1", None, 0)];
+        let held: Vec<CouplingPkg> = vec![];
+        assert!(soname_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn soname_rule_lets_a_pair_move_together() {
+        // The dependent is Ready too, so its new version wants the new soname.
+        // Holding either would be wrong — this is the state after `nog install
+        // libbluray ffmpeg4.4`, and the workaround must not be undone.
+        let data = sd(
+            &[
+                ("libbluray", &["libbluray.so=3-64"], &[]),
+                ("ffmpeg4.4", &[], &["libbluray.so=3-64"]),
+            ],
+            &[("libbluray", &["libbluray.so=4-64"]), ("ffmpeg4.4", &[])],
+        );
+        let ready = vec![
+            pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0),
+            pkg("ffmpeg4.4", "4.4.8-3", "4.4.8-5", None, 0),
+        ];
+        assert!(soname_coupling_demotions(&ready, &[], &data).is_empty());
+    }
+
+    #[test]
+    fn soname_rule_accepts_a_surviving_second_provider() {
+        // Something else still provides the soname and is not moving, so the
+        // dependency stays satisfiable and nothing needs holding.
+        let data = sd(
+            &[
+                ("libxcrypt", &["libcrypt.so=2-64"], &[]),
+                ("libxcrypt-compat", &["libcrypt.so=1-64"], &[]),
+                ("oldapp", &[], &["libcrypt.so=1-64"]),
+            ],
+            &[("libxcrypt", &["libcrypt.so=3-64"])],
+        );
+        let ready = vec![pkg("libxcrypt", "4.4-1", "4.5-1", None, 0)];
+        assert!(soname_coupling_demotions(&ready, &[], &data).is_empty());
+    }
+
+    #[test]
+    fn soname_rule_holds_for_a_foreign_package_with_no_update() {
+        // The dependent is an AUR package: nothing pending, no countdown to
+        // inherit, and it would break exactly the same way. It must still be
+        // named, or the user cannot tell why the hold exists.
+        let data = sd(
+            &[
+                ("libbluray", &["libbluray.so=3-64"], &[]),
+                ("some-aur-thing", &[], &["libbluray.so=3-64"]),
+            ],
+            &[("libbluray", &["libbluray.so=4-64"])],
+        );
+        let ready = vec![pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0)];
+        assert_eq!(
+            soname_coupling_demotions(&ready, &[], &data),
+            vec![("libbluray".to_string(), "some-aur-thing".to_string())]
+        );
+    }
+
+    #[test]
+    fn soname_rule_prefers_a_held_partner_with_the_longest_wait() {
+        // Two packages break. Name the one with the longest countdown, so the
+        // row's inherited countdown is the one that actually gates the release.
+        let data = sd(
+            &[
+                ("libbluray", &["libbluray.so=3-64"], &[]),
+                ("dep-soon", &[], &["libbluray.so=3-64"]),
+                ("dep-later", &[], &["libbluray.so=3-64"]),
+            ],
+            &[("libbluray", &["libbluray.so=4-64"])],
+        );
+        let ready = vec![pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0)];
+        let held = vec![
+            pkg("dep-soon", "1-1", "2-1", None, 1),
+            pkg("dep-later", "1-1", "2-1", None, 6),
+        ];
+        assert_eq!(
+            soname_coupling_demotions(&ready, &held, &data)[0].1,
+            "dep-later"
+        );
+    }
+
+    #[test]
+    fn is_soname_accepts_exact_matches_and_rejects_ranges() {
+        assert!(is_soname("libbluray.so=3-64"));
+        assert!(is_soname("libEGL.so=1-32"));
+        // A range can be satisfied by more than one version, so a bump does
+        // not necessarily break it — out of scope for this rule.
+        assert!(!is_soname("libfoo.so>=3"));
+        assert!(!is_soname("libfoo.so<4"));
+        // Plain package names and unversioned provides are not sonames.
+        assert!(!is_soname("glibc"));
+        assert!(!is_soname("sh"));
+        assert!(!is_soname("libfoo.so"));
+    }
+
+    #[test]
+    fn soname_rule_is_inert_without_a_local_database() {
+        // load_installed() soft-fails to an empty map. nog must then behave
+        // exactly as it did before v1.3.1 rather than holding everything.
+        let ready = vec![pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0)];
+        assert!(soname_coupling_demotions(&ready, &[], &SonameData::default()).is_empty());
+    }
+
     #[test]
     fn pkgver_strips_epoch_and_pkgrel() {
         assert_eq!(pkgver("6.11.2-2"), "6.11.2");
@@ -794,7 +1133,7 @@ mod tests {
         ];
         let held = vec![pkg("lib32-libelf", "0.195-1", "0.196-2", Some("lib32-libelf"), 3)];
 
-        let d = coupling_demotions(&ready, &held);
+        let d = coupling_demotions(&ready, &held, &SonameData::default());
         let names = demoted_names(d.clone());
         assert_eq!(names, vec!["elfutils", "libelf"]);
         assert_eq!(d.len(), 2, "each package demoted exactly once");
@@ -817,7 +1156,7 @@ mod tests {
             pkg("bar", "3.0-1", "3.1-1", Some("foo-base"), 0),
         ];
 
-        let first = coupling_demotions(&ready, &held);
+        let first = coupling_demotions(&ready, &held, &SonameData::default());
         assert_eq!(demoted_names(first), vec!["foo"], "pass 1 sees only the lib32 pair");
 
         // Apply it, exactly as commands::update does, and look again.
@@ -827,7 +1166,7 @@ mod tests {
         ];
         let ready2 = vec![ready[1].clone()];
 
-        let second = coupling_demotions(&ready2, &held2);
+        let second = coupling_demotions(&ready2, &held2, &SonameData::default());
         assert_eq!(
             demoted_names(second),
             vec!["bar"],
@@ -850,7 +1189,7 @@ mod tests {
 
         let mut passes = 0;
         loop {
-            let d = coupling_demotions(&ready, &held);
+            let d = coupling_demotions(&ready, &held, &SonameData::default());
             if d.is_empty() {
                 break;
             }

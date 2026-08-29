@@ -61,6 +61,12 @@ pub struct PackageDesc {
     /// only meaningful for the version it belongs to. `None` when `%VERSION%`
     /// is missing — defensive fallback; every real desc has it.
     pub version: Option<String>,
+    /// The `%PROVIDES%` field, verbatim — sonames such as `libbluray.so=4-64`
+    /// alongside plain virtual-package names. v1.3.1 added this for the soname
+    /// coupling rule (issue #13), which compares what a package provides today
+    /// against what the pending version will provide. Empty when the field is
+    /// absent, which is the common case: most packages provide nothing.
+    pub provides: Vec<String>,
 }
 
 /// Load the full package map (name → PackageDesc) from every enabled sync
@@ -302,8 +308,12 @@ fn read_repo(db_path: &Path) -> Result<HashMap<String, PackageDesc>, String> {
 /// Parse the key fields we care about out of a desc file.
 ///
 /// Format is a series of `%KEY%` lines followed by one or more value lines,
-/// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, `%BASE%`, and
-/// `%VERSION%`.
+/// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, `%BASE%`,
+/// `%VERSION%` and `%PROVIDES%`.
+///
+/// `%PROVIDES%` is the only **multi-value** field of the five: a package can
+/// provide any number of sonames, so its branch consumes lines until a blank
+/// one rather than taking a single value.
 ///
 /// Returns `None` if `%NAME%` or `%BUILDDATE%` is missing (we need both for
 /// any useful classification). `%BASE%` and `%VERSION%` are optional —
@@ -314,6 +324,7 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     let mut date: Option<u64> = None;
     let mut pkgbase: Option<String> = None;
     let mut version: Option<String> = None;
+    let mut provides: Vec<String> = Vec::new();
 
     let mut lines = contents.lines();
     while let Some(line) = lines.next() {
@@ -338,6 +349,15 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
                     }
                 }
             }
+            "%PROVIDES%" => {
+                for v in lines.by_ref() {
+                    let trimmed = v.trim();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    provides.push(trimmed.to_string());
+                }
+            }
             "%BASE%" => {
                 if let Some(v) = lines.next() {
                     let trimmed = v.trim();
@@ -351,7 +371,9 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     }
 
     match (name, date) {
-        (Some(n), Some(d)) => Some((n, PackageDesc { builddate: d, pkgbase, version })),
+        (Some(n), Some(d)) => {
+            Some((n, PackageDesc { builddate: d, pkgbase, version, provides }))
+        }
         _ => None,
     }
 }
