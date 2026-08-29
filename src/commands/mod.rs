@@ -955,7 +955,7 @@ pub fn update(realign: bool) {
         println!("{}nog: Update finished, with {} step(s) that did not complete.{}",
             C_BOLD, step_failures.len(), C_RESET);
         println!("{}     Incomplete: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
-        format!("installed, incomplete steps: {}", step_failures.join("; "))
+        format!("installed with incomplete steps: {}", step_failures.join("; "))
     };
     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, &outcome);
     println!();
