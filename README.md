@@ -557,7 +557,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 > **v1.3.0 shipped 2026-08-28**, after a two-session dogfood that closed a 42-check matrix. v1.2.1 shipped 2026-08-25 alongside it: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
+### Next — couple packages by what they link, not just by what they are named ([#13](https://github.com/jetomev/nog/issues/13) · `priority-1`)
+
+- [ ] **Hold a package when releasing it would break a held one.** Found live during the v1.3.0 dogfood: `libbluray` cleared its hold and moved `libbluray.so` from 3 to 4 while `ffmpeg4.4`, still linking the old one, had a day left on its window — and pacman refused all seventy-eight packages in the transaction. Nothing breaks, but nothing installs either. The sync DB's `%PROVIDES%` and the local DB's `%DEPENDS%` already carry everything needed to catch this before the handoff, using the same coupling machinery v1.2.1 built.
+
+### Then — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
 
 - [ ] **Say when a reboot is needed.** Found live: a kernel or driver upgrade can leave the running system and the installed modules out of step, and nothing tells you until something breaks. nog knows exactly what it just installed, so it is the right place to say "reboot before you next use this".
 
