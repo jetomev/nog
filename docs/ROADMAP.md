@@ -7,8 +7,10 @@
 - [x] AUR step is handed cleared package names, not a filtered sysupgrade — same idiom as flatpak and snap
 - [x] Foreign fence demoted to a second layer and relabelled; the omission bypass is now closed structurally
 - [x] pacman failure cancels the run; later failures report and ask, defaulting to no
-- [x] Run log records `installed with failures: ...` when a run is carried through
-- [x] Tests 80 -> 84 (aur.rs gains its first test module)
+- [x] Run log records `installed with incomplete steps: ...` when a run is carried through
+- [x] A non-zero handoff is reported as "did not complete", not "failed" — the exit status cannot distinguish a declined prompt from a real error
+- [x] Review gate renamed `Begin the handoff?`, so it no longer echoes pacman's own prompt word for word
+- [x] Tests 80 -> 86 (aur.rs gains its first test module)
 
 ### v1.2.1 — Released (hotfix: family coupling, #11)
 - [x] `pkgbase_coupling_demotions()` — packages sharing a `%BASE%` release together

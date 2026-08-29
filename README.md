@@ -265,7 +265,7 @@ UNKNOWN:
 
 (none)
 
-nog: Proceed with installation? [Y/n] y
+nog: Begin the handoff? [Y/n] y
 
 nog: Handing off official packages to pacman ...
 :: Starting full system upgrade...
@@ -507,6 +507,42 @@ This is the fix for [#11](https://github.com/jetomev/nog/issues/11), and it is d
 
 **Coming from before v1.0.5:** hold windows used to be dated from your system's older database, so updates being seen for the first time were often waved straight through. nog now dates every hold from the fresh snapshot, so new updates serve their full window. Days-remaining figures on existing holds may shift a little too — the clock is now measured from the true build date.
 
+### `installing <A> breaks dependency '<lib>.so=N' required by <B>`
+
+pacman refuses the whole transaction and nothing installs. This happens when a
+package whose hold has expired bumps a shared library version, while a package
+that still links the old one is inside its window. nog cleared one and held the
+other, and the two cannot be split.
+
+Nothing is broken — pacman caught it and declined. Move the pair forward together:
+
+```bash
+nog install <A> <B>
+```
+
+One transaction, onto the new library. Never downgrade the cleared package back;
+the safe direction is always forward onto the version the repositories already
+carry. Waiting also works — the held package releases on its own schedule, and
+the wall disappears when it does.
+
+nog does not yet detect this before handing off; see **Automatic dependency
+coupling** in the roadmap.
+
+### pacman's log shows only one ignored package
+
+After an incident you may check `/var/log/pacman.log` and find:
+
+```
+[PACMAN] Running 'pacman -Syu --ignore archlinux-appstream-data'
+```
+
+nog passes a single comma-joined `--ignore` argument. pacman splits that string
+in place inside its own `argv` and only afterwards writes the `Running '...'`
+line, so the log records the first name and drops the rest. One name in the log
+can mean a hundred and sixty were passed. The holds were applied correctly — the
+`warning: <pkg>: ignoring package upgrade` lines above it are the accurate
+record. This is a pacman logging artefact, not a nog defect.
+
 ### `warning — checkupdates DB not found; using the system sync DB`
 
 nog couldn't find the private database `checkupdates` syncs into, and fell back to the system one — which may date holds from stale information. Usually a `TMPDIR` or `CHECKUPDATES_DB` mismatch between the two tools. Check `ls "${TMPDIR:-/tmp}/checkup-db-$(id -u)/sync"` right after a run, and if the layout has moved, please file a bug.
@@ -519,7 +555,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.3.0 shipped 2026-08-25.** Two releases in one evening: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.3.0 shipped 2026-08-28**, after a two-session dogfood that closed a 42-check matrix. v1.2.1 shipped 2026-08-25 alongside it: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
 ### Next — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
 
@@ -529,7 +565,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [ ] **Validate against paru** ([#12](https://github.com/jetomev/nog/issues/12)) — nog has supported paru since v1.0.0 and has never been run against it; every release so far was built and dogfooded on a machine with yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
-- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies and provided sonames out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **Reproduced live during the v1.3.0 dogfood**: `libbluray` cleared its hold and bumped `libbluray.so` from 3 to 4 while `ffmpeg4.4`, still linking the old soname, had a day left on its window — and pacman refused all seventy-eight packages. Neither shares a pkgbase, a `lib32-` name, or a version cohort, so all three current rules miss it; the sync DB's `%PROVIDES%` and the local DB's `%DEPENDS%` already carry everything needed to catch it.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog status` — a dashboard of what's held, ready, and overdue
 - [ ] `nog history` — a log of every tier change and package action
@@ -552,7 +588,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
-### v1.3.0 — August 25, 2026
+### v1.3.0 — August 28, 2026
 
 **One package manager per source.** Until now `nog update` handed the entire upgrade — official repositories *and* AUR — to your AUR helper in a single command. So yay drove the upgrade of some hundred and forty official packages it had no business touching, announced every held package once during its own search and then again through pacman's warnings, and blurred the source boundary that the whole report above it exists to make visible.
 
@@ -571,11 +607,15 @@ A source with nothing cleared is skipped entirely, so a run with no AUR updates 
 
 The foreign fence that originally patched that bypass stays, demoted to a second layer and relabelled to say what it now actually does — it blocks held packages from being dragged in as build dependencies, which is a different hole and still an open one.
 
-**Failures now behave differently depending on where they happen.** If pacman fails, nog cancels and touches nothing else: AUR packages are compiled against official libraries, and building them on a system whose repository upgrade did not finish is how you turn one problem into several. If a later step fails, nog reports it and asks whether to continue, defaulting to no. Flatpak and Snap moved to this model too, having previously stopped the run outright. A run you carry through after a failure is recorded as `installed with failures: …`, so the log describes what happened rather than implying a clean install or a cancellation.
+**Failures now behave differently depending on where they happen.** If pacman fails, nog cancels and touches nothing else: AUR packages are compiled against official libraries, and building them on a system whose repository upgrade did not finish is how you turn one problem into several. If a later step fails, nog reports it and asks whether to continue, defaulting to no. Flatpak and Snap moved to this model too, having previously stopped the run outright. A run you carry through after a failure is recorded as `installed with incomplete steps: …`, so the log describes what happened rather than implying a clean install or a cancellation.
+
+**And nog no longer claims to know why a step stopped.** pacman exits `1` when the user declines its prompt and `1` when something genuinely breaks; the exit status cannot tell the two apart, so nog does not pretend to. It says so outright — *"That is either a declined prompt or a pacman error — the exit status alone cannot tell the two apart"* — and the run log, which is permanent and read long after the terminal is gone, records `did not complete` rather than `failed`.
+
+**The review gate was renamed to `Begin the handoff?`.** It used to ask `Proceed with installation? [Y/n]` — word for word what pacman asks seconds later, distinguishable only by a `nog:` prefix against pacman's `::`. During the release dogfood the author answered nog's gate as pacman's three times in a row, holding a table that spelled out which was which. Two layers of confirmation only buy safety if you can tell which one you are answering.
 
 Care, safety and control are the premise; they just do not mean the same thing at every step.
 
-Tests: 80 → 84. `aur.rs` had no test module before this release.
+Tests: 80 → 86. `aur.rs` had no test module before this release.
 
 ### v1.2.1 — August 25, 2026
 

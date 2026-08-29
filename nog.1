@@ -128,8 +128,8 @@ mirroring the report tables plus the run's outcome
 .BR cancelled ,
 .BR "all held" ,
 .BR "up to date" ,
-.BR "pacman handoff failed" ,
-.BR "installed with failures: ..." );
+.BR "pacman handoff did not complete" ,
+.BR "installed with incomplete steps: ..." );
 logs older than 90 days are pruned automatically. Logging soft-fails with a
 warning and never blocks an update.
 .PP
@@ -556,6 +556,33 @@ A green Tier 3 annotation means you are still running v1.0.2 or earlier;
 upgrade nog before the next
 .BR "nog update" .
 .
+.SS \fBinstalling <A> breaks dependency '<lib>.so=N' required by <B>\fR
+pacman refuses the whole transaction and nothing installs. A package whose hold
+has expired bumps a shared library version, while a package still linking the
+old one is inside its window; nog cleared one and held the other, and pacman
+cannot split the pair.
+.PP
+Nothing is broken \(em pacman caught it and declined. Move the pair forward
+together with
+.BR "nog install <A> <B>" ,
+which installs both in one transaction. Never downgrade the cleared package
+back; the safe direction is forward, onto the version the repositories already
+carry. Waiting also works: the held package releases on its own schedule and
+the wall disappears with it.
+.PP
+nog does not yet detect this before handing off.
+.SS pacman's log shows only one ignored package
+.B nog
+passes a single comma-joined
+.B \-\-ignore
+argument. pacman splits that string in place inside its own
+.IR argv ,
+then writes its
+.RB \(dq Running\ '...' \(dq
+line, so the log records the first name and drops the rest \(em one name can
+mean a hundred and sixty were passed. The holds were applied correctly; the
+.RB \(dq "warning: <pkg>: ignoring package upgrade" \(dq
+lines are the accurate record. A pacman logging artefact, not a nog defect.
 .SH SEE ALSO
 .BR pacman (8),
 .BR grubforge (1),

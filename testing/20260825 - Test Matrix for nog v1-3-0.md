@@ -15,6 +15,17 @@ everything was held, so the handoff was unreachable — see §0.
 transcript. §5, §6.4–6.5 and most of §8 were **not reachable** in this run and
 are carried to Run 2.
 
+**Run 2 — 2026-08-28, 07:06 PM – 09:17 PM.** The session that closed the file.
+239 pending at the start, 78 Ready. §5 was reached in full, §6.4–6.5 and §8.5–8.6
+with it, and three findings came out of it — one of them a transaction-killing
+bug nobody had filed (F-5). Binary under test carried the F-3/F-4 fixes from
+commits `348f093` and `2f85878`.
+
+§2, §3 and §4 were re-exercised on the fixed binary during the same session:
+76 official packages upgraded in one pacman step, `snapd` 2.76-1 → 2.76.2-2 built
+and installed by yay in its own step, flatpak and snap silently dormant. All
+Run 1 results held.
+
 ---
 
 ## §0 · Preconditions
@@ -93,31 +104,30 @@ silent on the two large decoys, in the field, on data it had never seen.
 
 ## §5 · Failure handling
 
-Hard to trigger naturally; simulate where noted. **§5.1 is a release-blocker.**
+**All seven pass.** §5.1 was proven with a *real* failure — a locked pacman
+database, the same thing a second package manager leaves behind — not a
+simulation. §5.2–§5.7 used a PATH shim that answers `yay -S` with exit 7 and
+passes every query (`-Qua`, `-Sai`) through to the real yay, so detection,
+build dates, tiers, the fence and the pacman step were all genuine; only the
+install verb was intercepted. Exit code 7 was chosen to be unmistakable, and it
+appears unaltered in every message and every log row: nog reports the helper's
+status, it does not invent one.
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| 5.1 | **pacman fails → cancel** | alert names the status; **no other source runs**; log says `pacman handoff failed (status N)` | ⚪ **not run — BLOCKER** |
-| 5.2 | helper fails → ask | prompt `Continue with the remaining sources? [y/N]` | ⚪ not run |
-| 5.3 | Default is no | bare Enter stops the run | ⚪ not run |
-| 5.4 | EOF stops | `</dev/null` → `no input — stopping here.` | ⚪ not run |
-| 5.5 | Answering no | log says `cancelled after aur step failed (status N)` | ⚪ not run |
-| 5.6 | Answering yes | flatpak/snap still run; log says `installed with failures: ...` | ⚪ not run |
-| 5.7 | Summary printed | `Update finished, with N failed step(s).` + the list | ⚪ not run |
+| 5.1 | **pacman fails → cancel** | alert names the status; no other source runs | ✅ **real failure**, `status 1`, yay never invoked, `snapd` untouched |
+| 5.2 | helper fails → ask | prompt `Continue with the remaining sources? [y/N]` | ✅ printed after `the yay step exited with status 7.` |
+| 5.3 | Default is no | bare Enter stops the run | ✅ blank line stopped the run |
+| 5.4 | EOF stops | closed stdin → `no input — stopping here.` | ✅ verbatim |
+| 5.5 | Answering no | log says the aur step did not complete | ✅ `cancelled after the aur step did not complete (status 7)` × 326 rows |
+| 5.6 | Answering yes | later sources still run | ⚠️ **partial** — the run carried through and completed, but flatpak and snap had nothing pending, so neither was invoked either way. The carry-through is proven; "the later steps still run" is not. |
+| 5.7 | Summary printed | `Update finished, with N …` + the list | ✅ `Update finished, with 1 step(s) that did not complete.` / `Incomplete: aur (status 7)` |
 
-> **Simulation plan for Run 2 (revised).** No fake binaries needed. pacman and
-> yay both exit non-zero when the user declines their own `Proceed with
-> installation? [Y/n]` prompt, which makes the whole of §5 reachable with two
-> ordinary runs:
->
-> - **5.1** — run `nog update`, answer **n** at pacman's prompt. Expect nog to
->   cancel and never reach yay.
-> - **5.2/5.3/5.5** — run again, answer **Y** at pacman's prompt and **n** at
->   yay's. Expect nog's own continue-prompt, defaulting to no.
-> - **5.6/5.7** — same, then answer **y** to the continue-prompt.
-> - **5.4** — `nog update </dev/null` once a helper failure is in play.
->
-> Do **not** simulate by interrupting a real pacman transaction mid-write.
+> **How §5.1 was reached.** The plan written after Run 1 was to decline pacman's
+> own `Proceed with installation?` prompt. That failed three times running — see
+> F-4 — and was abandoned for `touch /var/lib/pacman/db.lck`, which makes pacman
+> exit 1 before it prints anything or asks anything. One prompt in the whole run,
+> nothing installable by accident, and a more realistic cause than a user decline.
 
 ---
 
@@ -125,11 +135,11 @@ Hard to trigger naturally; simulate where noted. **§5.1 is a release-blocker.**
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| 6.1 | Fence message reworded | `held back as a dependency`, not `shielded from the handoff` | ✅ |
-| 6.2 | Fence still populated | count matches uncleared foreign packages | ✅ 22 foreign − 2 with updates = **20**, matches the message exactly |
-| 6.3 | Held AUR package cannot move | absent from the helper's argument list | ✅ `snapd` absent |
-| 6.4 | AUR deactivated | `nog deactivate aur` → pacman step only, helper never invoked | ⚪ not run (writes `/etc/nog/sources.toml`, needs sudo) |
-| 6.5 | Reactivate | `nog activate aur` restores step 2 | ⚪ not run |
+| 6.1 | Fence message reworded | `held back as a dependency` | ✅ |
+| 6.2 | Fence still populated | count matches uncleared foreign packages | ✅ 20, exact |
+| 6.3 | Held AUR package cannot move | absent from the helper's argument list | ✅ |
+| 6.4 | AUR deactivated | helper never invoked | ✅ **stronger than written** — the `reported by yay` line disappears entirely; the switch gates *detection*, not just the handoff |
+| 6.5 | Reactivate | restores step 2 | ✅ `1 AUR update(s) reported by yay.` returned; `sources.toml` back to four `true` |
 
 ---
 
@@ -137,12 +147,23 @@ Hard to trigger naturally; simulate where noted. **§5.1 is a release-blocker.**
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| 7.1 | Per-source counts match execution | reported counts describe what actually ran | ✅ 169+2+0+0 reported; 8 official + 1 AUR installed |
-| 7.2 | CSV written | dated file under `~/.local/share/nog/logs/` | ✅ `20260826 nog-update.csv` |
-| 7.3 | Outcome column accurate | one of the documented values | ✅ `installed` on all 171 rows |
-| 7.4 | Man page matches behaviour | `man nog` four-step description is what happened | ✅ |
-| 7.5 | README sample matches | the example output resembles the real run | ✅ |
-| 7.6 | Version sync | binary, man page, README badge, PKGBUILD all `1.3.0` | ✅ binary/man/badge `1.3.0`; PKGBUILD `1.2.1`, bumps at release |
+| 7.1 | Per-source counts match execution | counts describe what ran | ✅ |
+| 7.2 | CSV written | dated file under `~/.local/share/nog/logs/` | ✅ `20260828 nog-update.csv` |
+| 7.3 | Outcome column accurate | one of the documented values | ✅ eight distinct outcomes exercised in one day-file |
+| 7.4 | Man page matches behaviour | four-step description is what happened | ✅ |
+| 7.5 | README sample matches | example resembles the real run | ✅ |
+| 7.6 | Version sync | binary, man, badge, PKGBUILD all `1.3.0` | ✅ binary/man/badge; PKGBUILD bumps at release |
+
+**Every outcome string nog can write was produced on 2026-08-28**, in one file:
+
+| Rows | Outcome |
+|---|---|
+| 637 | `cancelled` |
+| 482 | `pacman handoff did not complete (status 1)` |
+| 326 | `cancelled after the aur step did not complete (status 7)` |
+| 239 | `installed` |
+| 163 | `installed with incomplete steps: aur (status 7)` |
+| 162 | `all held` |
 
 ---
 
@@ -150,51 +171,91 @@ Hard to trigger naturally; simulate where noted. **§5.1 is a release-blocker.**
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| 8.1 | Unknown prompt still works | per-package `[y/N]` | ⚪ not run — UNKNOWN was empty |
-| 8.2 | Kernel/headers desync warning | unchanged | ⚪ not run — kernel and headers were in step |
+| 8.1 | Unknown prompt still works | per-package `[y/N]` | ⚪ not run — UNKNOWN was empty in every run, both nights |
+| 8.2 | Kernel/headers desync warning | unchanged | ⚪ not run — `linux-zen` and its headers stayed in step |
 | 8.3 | `--realign` | unchanged | ⚪ not run |
 | 8.4 | `nog search` tier colours | unchanged | ✅ |
-| 8.5 | `nog install` | routes through the helper, unchanged | ⚪ not run |
-| 8.6 | All-held early exit | `Nothing to install — every pending update is held.` | ⚪ not run — carried to Run 2 |
+| 8.5 | `nog install` | routes through the helper | ✅ tier check printed for both packages, one transaction, clean |
+| 8.6 | All-held early exit | `Nothing to install — every pending update is held.` | ✅ verbatim, outcome `all held` |
 
 ---
 
 ## Field observations (not checks)
 
 **F-1 · v1.2.1 died on a transient mirror timeout; v1.3.0 walked through it.**
-The 07:00 PM run in the same log file is the *installed* v1.2.1 (`/usr/bin/nog`),
-run minutes before the test build. Its handoff — `yay -Syu` — reached yay's own
-`pacman -S -y` (pacman.log 19:01:20), which could not fetch `chaotic-aur.db`
-from `geo-mirror.chaotic.cx` (10 s timeout). yay aborted, and nog logged
-`handoff failed (status 1)` against all 171 rows: **nothing was installed.**
-
-Forty-two seconds later v1.3.0's `pacman -Syu` hit the *same* timeout, treated a
-single unreachable third-party DB as non-fatal, and completed all 8 upgrades.
-
-This was not planned, and it is the strongest evidence for #10 in the file: the
-split handoff removed a failure mode nobody had filed — one flaky third-party
-mirror could take down the entire update, including packages from `core` and
-`extra` that had nothing to do with it.
+The 07:00 PM run on 08-26 in the same log file is the *installed* v1.2.1. Its
+handoff — `yay -Syu` — reached yay's own `pacman -S -y`, which could not fetch
+`chaotic-aur.db` (10 s timeout). yay aborted, and nog logged a failure against
+all 171 rows: **nothing was installed.** Forty-two seconds later v1.3.0's
+`pacman -Syu` hit the *same* timeout, treated one unreachable third-party DB as
+non-fatal, and completed all 8 upgrades. Unplanned, and the strongest evidence
+for #10 in the file: the split handoff removed a failure mode nobody had filed.
 
 **F-2 · pacman.log misrepresents nog's ignore list.** nog passes one
-comma-joined `--ignore`; pacman splits that string **in place inside `argv`**
-and only then writes its `Running '...'` line, so the log records:
+comma-joined `--ignore`; pacman splits that string in place inside `argv` and
+only then writes its `Running '...'` line, so the log records one name where 162
+were passed. Verified by `--print`. Anyone auditing pacman.log after an incident
+will conclude nog held exactly one package. Worth a troubleshooting note; not a
+nog defect.
+
+**F-3 · "failed" is the wrong word for a user cancel. FIXED (`348f093`).**
+pacman exits 1 both when the user declines its prompt and when something
+genuinely breaks; the status cannot distinguish them. Javier's ruling was not to
+guess but to **say it could be either**. The terminal now prints *"That is either
+a declined prompt or a pacman error — the exit status alone cannot tell the two
+apart"*, and the run log — permanent, read long after the terminal is gone — says
+`did not complete` rather than `failed`. Applied to the aur, flatpak and snap
+steps too. A follow-on: the carried-through outcome briefly read
+`installed, incomplete steps: …`, whose comma forced RFC-4180 quoting on a column
+that had never needed it. Escaping was correct, but a quoted field trips naive
+parsers — it tripped one during this very session — so it became
+`installed with incomplete steps: …` (`2f85878`).
+
+**F-4 · nog's gate was word-for-word pacman's. FIXED (`348f093`).** nog asked
+`Proceed with installation? [Y/n]`; pacman asks `:: Proceed with installation?
+[Y/n]` seconds later. The two are distinguishable only by a `nog:` prefix versus
+`::`. During this session the tool's own author, holding a table that spelled out
+which prompt was which, answered nog's gate as pacman's **three times in a row**.
+The v1.0.7 double-confirm only buys safety if the user can tell the layers apart.
+The gate now asks **`Begin the handoff?`**, borrowing the word already used in
+every step message. The three misfires are the evidence, not an anecdote: a
+prompt that misleads its own author will mislead anyone.
+
+**F-5 · 🐛 A Ready package can break a Held one through a soname bump. NOT
+FIXED — filed for the next cycle.** Live, unplanned, mid-matrix:
 
 ```
-[PACMAN] Running 'pacman -Syu --ignore archlinux-appstream-data'
+error: failed to prepare transaction (could not satisfy dependencies)
+:: installing libbluray (1.5.0-1) breaks dependency 'libbluray.so=3-64'
+   required by ffmpeg4.4
 ```
 
-— one name, where 162 were passed. Verified by `--print`: a genuine single-name
-ignore plans 160 packages, and the run installed 8. Anyone auditing pacman.log
-after an incident will conclude nog held exactly one package. Worth a
-troubleshooting note; it is not a nog defect.
+`libbluray` was Ready (hold just expired) and bumps `libbluray.so` from 3 to 4.
+`ffmpeg4.4` was Held with 1 day remaining and still links the old soname. pacman
+refused the **entire 78-package transaction**. All three coupling rules miss this
+shape: the two packages share no pkgbase, no `lib32-` name pattern, and no version
+cohort. A scan of all 78 Ready packages found exactly one such pair (`poppler` also
+drops `libpoppler.so=162`, but nothing installed still needs it).
 
-**F-3 · "failed" is the wrong word for a user cancel.** If the user answers
-**n** at pacman's own `Proceed with installation?`, pacman exits 1 and nog will
-log `pacman handoff failed (status N)`. Stopping is correct; calling a
-deliberate decline a *failure* is not, and the run log is the permanent record.
-`cancelled` vocabulary already exists in §5.5. Confirm the wording during 5.1
-and decide before tagging.
+nog already holds the data — the sync DB carries `%PROVIDES%`, the local DB
+carries `%DEPENDS%` — so a fourth rule falls out directly: *if a Ready candidate's
+new version drops a soname that a Held package still depends on, demote it and
+note `coupled to <pkg>`.* This is the depends/provides-graph generalization left
+open since v1.0.6, now with a reproduction.
+
+**Severity, stated honestly: this blocks updates, it does not break systems.**
+pacman's resolver caught it and refused everything — the exact opposite of the
+2026-08-25 qt6 split, which sailed through and killed SDDM. That difference is why
+it is filed rather than hotfixed. Workaround, used live and cleanly:
+`nog install ffmpeg4.4 libbluray` — both in one transaction, forward onto the new
+soname, never back.
+
+**F-6 · The continue prompt runs into the next line on non-interactive stdin.**
+`nog: Continue with the remaining sources? [y/N] nog: no input — stopping here.`
+Interactively the user's Enter supplies the newline, so this is invisible in normal
+use; it only shows when stdin is a pipe or `/dev/null`. Cosmetic, one `eprintln!()`
+to fix, deliberately **not** changed after the matrix went green — bundled with F-5
+for the next cycle.
 
 ---
 
@@ -202,11 +263,22 @@ and decide before tagging.
 
 | Check | Why not run |
 |---|---|
-| §2.5 chaotic-aur | No chaotic-aur package was Ready; all 8 were `extra/`. The chaotic DB *fetch* did happen in the pacman step, which is partial evidence only. |
-| §3.6 helper skipped when empty | An AUR package *was* cleared, so the empty case never arose. |
-| §5.1–5.7 failure handling | Requires a deliberate non-zero exit from a handoff step. Reachable via the declined-prompt plan above; **§5.1 blocks the tag.** |
-| §6.4–6.5 source kill switch | `nog activate` / `deactivate` write `/etc/nog/sources.toml` via sudo — hand-run, not agent-run. |
-| §8.1 Unknown prompt | UNKNOWN bucket was empty. |
-| §8.2 kernel/headers desync | `linux-zen` and `linux-zen-headers` were both held at matching versions — no desync to warn about. |
-| §8.3 `--realign`, §8.5 `nog install` | Not exercised by an update run. |
-| §8.6 all-held early exit | Every Ready package was consumed by this run; the next all-held run will show it. |
+| §2.5 chaotic-aur | No chaotic package was ever Ready across both nights — every one of them was inside its hold window. The chaotic DB *fetch* happened in the pacman step, which is partial evidence only. |
+| §3.6 helper skipped when empty | An AUR package was cleared in every run that reached the handoff. §6.4 shows yay uninvoked, but by the kill switch, which is a different code path. |
+| §5.6 (partial) | flatpak and snap had nothing pending, so "the later steps still run" could not be distinguished from "there was nothing for them to do". |
+| §8.1 Unknown prompt | UNKNOWN was empty in every single run. |
+| §8.2 kernel/headers desync | `linux-zen` and `linux-zen-headers` were held at matching versions throughout. |
+| §8.3 `--realign` | Not exercised by an update run. |
+
+---
+
+## Verdict
+
+**v1.3.0 is releasable.** The release-blocker (§5.1) passes on a real failure,
+not a simulation. Every failure-handling path has now executed at least once —
+this was the release's whole risk, since #10's code had never run before tonight.
+Two findings were fixed and re-verified in-session; two more (F-5, F-6) are filed
+with reproductions, neither a v1.3.0 regression — F-5 has been latent since at
+least v1.0.6.
+
+Nothing carried forward from Run 1 remains unexplained.
