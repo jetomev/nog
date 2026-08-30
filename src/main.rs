@@ -6,6 +6,7 @@ mod config;
 mod holds;
 mod local_db;
 mod pacman;
+mod reboot;
 mod runlog;
 mod sources;
 mod sync_db;

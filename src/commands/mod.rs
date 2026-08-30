@@ -1,5 +1,6 @@
 use crate::aur::{self, Helper};
 use crate::tiers::{Tier, TierManager};
+use crate::reboot;
 use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
 use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
@@ -1004,8 +1005,65 @@ pub fn update(realign: bool) {
         format!("installed with incomplete steps: {}", step_failures.join("; "))
     };
     write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, &outcome);
+
+    // Issue #9 — reboot advice. Deliberately placed after the handoff, so the
+    // probes see what pacman actually did rather than what nog asked for; and
+    // after the run log, so a misbehaving probe can never cost the permanent
+    // record. The user chose the packages that reached this point.
+    let cleared_for_reboot: Vec<(String, String)> = ready
+        .iter()
+        .map(|(u, _, _)| (u.name.clone(), u.new_version.clone()))
+        .chain(unknown.iter().filter_map(|(u, _)| {
+            if ignore.iter().any(|i| i == &u.name) {
+                None
+            } else {
+                Some((u.name.clone(), u.new_version.clone()))
+            }
+        }))
+        .collect();
+    print_reboot_advice(&cleared_for_reboot, &tm);
+
     println!();
     println!("Thank you for using nog!");
+}
+
+/// Issue #9: say something when the running machine no longer matches what is
+/// installed. Silent unless there is something to say — a notice that appears
+/// after every run is one nobody reads, which is how the original twenty minutes
+/// were lost.
+///
+/// Verified findings are printed in Tier 1 red because they are facts about a
+/// broken state; the announcement that follows is muted, because it is advice.
+fn print_reboot_advice(cleared: &[(String, String)], tm: &TierManager) {
+    let tier1 = tm.tier1_packages();
+
+    // Probe only if something relevant was handed off. On an ordinary run this
+    // is empty and nog does no extra work at all.
+    let candidates: Vec<String> = cleared
+        .iter()
+        .filter(|(name, _)| reboot::classify(name, &tier1).is_some())
+        .map(|(name, _)| name.clone())
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+
+    let probe = reboot::SystemProbe::read(&candidates);
+    let lines = reboot::render(&reboot::assess(cleared, &tier1, &probe));
+    if lines.is_empty() {
+        return;
+    }
+
+    println!();
+    for line in &lines {
+        if line.starts_with("IMPORTANT:") {
+            println!("{}{}{}{}", C_BOLD, C_RED, line, C_RESET);
+        } else if line.starts_with("NOTE:") {
+            println!("{}{}{}{}", C_BOLD, C_YELLOW, line, C_RESET);
+        } else {
+            println!("{}{}{}", C_SUBTEXT, line, C_RESET);
+        }
+    }
 }
 
 enum PromptOutcome { Yes, No, Eof }
