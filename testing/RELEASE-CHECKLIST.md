@@ -66,6 +66,21 @@ strings target/release/nog | grep -i CARGO_MANIFEST_DIR
 cargo build --release 2>&1 | grep "generated .* warning"
 ```
 
+## Matrix roll-up — never by hand
+
+```bash
+python3 testing/tally-matrix.py "testing/<this release's matrix>.md"
+```
+
+The v1.4.0 roll-up was hand-tallied twice and was wrong both times — 44, then 52,
+against an actual 63 — and it under-reported the failure count, which is the
+direction that matters. The script recomputes from the tables and **refuses to
+count a verdict it was not taught** rather than folding an unknown into PASS.
+
+Cross-check the findings list against the tables: every row whose verdict is
+`FAIL` must have a numbered finding. v1.4.0's check 8.5 was written `FAIL` in its
+table and then never carried into the findings, which is how the count drifted.
+
 ## Co-author credit
 
 Every release artifact carries the dual credit line:

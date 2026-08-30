@@ -116,12 +116,43 @@ its result depends on the box.
 
 ---
 
+## §9 · Fresh install from the AUR
+
+Run after the AUR push, against the published package rather than the local
+build. yay's cache was cleared first — the v1.0.8 **F-2** lesson, where a stale
+cached package was silently reinstalled over a fix.
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 9.1 | AUR git serves the new `pkgver` | 1.4.0 | **PASS** | Confirmed via cgit before the RPC had caught up |
+| 9.2 | AUR RPC index reports the new version | 1.4.0-1 | **PASS** | Lagged the push by a few minutes, as expected |
+| 9.3 | `yay -S nog` fetches and builds | signature valid, tests green | **PASS** | Cache holds the signed `.tar.gz` and `.asc` it fetched, so the AUR path was genuinely exercised |
+| 9.4 | Installed `nog --version` | 1.4.0 | **PASS** | |
+| 9.5 | `/etc/nog/nog.conf` on the installed system | 1.4.0 | **PASS** | **F-1 proven fixed on the artifact that carries it.** Before the fix this file was the one surface a user would actually receive carrying the wrong version |
+| 9.6 | Man page installed | present | **PASS** | `/usr/share/man/man1/nog.1.gz` |
+| 9.7 | `backup=` protected the user's configs | no clobber | **PASS** | No `.pacnew` — correct, the configs were unmodified, so nothing to preserve |
+| 9.8 | shields.io AUR badge | 1.4.0 | **DEFERRED** | Still 1.3.1 at the time of writing; its own cache is ~30 min (`cacheSeconds=1801`). Self-resolving. The camo cache-buster in the checklist is only needed if it is still stale well after that |
+
+---
+
 ## Roll-up
 
-**44 checks · 40 PASS · 2 FAIL (both fixed before publication) · 1 N/A · 2 CANNOT TEST**
+**63 checks · 56 PASS · 3 FAIL (all fixed before publication) · 1 N/A · 1 DEFERRED · 2 CANNOT TEST**
+
+*Computed by `testing/tally-matrix.py`, never by hand — see **M-6**.*
 
 Nothing here was fixed by relaxing an expectation. The two failures are recorded
 as failures because that is what they were when the matrix found them.
+
+**The two CANNOT TEST entries are the honest limit of this release.** Every
+component of the reboot notice is verified; the assembled chain firing on a real
+transaction is not, and cannot be from this machine — nog is holding every
+package that would trigger it (`glibc` 9 days, `mkinitcpio` 10, `mesa` 19,
+`linux-zen` — the running kernel — 27). *That is the two features interacting
+correctly rather than a gap in either:* the notice should mostly fire on the day
+a Tier 1 hold expires, which is exactly when kernels and glibc land. Earliest
+real opportunity is **~2026-09-08** (glibc, the advice path) and **~2026-09-26**
+(the kernel, the verified path).
 
 ---
 
@@ -131,6 +162,7 @@ as failures because that is what they were when the matrix found them.
 |---|---|---|---|
 | **F-1** | 2.3 | medium | `config/nog.conf` shipped the default `[general] version = "1.3.1"` while every other surface read 1.4.0. A user installing v1.4.0 would have received a config file claiming to be the previous release. Caught by the checklist's own version-sync gate — the gate exists because this exact class of miss has happened before, and it earned its keep again. Fixed before publication. |
 | **F-2** | 8.4 | medium | `docs/CHANGELOG.md` was unreachable from the README. The Roadmap section carries a pointer to `docs/ROADMAP.md`; the Changelog section never had the equivalent. The locked convention pushes the third-oldest release out of the README on every release, so every release since the convention landed has been quietly moving history into a file no reader could navigate to. Made concrete by this release pushing v1.3.0 out. Fixed. |
+| **F-3** | 8.5 | low | The README's Project Structure block advertised **54 tests** against an actual 128, and omitted `local_db.rs`, which shipped in v1.3.1. Both claims had been stale since before this release — the module list is updated by hand and nothing checks it, and the test count was last touched three releases ago. A reader's first impression of the project's test coverage was wrong by a factor of two, in the direction that understates it. Fixed in the docs commit, and it is the only finding here that was not caught by a checklist gate: there is no gate for it. |
 
 ## Method notes
 
@@ -140,3 +172,5 @@ as failures because that is what they were when the matrix found them.
 | **M-2** | **The checklist listed a file that no longer exists.** Its version-sync gate required the in-tree `PKGBUILD`, deleted in this release. A gate naming a missing file either fails forever or gets skipped, and skipped is worse. Removed, with a note recording why the file must not return. |
 | **M-3** | **A staged deletion landed in the wrong commit.** `git rm --cached PKGBUILD` was run at the moment the decision was made, several steps before the commit it belonged to — so it was already in the index when the *feature* commit was made, and rode along with it. The result was a docs commit whose message described a deletion its diff did not contain. Caught before pushing by reading the staged file list rather than trusting the intent; both commits were rebuilt from saved messages. **Stage a deletion when it belongs to a commit, not when the decision is taken.** |
 | **M-4** | **`--locked` caught the stale `Cargo.lock`.** Bumping `Cargo.toml` leaves the lock recording the old version, and `cargo test --release --locked` refused to run rather than silently updating it. Worth stating because the refusal reads like a tooling failure and is actually the gate doing its job. |
+| **M-5** | **Verifying a nog release requires the tools nog exists to wrap.** Steps 9.3 and the removal before it use `yay` and `pacman` directly, because nog can update packages but cannot install or reinstall one. That is C3's territory (the install chain, now v1.5.0). Recorded as a gap rather than passed over, per the standing rule that gaps on the testbed are findings. |
+| **M-6** | **The roll-up was hand-tallied twice and wrong twice — 44, then 52, against an actual 63.** Worse than the count: it reported **2** failures against an actual **3**, because check 8.5 was written `FAIL → fixed` in its table and then never carried into the findings list. A summary that under-reports failures is the one direction that matters, and it is the same defect shape as a stale README over shipped code. `testing/tally-matrix.py` now recomputes it from the tables and **refuses to count a verdict it was not taught** rather than folding an unknown into PASS. The lesson is inherited, not new — mindForge learned it on 2026-08-30 as its own M-4 — which is the argument for the script rather than for more care. |
