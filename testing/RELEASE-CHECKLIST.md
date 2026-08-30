@@ -12,7 +12,6 @@ Before tagging, every surface below must carry the new version string `vX.Y.Z`:
 - `nog.1` `.TH NOG 1 "Month Year" "nog vX.Y.Z"` header
 - `README.md` Version badge URL
 - `README.md` nog.conf example `version = "X.Y.Z"`
-- `PKGBUILD` (in-tree) `pkgver`
 - `~/Programs/aur-nog-remote/PKGBUILD` `pkgver` + `pkgrel`
 - `~/Programs/aur-nog-remote/.SRCINFO` (regenerate via `makepkg --printsrcinfo`)
 - The annotated tag message references the version
@@ -20,8 +19,20 @@ Before tagging, every surface below must carry the new version string `vX.Y.Z`:
 Quick audit:
 
 ```bash
-grep -E "^version = |pkgver=|nog v[0-9]" Cargo.toml config/nog.conf nog.1 PKGBUILD README.md | head -20
+grep -E "^version = |nog v[0-9]" Cargo.toml config/nog.conf nog.1 README.md | head -20
 ```
+
+> **The in-tree `PKGBUILD` was deleted in v1.4.0** and must not come back. It had
+> diverged from the AUR copy on `source`, `sha256sums` and `validpgpkeys` while
+> both files reported the same `pkgver`, so a version check passed it every time.
+> A root copy can never carry a correct checksum at the moment it is committed,
+> because the asset it checksums does not exist until the tag is pushed.
+> Packaging lives in `~/Programs/aur-nog-remote/` alone.
+
+> **The `README.md` sample run is a captured transcript** and legitimately shows
+> the version it was captured under. Do not edit the version string inside it to
+> match the release — that turns a real record into a fabricated one. Replace it
+> only by capturing a fresh run.
 
 ## Doc coverage
 
@@ -48,16 +59,18 @@ grep -rn "TODO\|FIXME\|XXX" src/ | grep -v "^Binary"
 strings target/release/nog | grep -i CARGO_MANIFEST_DIR
 # MUST be empty
 
-# 4. Warning delta — note in changelog if non-zero from last release
-cargo build --release 2>&1 | grep "^warning:" | wc -l
+# 4. Warning delta — note in changelog if non-zero from last release.
+# Read cargo's own summary rather than counting lines: every warning line AND
+# the "generated N warnings" footer start with "warning:", so a naive grep -c
+# reports one more than there are. It said 7 for 6 on the v1.4.0 release.
+cargo build --release 2>&1 | grep "generated .* warning"
 ```
 
 ## Co-author credit
 
 Every release artifact carries the dual credit line:
 
-- `PKGBUILD` `# Co-developer: Claude (Anthropic)`
-- `~/Programs/aur-nog-remote/PKGBUILD` same line
+- `~/Programs/aur-nog-remote/PKGBUILD` `# Co-developer: Claude (Anthropic)` (the in-tree copy is gone as of v1.4.0)
 - `README.md` Authors / Credits section
 - Man page **AUTHORS** section
 - GitHub release body footer

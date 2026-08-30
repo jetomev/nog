@@ -652,6 +652,8 @@ Validated before a line of it was written, and again afterwards: the failure was
 
 Tests: 86 → 100. Warnings unchanged at 6. No measurable runtime cost.
 
+*Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
+
 ## Related Projects
 
 - **[KognogOS](https://github.com/jetomev/KognogOS)** — the distribution nog was built for. Arch-based, KDE Plasma on Wayland, tier-aware by default.
