@@ -2,6 +2,28 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.4.0 — August 30, 2026
+
+**nog now tells you when the machine you are running is no longer the machine you have installed.**
+
+Found live on August 10. A `nog update` installed `nvidia-utils`, `lib32-nvidia-utils` and `nvidia-open-dkms`. DKMS rebuilt the modules correctly and the desktop kept working — until the first 3D application, which died with `Failed to initialize NVML: Driver/library version mismatch`. The old module was still loaded in memory. Twenty minutes went to suspecting the game, then Wine, then the server. nog knew exactly what it had just installed and said nothing.
+
+It says something now, and the rule is that it may never say it anonymously:
+
+- **Where nog can check, it checks, and marks the line `verified`** — the running kernel against what is installed, the loaded NVIDIA module against the installed driver, the running init system against the installed systemd. Those lines are observations, and they carry both versions.
+- **Where nog cannot check, it names the packages instead** and says in words that this is advice rather than a finding. `glibc`, `mkinitcpio` and `grub` offer no reliable way to ask what is currently running, so nog does not pretend otherwise.
+- **Session components are separated out.** `mesa`, `xorg-server`, `wayland` and `dbus` get "log out and back in", not "reboot". Demanding a reboot when a logout is enough is the same noise this feature exists to prevent.
+
+**The kernel check deliberately parses no version numbers.** A running kernel reports `7.0.5-zen1-1-zen` while its own package reports `7.0.5.zen1-1`; comparing those two strings is a false-alarm generator, and normalising them is a second one waiting for the next kernel flavour. `/usr/lib/modules/` is named for the running kernel and that directory is removed when the kernel is replaced — so its absence *is* the finding, with nothing to parse.
+
+**Silence is the common case, and it is enforced by test.** A package nog cleared but pacman never installed produces nothing — you can still decline individual packages at pacman's own prompt, and nog re-reads what actually landed rather than trusting its own request. A driver whose loaded module already matches produces nothing. An ordinary run performs no probing at all. Four tests exist for no purpose other than proving nog stays quiet, because a notice that appears after every run is one nobody reads — which is how the original twenty minutes were lost.
+
+**nog recommends. nog never reboots anything.**
+
+Also in this release: **the root `PKGBUILD` is gone.** It fetched `archive/refs/tags/` with `sha256sums=('SKIP')` and no `validpgpkeys`, while the AUR copy has used the signed release asset since v1.0.9 — and both files reported the same version, so every version check passed it. It was the only root PKGBUILD across seven repositories, it can never hold a correct checksum at the moment it is committed, and `makepkg` testing already happens against the AUR copy. Deleting it ends the divergence instead of promising to watch for it.
+
+Tests: 100 → 128. Warnings unchanged at 6.
+
 ### v1.3.1 — August 28, 2026
 
 **A package whose hold expires can no longer break one that is still waiting.**

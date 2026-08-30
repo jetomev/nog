@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.3.1" "User Commands"
+.TH NOG 1 "August 2026" "nog v1.4.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -288,6 +288,58 @@ requires root \(em nog stays unprivileged and escalates through
 for that step alone. Holds are enforced the same way as flatpak: nog names
 exactly the snaps it cleared this run and nothing else.
 .
+.SH REBOOT ADVICE
+After a successful update,
+.B nog
+compares the running system against what is now installed and, if they differ,
+ends the run with a recommendation. It never reboots or restarts anything.
+.PP
+Every line states its own basis, and the distinction is deliberate:
+.TP
+.B verified
+.B nog
+looked at the running system and observed the difference. The line carries both
+versions. Three checks are available:
+.RS
+.IP \(bu 2
+the running kernel, by whether
+.I /usr/lib/modules/<uname \-r>
+still exists \(em that directory is named for the running kernel and is removed
+when the kernel is replaced, so no version string is ever parsed
+.IP \(bu 2
+the loaded NVIDIA driver, from
+.I /proc/driver/nvidia/version
+.IP \(bu 2
+the running init system, from
+.B systemctl \-\-version
+.RE
+.TP
+.B advice
+.B nog
+confirmed the package was installed but has no way to ask what is running \(em
+.BR glibc ,
+.B mkinitcpio
+and
+.B grub
+have no such probe. The packages are named and the notice says plainly that it
+is advice rather than a finding.
+.PP
+.BR mesa ,
+.BR xorg\-server ,
+.B wayland
+and
+.B dbus
+produce a log-out notice instead of a reboot recommendation.
+.I <X>\-headers
+packages produce nothing: they are never loaded into a running system and they
+accompany every kernel.
+.PP
+Nothing is printed when there is nothing to report. A package
+.B nog
+cleared but pacman did not install produces no notice \(em installed versions are
+re-read after the handoff rather than assumed from the request \(em and a driver
+whose loaded module already matches is silent.
+.PP
 .SH FILES
 .TP
 .I /etc/nog/nog.conf

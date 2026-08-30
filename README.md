@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.3.1](https://img.shields.io/badge/Version-1.3.1-purple.svg)
+![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -58,6 +58,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - Held packages sorted by how soon they release, so the list reads as a calendar
 - Packages with no usable date are never guessed at — nog asks you, one at a time
 - Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days
+- **Reboot advice** *(v1.4.0)* — when a kernel or driver update leaves the running system out of step with what is now installed, nog says so at the end of the run. Where it can check, it says `verified` and shows both versions; where it cannot, it names the package and says plainly that this is advice rather than a finding
 
 **Security**
 - **One manager per source** *(v1.3.0)* — pacman upgrades official packages; your AUR helper is handed only the AUR packages nog cleared, **by name**. Nothing unnamed can move, so a failed AUR lookup cannot release a hold by omission. Born from a real bypass we caught on our own machine, originally patched by the foreign fence *(v1.0.9)*, which now backs it up as a second layer.
@@ -294,7 +295,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.3.1"
+version = "1.4.0"
 log_level = "info"
 
 [paths]
@@ -378,6 +379,8 @@ nog/
 |   |-- commands/mod.rs   # Every subcommand's implementation
 |   |-- tiers.rs          # Tier classification, including auto-coupling and [groups]
 |   |-- holds.rs          # Hold evaluation and the foreign fence (pure functions)
+|   |-- local_db.rs       # Reads pacman's local database for the dependency graph (v1.3.1)
+|   |-- reboot.rs         # Reboot advice: probes the running system  (v1.4.0)
 |   |-- pacman.rs         # pacman wrapper
 |   |-- aur.rs            # AUR helper detection and handoff
 |   |-- flatpak.rs        # Flatpak source  (v1.1.0)
@@ -390,11 +393,12 @@ nog/
 |-- testing/              # Test matrix, results, and release checklist for every version
 |-- docs/                 # Full changelog, full roadmap, v2 design notes
 |-- nog.1                 # Man page
-|-- PKGBUILD              # AUR packaging, kept in step with the latest tag
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 4,800 lines of Rust, with 54 tests that run on every release.
+Around 6,950 lines of Rust, with 128 tests that run on every release.
+
+Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
 ---
 
@@ -568,15 +572,14 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.3.0 shipped 2026-08-28**, after a two-session dogfood that closed a 42-check matrix. v1.2.1 shipped 2026-08-25 alongside it: [#11](https://github.com/jetomev/nog/issues/11) (family coupling, after a split Qt6 stack left a desktop unable to reach a login screen) and [#10](https://github.com/jetomev/nog/issues/10) (one manager per source). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.4.0 shipped 2026-08-30** — reboot advice ([#9](https://github.com/jetomev/nog/issues/9)), written after an NVIDIA upgrade left the old module loaded and cost twenty minutes of blaming a game. v1.3.1 shipped 2026-08-28 ([#13](https://github.com/jetomev/nog/issues/13), soname coupling), found during v1.3.0's own release dogfood. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — reboot advice after key upgrades ([#9](https://github.com/jetomev/nog/issues/9) · `priority-2`)
+### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
 
-- [ ] **Say when a reboot is needed.** Found live: a kernel or driver upgrade can leave the running system and the installed modules out of step, and nothing tells you until something breaks. nog knows exactly what it just installed, so it is the right place to say "reboot before you next use this".
+- [ ] **Run nog against paru.** nog has supported paru since v1.0.0 and has never once been run against it — every release so far was built and dogfooded on a machine running yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 
 ### Later
 
-- [ ] **Validate against paru** ([#12](https://github.com/jetomev/nog/issues/12)) — nog has supported paru since v1.0.0 and has never been run against it; every release so far was built and dogfooded on a machine with yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
 - [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held. What remains is the versioned `=` dependency case, where the declaration is exact rather than a soname.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
@@ -589,9 +592,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [x] **C1 · v1.1.0** — Flatpak
 - [x] **C2 · v1.2.0** — Snap
-- [ ] **C3 · v1.4.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
-- [ ] **C4 · v1.5.0** — Full command surface plus `--json` output
-- [ ] **C5 · v1.6.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
+- [ ] **C3 · v1.5.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
+- [ ] **C4 · v1.6.0** — Full command surface plus `--json` output
+- [ ] **C5 · v1.7.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
 - [ ] **C6** — nogForge, the visual companion, built on forgekit *(gated on [#12](https://github.com/jetomev/nog/issues/12) — validate against paru first)*
 - [ ] **C7 · v2.0.0** — the crown release
 
@@ -600,6 +603,28 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.4.0 — August 30, 2026
+
+**nog now tells you when the machine you are running is no longer the machine you have installed.**
+
+Found live on August 10. A `nog update` installed `nvidia-utils`, `lib32-nvidia-utils` and `nvidia-open-dkms`. DKMS rebuilt the modules correctly and the desktop kept working — until the first 3D application, which died with `Failed to initialize NVML: Driver/library version mismatch`. The old module was still loaded in memory. Twenty minutes went to suspecting the game, then Wine, then the server. nog knew exactly what it had just installed and said nothing.
+
+It says something now, and the rule is that it may never say it anonymously:
+
+- **Where nog can check, it checks, and marks the line `verified`** — the running kernel against what is installed, the loaded NVIDIA module against the installed driver, the running init system against the installed systemd. Those lines are observations, and they carry both versions.
+- **Where nog cannot check, it names the packages instead** and says in words that this is advice rather than a finding. `glibc`, `mkinitcpio` and `grub` offer no reliable way to ask what is currently running, so nog does not pretend otherwise.
+- **Session components are separated out.** `mesa`, `xorg-server`, `wayland` and `dbus` get "log out and back in", not "reboot". Demanding a reboot when a logout is enough is the same noise this feature exists to prevent.
+
+**The kernel check deliberately parses no version numbers.** A running kernel reports `7.0.5-zen1-1-zen` while its own package reports `7.0.5.zen1-1`; comparing those two strings is a false-alarm generator, and normalising them is a second one waiting for the next kernel flavour. `/usr/lib/modules/` is named for the running kernel and that directory is removed when the kernel is replaced — so its absence *is* the finding, with nothing to parse.
+
+**Silence is the common case, and it is enforced by test.** A package nog cleared but pacman never installed produces nothing — you can still decline individual packages at pacman's own prompt, and nog re-reads what actually landed rather than trusting its own request. A driver whose loaded module already matches produces nothing. An ordinary run performs no probing at all. Four tests exist for no purpose other than proving nog stays quiet, because a notice that appears after every run is one nobody reads — which is how the original twenty minutes were lost.
+
+**nog recommends. nog never reboots anything.**
+
+Also in this release: **the root `PKGBUILD` is gone.** It fetched `archive/refs/tags/` with `sha256sums=('SKIP')` and no `validpgpkeys`, while the AUR copy has used the signed release asset since v1.0.9 — and both files reported the same version, so every version check passed it. It was the only root PKGBUILD across seven repositories, it can never hold a correct checksum at the moment it is committed, and `makepkg` testing already happens against the AUR copy. Deleting it ends the divergence instead of promising to watch for it.
+
+Tests: 100 → 128. Warnings unchanged at 6.
 
 ### v1.3.1 — August 28, 2026
 
@@ -626,35 +651,6 @@ If the local database cannot be read, the rule goes quiet and nog behaves exactl
 Validated before a line of it was written, and again afterwards: the failure was replayed from the cached packages, a sweep of 161 pending updates against 1397 installed packages produced no false positives, and finally v1.3.0 and v1.3.1 were run against byte-identical restored state — the first putting `libbluray` in Ready, the second holding it, coupled, to clear with its partner.
 
 Tests: 86 → 100. Warnings unchanged at 6. No measurable runtime cost.
-
-### v1.3.0 — August 28, 2026
-
-**One package manager per source.** Until now `nog update` handed the entire upgrade — official repositories *and* AUR — to your AUR helper in a single command. So yay drove the upgrade of some hundred and forty official packages it had no business touching, announced every held package once during its own search and then again through pacman's warnings, and blurred the source boundary that the whole report above it exists to make visible.
-
-The handoff is now four steps, each run by the tool that owns that source:
-
-```
-pacman     official repositories, including binary repos like chaotic-aur
-<helper>   the AUR packages nog cleared, by name
-flatpak    unchanged
-snap       unchanged
-```
-
-A source with nothing cleared is skipped entirely, so a run with no AUR updates never invokes your helper at all.
-
-**The AUR step names its packages.** This is worth explaining, because the obvious alternative would have been to ask the helper for an AUR-only upgrade and pass it a list of exclusions. Naming turned out to be better in three ways. It is already how nog drives Flatpak and Snap, so there is now one idiom across every source instead of two. It uses only the part of the command surface that yay and paru implement identically, rather than a flag whose behaviour differs between them. And it is a stronger guarantee: a package nog does not name cannot move, whatever happens, so a failed AUR lookup can no longer release a hold simply by forgetting to mention it. That was a real bypass, caught on the maintainer's own machine in August, and it is now closed by the shape of the thing rather than by a rule guarding it.
-
-The foreign fence that originally patched that bypass stays, demoted to a second layer and relabelled to say what it now actually does — it blocks held packages from being dragged in as build dependencies, which is a different hole and still an open one.
-
-**Failures now behave differently depending on where they happen.** If pacman fails, nog cancels and touches nothing else: AUR packages are compiled against official libraries, and building them on a system whose repository upgrade did not finish is how you turn one problem into several. If a later step fails, nog reports it and asks whether to continue, defaulting to no. Flatpak and Snap moved to this model too, having previously stopped the run outright. A run you carry through after a failure is recorded as `installed with incomplete steps: …`, so the log describes what happened rather than implying a clean install or a cancellation.
-
-**And nog no longer claims to know why a step stopped.** pacman exits `1` when the user declines its prompt and `1` when something genuinely breaks; the exit status cannot tell the two apart, so nog does not pretend to. It says so outright — *"That is either a declined prompt or a pacman error — the exit status alone cannot tell the two apart"* — and the run log, which is permanent and read long after the terminal is gone, records `did not complete` rather than `failed`.
-
-**The review gate was renamed to `Begin the handoff?`.** It used to ask `Proceed with installation? [Y/n]` — word for word what pacman asks seconds later, distinguishable only by a `nog:` prefix against pacman's `::`. During the release dogfood the author answered nog's gate as pacman's three times in a row, holding a table that spelled out which was which. Two layers of confirmation only buy safety if you can tell which one you are answering.
-
-Care, safety and control are the premise; they just do not mean the same thing at every step.
-
-Tests: 80 → 86. `aur.rs` had no test module before this release.
 
 ## Related Projects
 

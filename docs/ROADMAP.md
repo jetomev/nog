@@ -2,6 +2,17 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.4.0 — Released (reboot advice, #9)
+- [x] New `reboot` module: probe the running system *after* the handoff, so it reflects what pacman did rather than what nog asked for
+- [x] Kernel checked by the presence of `/usr/lib/modules/<uname -r>` — no version string is parsed, because the running kernel and its package spell the same version differently
+- [x] NVIDIA checked against `/proc/driver/nvidia/version` — the exact comparison that diagnosed the original incident in seconds
+- [x] systemd checked against `systemctl --version`, with the distribution suffix dropped
+- [x] Observations marked `verified` and carrying both versions; everything else named as advice, never warned anonymously
+- [x] Session components (`mesa`, `xorg-server`, `wayland`, `dbus`) get a logout notice, not a reboot demand
+- [x] `*-headers` excluded — never loaded into a running system, and present beside every kernel
+- [x] A package nog cleared but pacman did not install produces no notice; installed versions are re-read after the handoff
+- [x] Root `PKGBUILD` deleted — it had diverged from the AUR copy on `source`, `sha256sums` and `validpgpkeys` while reporting the same version
+
 ### v1.3.1 — Released (soname coupling, #13)
 - [x] New `local_db` module reads `/var/lib/pacman/local` for `%PROVIDES%` and `%DEPENDS%` — nog's first look at the installed dependency graph
 - [x] `sync_db` parses `%PROVIDES%`, its first multi-value field
