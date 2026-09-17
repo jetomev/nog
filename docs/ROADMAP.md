@@ -2,6 +2,16 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.4.1 — Released (snap holds enforced in snapd, #18)
+- [x] Tier windows placed with `snap refresh --hold=<hours>`, grouped so one call covers every snap sharing a window
+- [x] Durations in hours — `d` is not a unit snapd parses — clamped to snapd's own 90-day ceiling for a named hold
+- [x] A zero-day window (Tier 1 awaiting manual signoff) takes the ceiling; plain arithmetic gave it a one-hour hold
+- [x] A hold that fails to land prints `NOT HELD` rather than being reported as a hold
+- [x] No unhold needed: snapd leaves a specifically named refresh unblocked, and nog always names what it refreshes
+- [x] `held_snap_windows` split out so the selection is testable without running a transaction
+- [x] Test renamed `held_snaps_can_never_be_refreshed` → `nog_itself_never_refreshes_a_held_snap` — the old name claimed what it never checked
+- [x] Man page corrected: the false "same way as flatpak" hold claim, and a PRIVILEGES section that undercounted escalations and denied editing `/etc/pacman.conf`
+
 ### v1.4.0 — Released (reboot advice, #9)
 - [x] New `reboot` module: probe the running system *after* the handoff, so it reflects what pacman did rather than what nog asked for
 - [x] Kernel checked by the presence of `/usr/lib/modules/<uname -r>` — no version string is parsed, because the running kernel and its package spell the same version differently

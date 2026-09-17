@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "August 2026" "nog v1.4.0" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.4.1" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -285,8 +285,22 @@ nog operation,
 .B "snap refresh"
 requires root \(em nog stays unprivileged and escalates through
 .BR sudo (8)
-for that step alone. Holds are enforced the same way as flatpak: nog names
-exactly the snaps it cleared this run and nothing else.
+for the snap steps alone.
+.PP
+Snap holds are enforced differently from flatpak, and the difference matters.
+snapd runs its own auto\-refresh on its own schedule \(em four times a day by
+default \(em so naming only the cleared snaps at refresh time held nothing:
+snapd refreshed the rest regardless. Since v1.4.1 nog places the tier window
+in snapd itself, with
+.BR "snap refresh --hold=<hours>" ,
+where it actually binds. A held snap is protected from snapd's timer and from
+a blanket
+.BR "snap refresh" ,
+while a specifically named refresh stays unblocked \(em which is how nog still
+releases the snap itself once the window closes. If a hold cannot be placed,
+nog says
+.B "NOT HELD"
+rather than reporting a hold it did not achieve.
 .
 .SH REBOOT ADVICE
 After a successful update,
@@ -513,7 +527,7 @@ and
 .BR paru (8)
 refuse to run as root.
 .PP
-nog escalates to root in exactly two places, both as transparent
+nog escalates to root in exactly four places, all as transparent
 .BR sudo (8)
 subprocess invocations:
 .TP
@@ -530,19 +544,28 @@ helper runs its own
 .B sudo pacman
 internally for the pacman step.
 .TP
-.B sudo tee /etc/nog/tier-pins.toml
-For the single file
+.B "sudo snap refresh --hold=<hours> | sudo snap refresh <names>"
+For snap holds and snap refreshes (v1.2.0; the hold step added in v1.4.1).
+snapd requires root for both. Nothing else about the snap source does.
+.TP
+.B "sudo tee /etc/nog/tier-pins.toml | /etc/nog/sources.toml"
+For the files
 .B nog
-ever writes. Used only during
-.BR "nog pin" .
-The new file contents are rebuilt in memory and piped through
+writes, during
+.BR "nog pin" " and " "nog activate" / "nog deactivate" .
+The new contents are rebuilt in memory and piped through
 .BR tee ;
 nog itself never runs with root privileges.
+.TP
+.B sudo cp --preserve=all /etc/pacman.conf ...
+To take a timestamped backup before editing the Chaotic\-AUR section, and only
+during
+.BR "nog activate" / "nog deactivate chaotic-aur" .
 .PP
-.B nog
-never modifies any other file on your system \(em not
+Outside that one Chaotic\-AUR section of
 .IR /etc/pacman.conf ,
-not
+.B nog
+modifies no other file on your system \(em not
 .IR /etc/pacman.d/ ,
 not
 .IR /var/lib/pacman/local/ ,

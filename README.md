@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-purple.svg)
+![Version: 1.4.1](https://img.shields.io/badge/Version-1.4.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -48,7 +48,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Official repos** through pacman
 - **AUR** through yay or paru, detected automatically
 - **Flatpak** *(v1.1.0)* — aged by the pending release's publish date
-- **Snap** *(v1.2.0)* — aged by the publish date in the channel you track
+- **Snap** *(v1.2.0)* — aged by the publish date in the channel you track, and since v1.4.1 the hold is placed in snapd itself, so its own four-times-a-day auto-refresh cannot walk past it
 
   Flatpak and Snap are optional in both directions. If the program isn't installed, that source sits quietly dormant — never an error. Turn any of them on or off with `nog activate|deactivate <source>`.
 
@@ -295,7 +295,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.4.0"
+version = "1.4.1"
 log_level = "info"
 
 [paths]
@@ -433,7 +433,7 @@ Four places. That's the complete list.
 | What | Command | When |
 |---|---|---|
 | Package transactions | `sudo pacman ...` | `install`, `remove`, `update`, `unlock --promote` — **only when no AUR helper is configured**. With a helper, nog calls the helper as you, and the helper runs its own `sudo pacman` internally. |
-| Snap updates | `sudo snap refresh ...` | Only when applying snap updates. snapd requires root; nothing else about snap does. |
+| Snap holds and updates | `sudo snap refresh ...` | Placing a tier hold (`--hold`, v1.4.1) and applying snap updates. snapd requires root for both; nothing else about snap does. |
 | Its own config files | `sudo tee <file>` | Writing `tier-pins.toml` (during `nog pin`) and `sources.toml` (during `activate`/`deactivate`). The new contents are built in memory and piped to `tee` — nog itself never runs as root, only `tee` does. |
 | pacman.conf backup | `sudo cp --preserve=all` | Only during `nog activate|deactivate chaotic-aur`, to take a timestamped backup before editing that one section. |
 
@@ -572,7 +572,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.4.0 shipped 2026-08-30** — reboot advice ([#9](https://github.com/jetomev/nog/issues/9)), written after an NVIDIA upgrade left the old module loaded and cost twenty minutes of blaming a game. v1.3.1 shipped 2026-08-28 ([#13](https://github.com/jetomev/nog/issues/13), soname coupling), found during v1.3.0's own release dogfood. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.4.1 shipped 2026-09-16** — snap holds are now placed in snapd ([#18](https://github.com/jetomev/nog/issues/18)), after a log review found snapd refreshing a snap in the same minute nog reported it held. v1.4.0 shipped 2026-08-30 — reboot advice ([#9](https://github.com/jetomev/nog/issues/9)), written after an NVIDIA upgrade left the old module loaded and cost twenty minutes of blaming a game. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
 ### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
 
@@ -604,6 +604,28 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.4.1 — September 16, 2026
+
+**A snap that nog reported as held was not held.**
+
+Found during a routine read of nog's own update logs — the kind of check that exists precisely because nothing had gone visibly wrong. The log for September 15 showed `core20` in the Held bucket with `1 day remaining`. snapd's own change log showed it refreshing that same snap in that same minute.
+
+nog's hold on a snap had never been a hold. It was a decision not to name it. snapd runs its own auto-refresh on its own schedule — four times a day by default — and had never been told anything at all. Every snap nog held was refreshed on snapd's clock regardless.
+
+**The test that should have caught this was called `held_snaps_can_never_be_refreshed`.** It asserted that nog's apply-list excluded held snaps. That was true, and beside the point: it proved *nog* would not refresh a held snap and asked nothing about anyone else. The gap between the name and the assertion is exactly where the bug lived. It is now called `nog_itself_never_refreshes_a_held_snap`, which is what it actually checks.
+
+**The tier window is now placed where it binds** — in snapd, with `snap refresh --hold=<hours>`, grouped so one call covers every snap sharing a window. Durations are in hours because `d` is not a unit snapd parses, and they are clamped to snapd's own 90-day ceiling for a named hold: asking for more fails the call outright, which would leave the snap unheld.
+
+**A zero-day window takes the ceiling, not zero.** Zero days means a Tier 1 package awaiting manual signoff — held until a person says otherwise. Left to plain arithmetic it clamped to a **one-hour hold**, which is a hold in name only, for precisely the packages that matter most. It surfaced only because the test asserted the promise rather than the arithmetic.
+
+**If a hold cannot be placed, nog says `NOT HELD` in red.** Reporting a hold that did not happen is the shape of this bug, not a smaller version of it.
+
+**No unhold is needed before nog's own refresh, and that is snapd's own asymmetry doing the work.** A named hold blocks auto-refreshes and blanket `snap refresh`, while leaving a *specifically named* refresh unblocked — and nog always names what it refreshes. That behaviour was verified on a real machine rather than taken from the help text: a one-hour hold on `hello` reported `General refreshes of "hello" held until …`, and `snap refresh hello` then proceeded normally.
+
+**Two documentation claims were false and are corrected.** The man page described snap holds as working "the same way as flatpak: nog names exactly the snaps it cleared this run and nothing else" — the bug, written down as if it were the design. Separately, **PRIVILEGES AND SUDO** still said nog escalates in "exactly two places" and promised it modifies neither `/etc/pacman.conf` nor anything else; nog has commented out the Chaotic-AUR section of `pacman.conf` since v1.0.9, and the README's own escalation table has said so all along. Both sections now match the code.
+
+Tests: 128 → 135. Warnings unchanged at 6.
+
 ### v1.4.0 — August 30, 2026
 
 **nog now tells you when the machine you are running is no longer the machine you have installed.**
@@ -625,32 +647,6 @@ It says something now, and the rule is that it may never say it anonymously:
 Also in this release: **the root `PKGBUILD` is gone.** It fetched `archive/refs/tags/` with `sha256sums=('SKIP')` and no `validpgpkeys`, while the AUR copy has used the signed release asset since v1.0.9 — and both files reported the same version, so every version check passed it. It was the only root PKGBUILD across seven repositories, it can never hold a correct checksum at the moment it is committed, and `makepkg` testing already happens against the AUR copy. Deleting it ends the divergence instead of promising to watch for it.
 
 Tests: 100 → 128. Warnings unchanged at 6.
-
-### v1.3.1 — August 28, 2026
-
-**A package whose hold expires can no longer break one that is still waiting.**
-
-Found the same evening v1.3.0 shipped, during its own release dogfood. `libbluray` had cleared its hold and moves `libbluray.so` from version 3 to version 4. `ffmpeg4.4` still linked the old one and had a day left on its window. nog put one in Ready and the other in Held, and pacman refused the whole transaction — seventy-eight packages, of which seventy-six had nothing to do with either:
-
-```
-error: failed to prepare transaction (could not satisfy dependencies)
-:: installing libbluray (1.5.0-1) breaks dependency 'libbluray.so=3-64'
-   required by ffmpeg4.4
-```
-
-Nothing broke — pacman caught it and declined, which is the opposite of the Qt6 split that prompted v1.2.1. But nothing installed either, and nog is supposed to hand pacman a plan that works.
-
-**The three existing coupling rules all match on names** — a shared PKGBUILD, the `lib32-` prefix, a version cohort — and these two packages share none of them. The relationship exists only in the dependency graph, which nog had never had a reason to read. It does now: a new reader for pacman's local database supplies what is installed and what it requires, the repository metadata supplies what each pending package will provide, and the rule asks one question per candidate — *for each shared library this upgrade stops providing, will anything still provide it afterwards?* If nothing will, every installed package that still requires it would break, so the candidate waits and its row says who it is waiting for.
-
-**Sonames are compared as whole strings, architecture suffix included, and that detail is the whole rule.** On the machine this was written for, eleven library names exist at two versions simultaneously — `ffmpeg4.4` provides `libavcodec.so=58` while `ffmpeg-obs` provides `libavcodec.so=63`, `libxcrypt-compat` sits beside `libxcrypt` — and a further 118 differ only by `-32` against `-64`. A rule that compared library *names* would couple every one of those pairs to each other and wedge the update queue permanently. All eleven are now negative tests.
-
-**Dependents are drawn from every installed package, not just the pending ones.** A foreign or AUR package built against the old library has no repository update to wait for and breaks in exactly the same way. Such a partner has no countdown to inherit, so its row reads `blocked by <package>` rather than borrowing a countdown that would claim it releases today.
-
-If the local database cannot be read, the rule goes quiet and nog behaves exactly as v1.3.0 did. It only pre-empts a refusal pacman would issue anyway, so failing closed would cost more than it saves.
-
-Validated before a line of it was written, and again afterwards: the failure was replayed from the cached packages, a sweep of 161 pending updates against 1397 installed packages produced no false positives, and finally v1.3.0 and v1.3.1 were run against byte-identical restored state — the first putting `libbluray` in Ready, the second holding it, coupled, to clear with its partner.
-
-Tests: 86 → 100. Warnings unchanged at 6. No measurable runtime cost.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

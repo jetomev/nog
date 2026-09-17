@@ -2,6 +2,28 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.4.1 — September 16, 2026
+
+**A snap that nog reported as held was not held.**
+
+Found during a routine read of nog's own update logs — the kind of check that exists precisely because nothing had gone visibly wrong. The log for September 15 showed `core20` in the Held bucket with `1 day remaining`. snapd's own change log showed it refreshing that same snap in that same minute.
+
+nog's hold on a snap had never been a hold. It was a decision not to name it. snapd runs its own auto-refresh on its own schedule — four times a day by default — and had never been told anything at all. Every snap nog held was refreshed on snapd's clock regardless.
+
+**The test that should have caught this was called `held_snaps_can_never_be_refreshed`.** It asserted that nog's apply-list excluded held snaps. That was true, and beside the point: it proved *nog* would not refresh a held snap and asked nothing about anyone else. The gap between the name and the assertion is exactly where the bug lived. It is now called `nog_itself_never_refreshes_a_held_snap`, which is what it actually checks.
+
+**The tier window is now placed where it binds** — in snapd, with `snap refresh --hold=<hours>`, grouped so one call covers every snap sharing a window. Durations are in hours because `d` is not a unit snapd parses, and they are clamped to snapd's own 90-day ceiling for a named hold: asking for more fails the call outright, which would leave the snap unheld.
+
+**A zero-day window takes the ceiling, not zero.** Zero days means a Tier 1 package awaiting manual signoff — held until a person says otherwise. Left to plain arithmetic it clamped to a **one-hour hold**, which is a hold in name only, for precisely the packages that matter most. It surfaced only because the test asserted the promise rather than the arithmetic.
+
+**If a hold cannot be placed, nog says `NOT HELD` in red.** Reporting a hold that did not happen is the shape of this bug, not a smaller version of it.
+
+**No unhold is needed before nog's own refresh, and that is snapd's own asymmetry doing the work.** A named hold blocks auto-refreshes and blanket `snap refresh`, while leaving a *specifically named* refresh unblocked — and nog always names what it refreshes. That behaviour was verified on a real machine rather than taken from the help text: a one-hour hold on `hello` reported `General refreshes of "hello" held until …`, and `snap refresh hello` then proceeded normally.
+
+**Two documentation claims were false and are corrected.** The man page described snap holds as working "the same way as flatpak: nog names exactly the snaps it cleared this run and nothing else" — the bug, written down as if it were the design. Separately, **PRIVILEGES AND SUDO** still said nog escalates in "exactly two places" and promised it modifies neither `/etc/pacman.conf` nor anything else; nog has commented out the Chaotic-AUR section of `pacman.conf` since v1.0.9, and the README's own escalation table has said so all along. Both sections now match the code.
+
+Tests: 128 → 135. Warnings unchanged at 6.
+
 ### v1.4.0 — August 30, 2026
 
 **nog now tells you when the machine you are running is no longer the machine you have installed.**
