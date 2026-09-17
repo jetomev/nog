@@ -791,6 +791,42 @@ pub fn update(realign: bool) {
 
     print_buckets(&ready, &held, &unknown, &flatpak_names, &snap_names);
 
+    // v1.4.1 (issue #18) — a tier hold that snapd does not know about is not a
+    // hold. snapd auto-refreshes on ITS timer (four times a day by default),
+    // so listing only cleared snaps at refresh time enforced nothing: on
+    // 2026-09-15 nog showed `core20` as held with "1 day remaining" while
+    // snapd refreshed it in the same minute.
+    //
+    // Placed here, immediately after the buckets are final and BEFORE any
+    // handoff, so the window is shut as early as nog can shut it. It does not
+    // block nog's own refresh later: snapd leaves a named snap's explicit
+    // refresh unblocked, and nog always names what it refreshes.
+    if !snap_names.is_empty() {
+        let all_held: Vec<(String, u64)> = held
+            .iter()
+            .map(|(u, _, days, _)| (u.name.clone(), *days))
+            .collect();
+        let held_snaps = snap::held_snap_windows(&all_held, &snap_names);
+        let groups = snap::hold_args(&held_snaps);
+        if !groups.is_empty() {
+            println!();
+            println!("{}nog: Holding {} snap(s) in snapd so its own timer cannot refresh them ...{}",
+                C_BOLD, held_snaps.len(), C_RESET);
+            println!("{}     (a snap hold needs root — sudo may prompt){}", C_SUBTEXT, C_RESET);
+            for (hours, names) in &groups {
+                let st = snap::place_hold(*hours, names);
+                if !st.success() {
+                    // A hold that did not land must never be reported as one:
+                    // silently carrying on is precisely the shape of #18.
+                    println!("{}     NOT HELD (status {}): {}{}",
+                        C_RED, st.code().unwrap_or(-1), names.join(", "), C_RESET);
+                    println!("{}     snapd can still refresh those on its own schedule.{}",
+                        C_RED, C_RESET);
+                }
+            }
+        }
+    }
+
     // v1.0.8: snapshot the final buckets for the run log. Taken after the
     // realign/coupling passes so the CSV mirrors the printed tables exactly.
     let log_rows = runlog_rows(&ready, &held, &unknown);

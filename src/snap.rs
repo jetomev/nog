@@ -225,6 +225,79 @@ pub fn apply_list(
     out
 }
 
+/// snapd's own auto-refresh runs on ITS timer, not nog's -- four times a day
+/// by default. Listing only cleared snaps at refresh time therefore held
+/// nothing: on 2026-09-15 nog classified `core20` as held with "1 day
+/// remaining" and snapd auto-refreshed it in the same minute (issue #18).
+///
+/// So a tier hold has to be placed WHERE IT IS ENFORCED -- in snapd:
+///     snap refresh --hold=<duration> <names...>
+///
+/// The asymmetry in snapd's own help is what makes this work cleanly:
+/// a named hold blocks auto-refreshes and blanket `snap refresh`, but
+/// "specific snap requests from 'snap refresh target-snap' remain unblocked".
+/// nog always names the snaps it refreshes, so it never has to unhold first --
+/// the hold stops snapd and steps aside for nog.
+///
+/// Durations are Go-style: hours, because `d` is not a unit snapd parses.
+/// Clamped to [1h, 90d] -- 90 days is snapd's own ceiling for a named hold,
+/// and a 0-day window (a Tier 1 package awaiting manual signoff) means
+/// "until a human says so", which is the ceiling rather than no hold at all.
+///
+/// Pure and grouped so one call covers every snap sharing a window.
+pub const SNAP_HOLD_MAX_HOURS: u64 = 90 * 24;
+pub fn hold_args(held: &[(String, u64)]) -> Vec<(u64, Vec<String>)> {
+    let mut by_hours: HashMap<u64, Vec<String>> = HashMap::new();
+    for (name, days) in held {
+        // 0 days is NOT a short window -- it is the Tier 1 "awaiting manual
+        // signoff" placeholder, i.e. held until a human says otherwise. Left to
+        // arithmetic it clamped to ONE HOUR, which is a hold in name only and
+        // would have reproduced #18 for exactly the packages that matter most.
+        let hours = if *days == 0 {
+            SNAP_HOLD_MAX_HOURS
+        } else {
+            days.saturating_mul(24).clamp(1, SNAP_HOLD_MAX_HOURS)
+        };
+        by_hours.entry(hours).or_default().push(name.clone());
+    }
+    let mut out: Vec<(u64, Vec<String>)> = by_hours
+        .into_iter()
+        .map(|(h, mut names)| { names.sort(); names.dedup(); (h, names) })
+        .collect();
+    out.sort_by_key(|(h, _)| *h);          // deterministic, shortest first
+    out
+}
+
+/// Which held packages are snaps, and how long each still has to run.
+/// Split out of the update flow so the SELECTION is testable on its own --
+/// the bug in #18 was never in the arithmetic, it was in what nog did (and
+/// did not do) with the set it had already computed correctly.
+///
+/// KNOWN LIMIT (issue #20): sources are matched by name, because the run has
+/// no source column. `snapd` exists both as an Arch package and as a snap, so
+/// if the Arch one is held while the snap one is ready, this selects it and a
+/// hold is placed on a snap that was cleared. Erring toward holding is the
+/// safe direction -- nog's own explicit refresh is never blocked by a hold --
+/// but the ambiguity is real and goes away when #20 lands a source column.
+pub fn held_snap_windows(all_held: &[(String, u64)], snap_names: &[String]) -> Vec<(String, u64)> {
+    all_held
+        .iter()
+        .filter(|(name, _)| snap_names.iter().any(|s| s == name))
+        .cloned()
+        .collect()
+}
+
+/// Place one hold. Requires root, so nog escalates exactly as `refresh` does.
+pub fn place_hold(hours: u64, names: &[String]) -> ExitStatus {
+    let dur = format!("--hold={}h", hours);
+    let mut args: Vec<&str> = vec!["snap", "refresh", &dur];
+    args.extend(names.iter().map(|s| s.as_str()));
+    Command::new("sudo")
+        .args(&args)
+        .status()
+        .unwrap_or_else(|e| panic!("nog: failed to launch sudo snap refresh --hold: {}", e))
+}
+
 /// Refresh exactly the named snaps. Requires root — nog stays unprivileged
 /// and escalates through `sudo`, as it does for its own root-owned files.
 /// snap's progress output is left intact (issue #8: show the work).
@@ -317,9 +390,85 @@ mod tests {
     }
 
     #[test]
-    fn held_snaps_can_never_be_refreshed() {
+    fn nog_itself_never_refreshes_a_held_snap() {
+        // Renamed from `held_snaps_can_never_be_refreshed`, which claimed far
+        // more than it proved. It showed only that NOG does not refresh a held
+        // snap; it never asked whether anything else would, and snapd did --
+        // four times a day (issue #18). The name now matches the assertion.
         let snaps = vec!["bitwarden".to_string()];
         assert!(apply_list(&snaps, &[], &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn hold_args_groups_snaps_sharing_a_window() {
+        let held = vec![
+            ("core20".to_string(), 1),
+            ("hello".to_string(), 2),
+            ("bitwarden".to_string(), 1),
+        ];
+        let got = hold_args(&held);
+        assert_eq!(got, vec![
+            (24, vec!["bitwarden".to_string(), "core20".to_string()]),
+            (48, vec!["hello".to_string()]),
+        ]);
+    }
+
+    #[test]
+    fn hold_args_never_emits_a_zero_length_hold() {
+        // A 0-day window is Tier 1 awaiting manual signoff. `--hold=0h` is not
+        // a hold, and silently placing one would reproduce issue #18 exactly:
+        // nog reporting a hold that snapd does not enforce.
+        let got = hold_args(&[("core20".to_string(), 0)]);
+        assert_eq!(got[0].0, SNAP_HOLD_MAX_HOURS);
+    }
+
+    #[test]
+    fn hold_args_clamps_to_snapd_ceiling() {
+        // snapd refuses a named hold longer than 90 days. Asking for more
+        // fails the whole call, which would leave the snap UNHELD.
+        let got = hold_args(&[("linux-thing".to_string(), 3650)]);
+        assert_eq!(got[0].0, SNAP_HOLD_MAX_HOURS);
+    }
+
+    #[test]
+    fn held_snap_windows_ignores_held_packages_that_are_not_snaps() {
+        let all_held = vec![
+            ("gimp".to_string(), 1),          // pacman
+            ("core20".to_string(), 2),        // snap
+            ("linux-zen".to_string(), 28),    // pacman
+        ];
+        let snaps = vec!["core20".to_string(), "hello".to_string()];
+        assert_eq!(held_snap_windows(&all_held, &snaps),
+                   vec![("core20".to_string(), 2)]);
+    }
+
+    #[test]
+    fn held_snap_windows_is_empty_when_no_snap_is_held() {
+        // The common case, and the one that must NOT prompt for root:
+        // no held snaps means no hold call at all.
+        let all_held = vec![("gimp".to_string(), 1)];
+        let snaps = vec!["core20".to_string()];
+        assert!(held_snap_windows(&all_held, &snaps).is_empty());
+        assert!(hold_args(&held_snap_windows(&all_held, &snaps)).is_empty());
+    }
+
+    #[test]
+    fn held_snap_windows_matches_by_name_and_says_so() {
+        // Documents the #20 ambiguity rather than hiding it: `snapd` is both an
+        // Arch package and a snap, and with no source column they are the same
+        // string. Selecting it is the safe direction -- an explicit `snap
+        // refresh snapd` from nog is never blocked by nog's own hold.
+        let all_held = vec![("snapd".to_string(), 3)];
+        let snaps = vec!["snapd".to_string()];
+        assert_eq!(held_snap_windows(&all_held, &snaps).len(), 1);
+    }
+
+    #[test]
+    fn hold_args_is_deterministic() {
+        let a = hold_args(&[("b".into(), 2), ("a".into(), 2)]);
+        let b = hold_args(&[("a".into(), 2), ("b".into(), 2)]);
+        assert_eq!(a, b);
+        assert_eq!(a[0].1, vec!["a".to_string(), "b".to_string()]);
     }
 
     #[test]
