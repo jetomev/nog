@@ -234,17 +234,21 @@ Errors occurred, no packages were upgraded.\n";
     #[test]
     fn a_failing_command_reports_its_stderr_and_a_passing_one_reports_nothing() {
         // Real processes, so the relay thread and the tail are exercised
-        // rather than only the text picking.
-        let bad = run(
+        // rather than only the text picking. Relayed into a sink, not the
+        // real stderr: the fake error below once landed in every package
+        // build log, where it read as a real one (#24).
+        let bad = run_into(
             Command::new("sh").args(["-c", "echo 'error: no space left' >&2; exit 1"]),
             "sh",
+            std::io::sink(),
         );
         assert!(!bad.status.success());
         assert_eq!(bad.reason.as_deref(), Some("error: no space left"));
 
-        let good = run(
+        let good = run_into(
             Command::new("sh").args(["-c", "echo 'warning: noisy but fine' >&2"]),
             "sh",
+            std::io::sink(),
         );
         assert!(good.status.success());
         assert_eq!(good.reason, None);
