@@ -14,7 +14,8 @@
 3. AUR: PKGBUILD bumped, `updpkgsums`, `.SRCINFO` regenerated; signature, checksum and `.SRCINFO` pre-flight clean. `makepkg` smoke build from the signed asset: 172 tests pass.
 4. AUR push `03ca0dc` (after Javier unlocked the AUR key in an ssh-agent).
 5. **Javier installed v1.5.0 with `nog install <file>` — the release installed by its own new feature.**
-6. The installed binary ran a real `nog update`: 54 pending, all held, all logged `held` with the right source.
+6. Javier reinstalled it fresh from the AUR with `yay -S nog` (built from `03ca0dc`) — both install paths work.
+7. The installed binary ran a real `nog update`: 54 pending, all held, all logged `held` with the right source.
 
 ## Not proven (4)
 
@@ -29,7 +30,7 @@
 
 | ID | Severity | Description | Status |
 |---|---|---|---|
-| F-1 | low | A test prints a fake `error: no space left` into every package build log. [#24](https://github.com/jetomev/nog/issues/24) | OPEN — next batch |
+| F-1 | low | A test prints a fake `error: no space left` into every package build log. [#24](https://github.com/jetomev/nog/issues/24) | FIXED in v1.5.1 |
 | M-1 | low | Man page column list could not wrap (from v1.4.3) | FIXED |
 | M-2 | medium | Privilege sections wrong about when `update` uses `sudo pacman` (since v1.3.0) | FIXED |
 | M-3 | low | v2 design doc's version column stale | FIXED |

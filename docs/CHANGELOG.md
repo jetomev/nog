@@ -2,6 +2,14 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.1 — September 29, 2026
+
+**A clean build log.** One of the tests added in v1.4.3 starts a real program that deliberately fails with `error: no space left`, to prove nog captures the reason. It passed — but it let that fake error through to the real screen, so every package build printed an error line that was not one ([#24](https://github.com/jetomev/nog/issues/24), found during the v1.5.0 smoke build). Anyone reading an AUR build log would reasonably have stopped at it. The test now sends that output nowhere. nog itself is unchanged.
+
+Also recorded: v1.5.0 was installed on the development machine twice — first with its own `nog install <file>`, then fresh from the AUR through yay. Both paths work.
+
+Tests: 172 → 172. Warnings unchanged at 6.
+
 ### v1.5.0 — September 29, 2026
 
 **`nog install` now installs a package file you built yourself** ([#17](https://github.com/jetomev/nog/issues/17)).

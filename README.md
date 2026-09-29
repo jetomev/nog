@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-purple.svg)
+![Version: 1.5.1](https://img.shields.io/badge/Version-1.5.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -298,7 +298,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.0"
+version = "1.5.1"
 log_level = "info"
 
 [paths]
@@ -579,7 +579,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.0 shipped 2026-09-29** — `nog install` takes a package file you built ([#17](https://github.com/jetomev/nog/issues/17)), and carries v1.4.2 (nog reads which libraries programs actually use, [#16](https://github.com/jetomev/nog/issues/16)) and v1.4.3 (a truthful run log, [#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.5.1 shipped 2026-09-29** — a clean build log ([#24](https://github.com/jetomev/nog/issues/24)). **v1.5.0 shipped the same day** — `nog install` takes a package file you built ([#17](https://github.com/jetomev/nog/issues/17)), and carries v1.4.2 (nog reads which libraries programs actually use, [#16](https://github.com/jetomev/nog/issues/16)) and v1.4.3 (a truthful run log, [#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
 ### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
 
@@ -611,6 +611,14 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.1 — September 29, 2026
+
+**A clean build log.** One of the tests added in v1.4.3 starts a real program that deliberately fails with `error: no space left`, to prove nog captures the reason. It passed — but it let that fake error through to the real screen, so every package build printed an error line that was not one ([#24](https://github.com/jetomev/nog/issues/24), found during the v1.5.0 smoke build). Anyone reading an AUR build log would reasonably have stopped at it. The test now sends that output nowhere. nog itself is unchanged.
+
+Also recorded: v1.5.0 was installed on the development machine twice — first with its own `nog install <file>`, then fresh from the AUR through yay. Both paths work.
+
+Tests: 172 → 172. Warnings unchanged at 6.
+
 ### v1.5.0 — September 29, 2026
 
 **`nog install` now installs a package file you built yourself** ([#17](https://github.com/jetomev/nog/issues/17)).
@@ -634,24 +642,6 @@ Every Forge release ends with a `makepkg` build and a test run against the insta
 **Two documentation corrections.** The man page listed the run log's twelve column names as one unbreakable word, which the formatter could not fit — introduced in v1.4.3 and caught by the release checklist's formatting check. And both privilege sections said nog runs `sudo pacman` for updates "only when no AUR helper is configured"; since v1.3.0 the update always hands the official repositories to `sudo pacman` itself. They now say so, and name the new `pacman -U`.
 
 Tests: 166 → 172. Warnings unchanged at 6.
-
-### v1.4.3 — September 29, 2026
-
-**The run log now tells the truth about every package in it.**
-
-nog writes every `nog update` to a dated CSV file. A routine read of those files on September 16 found four ways they were wrong or silent.
-
-**Held packages were recorded as installed** ([#19](https://github.com/jetomev/nog/issues/19)). The log's `outcome` was the verdict for the whole run, copied onto every row — so on a run that installed anything, every package nog had deliberately held back said `installed` too. 3,782 rows across 22 files. The holds themselves had worked; checked against pacman's own database, gimp, google-chrome, ark and the rest were still at their old versions. Only the record was false. Now each row carries its own outcome: `held`, `skipped` for an unknown you declined, and otherwise what **that package's own source step** did — `installed`, `did not complete (status N)`, `cancelled`, or `not run` when an earlier step stopped the run. An AUR failure no longer colours the pacman rows that installed fine.
-
-**Two identical-looking `snapd` rows** ([#20](https://github.com/jetomev/nog/issues/20)). The Arch package `snapd` and the snap called `snapd` are different things that both update. Nothing in the row said which was which. There is now a `source` column — `pacman`, `aur`, `flatpak`, `snap` — and it comes from the update itself rather than from looking the name up afterwards. The on-screen tables had the same flaw and tagged the Arch `snapd` package "snap" as well; that is fixed too.
-
-**A failed step kept only its exit code** ([#21](https://github.com/jetomev/nog/issues/21)). On September 13 an update stopped with `status 1`, succeeded a minute later, and the cause was a guess three days afterwards — pacman's own log records what it ran, not what went wrong. Each tool's error output now passes through nog on its way to your terminal, byte by byte and still live, and nog keeps the last few kilobytes. A new `detail` column records the line that explains a failure: the last `error:` line, makepkg's `==> ERROR:`, or the question you answered no to. pacman asks its questions on the error stream without a newline, which is why the relay forwards bytes, not lines: a line-based relay would have hidden the question you were being asked.
-
-**Reboot advice left no trace** ([#22](https://github.com/jetomev/nog/issues/22)). The first real firing of the v1.4.0 reboot advice happened on September 13, and nothing recorded whether it had spoken. It is now written to a companion file, `YYYYMMDD nog-reboot.csv`, one row per line of advice — or a single `checked` row when the probes found nothing to say. It is written after the run log is on disk, so a probe problem still cannot touch the main record.
-
-**The log's columns changed once, for all four:** `date,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail`. Older files keep their own ten-column header. On the day you upgrade, the rows already written stay under the old header, and a blank line and the new header go in before the new rows — checked on a real log file.
-
-Tests: 152 → 166. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

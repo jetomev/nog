@@ -77,7 +77,7 @@ not passed in advance.
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 7.1 | `nog --version` on the installed package | `nog 1.5.0` | **PASS** | `/usr/bin/nog` → `nog 1.5.0`; `/etc/nog/nog.conf` and the man page footer 1.5.0; no `.pacnew`. Fresh *helper* install (`yay -S nog`) not run: the AUR search index still reported 1.4.1-1 an hour after the push, though the AUR's git copy was 1.5.0 |
+| 7.1 | `nog --version` after a fresh helper install | `nog 1.5.0` | **PASS** | Installed first by `nog install <file>` (7.2), then Javier ran `yay -S nog`: built from AUR commit `03ca0dc`, `reinstalled nog (1.5.0-1)` at 17:15; `nog --version` → `nog 1.5.0` |
 | 7.2 | `nog install <file>` on the `makepkg` smoke build | installs through `pacman -U` | **PASS** | Javier, 17:05: `'nog' 1.5.0-1 (local file) is Tier 3` → `upgraded nog (1.4.1-1 -> 1.5.0-1)`. The first release installed by its own feature |
 | 7.3 | pacman's own `Proceed? [Y/n]` visible during `nog update` | shown before the answer is typed | **CANNOT TEST** | All 54 pending updates are held today, so no handoff runs. Covered meanwhile by the timing test (4.6); first real update with Ready packages is the check |
 | 7.4 | Run log rows from the installed binary | `held` rows, sources correct | **PASS** | 17:05 run: 53 `pacman,held`, 1 `aur,held`. `installed` rows not yet seen — nothing was Ready |
@@ -89,7 +89,7 @@ not passed in advance.
 
 | ID | Check | Severity | Description | Status |
 |---|---|---|---|---|
-| F-1 | 7.5 | low | A test relays a real child's fake `error: no space left` to the real stderr, so every package build log shows an error line that is not one. [#24](https://github.com/jetomev/nog/issues/24) | OPEN — next batch |
+| F-1 | 7.5 | low | A test relays a real child's fake `error: no space left` to the real stderr, so every package build log shows an error line that is not one. [#24](https://github.com/jetomev/nog/issues/24) | FIXED in v1.5.1 |
 | M-1 | 1.5 | low | The man page listed the twelve run-log column names as one unbreakable word; groff warned `cannot adjust line`. Introduced in the v1.4.3 docs. | FIXED in v1.5.0 |
 | M-2 | 6.3 | medium | README and man page said nog runs `sudo pacman` for `update` "only when no AUR helper is configured". Since v1.3.0 the update step always hands the official repositories to `sudo pacman -Syu` itself. A false statement about when nog uses root, predating this release. | FIXED |
 | M-3 | 6.4 | low | `docs/v2-design.md` cycle table carried version numbers locked on 2026-08-10, two shifts out of date before today. Marked as historical with a pointer to the live roadmap; the locked content is untouched. | FIXED |

@@ -2,6 +2,10 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.1 — Released (clean build log, F-1 / #24)
+- [x] The relay test's fake `error: no space left` goes to a sink, not the real stderr
+- [x] v1.5.0 verified through a fresh yay install from the AUR
+
 ### v1.5.0 — Released (install a package file, #17; carries v1.4.2 and v1.4.3)
 - [x] `nog install` recognises an argument containing `.pkg.tar` as a file and hands it to `pacman -U`
 - [x] Name, version and tier read from the file itself (`pacman -Qip`, `LC_ALL=C`)
