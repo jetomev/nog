@@ -34,8 +34,10 @@ One change to the log file fixes all four, so they ship together.
 ### 3 · Install our own packages through nog
 - [x] **#17 · priority-2** · *code done 29 Sep, `01bbe94`* · `nog install` can't install a package file we built ourselves, so every Forge release falls back to raw pacman. It should accept a file and still show its tier.
 
-### 4 · Prove nog works with paru
-- [ ] **#12 · priority-3** · **IN PROGRESS 29 Sep** — step 1: Javier installs paru (`nog install paru`, from chaotic-aur) · nog has claimed to support paru (another AUR helper) since v1.0.0 and has never been tested with it. Install paru, run the full test list, then do the same with yay again. This must happen before nogForge is built.
+### 4 · Prove nog works with paru — DONE 29 Sep
+- [x] **#12** · nog works with paru: install, auto-fallback, update plan, dates, and paru's AUR build path all checked; yay removed and restored. Results in `testing/20260929 - Test Results for nog v1-5-1-paru.md`
+- [ ] **#25 (F-2) · priority-3** · a failing AUR helper reads as "no AUR updates", silently. Found during #12
+- [ ] Still unseen: paru's "nothing to update" answer, and an AUR update handed to paru
 
 ### 5 · Cache cleanup
 - [ ] **#15 · priority-3** · `nog clean`: clear out old package downloads, but keep the ones a held package may still need.
