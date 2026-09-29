@@ -2,6 +2,28 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.4.2 — September 29, 2026
+
+**nog now reads the programs themselves, not only what their packages declare.**
+
+On August 29 a `nog update` installed `libbluray` 1.5.0, which moves its library from `libbluray.so.3` to `.so.4`. chaotic-aur's `ffmpeg-obs` still linked `.so.3` — but its package declared plain `libbluray`, with no version. The v1.3.1 soname rule reads declarations, so it saw nothing. pacman read the same declarations and was satisfied. The update succeeded, and nine packages that go through `ffmpeg-obs` broke silently: Thunderbird, VLC's ffmpeg plugin, Qt's ffmpeg multimedia backend, KDE's screen-capture library and five more. It went unnoticed for two days, until Spectacle refused to start ([#16](https://github.com/jetomev/nog/issues/16)).
+
+The worst part: the fixed `ffmpeg-obs` had been in the repository since August 26. nog was holding it. The hold protected one package by breaking nine.
+
+**When a pending update drops a library version, nog now opens every installed program and library and reads which libraries each one actually needs** — the `DT_NEEDED` entries the system loader acts on. A real linker is treated exactly like a declared one: the library is held until its users can move with it. A small ELF reader was written for this rather than taking on a dependency; it reads the dynamic section and nothing else.
+
+- **It only runs when it can matter.** About one pending update in 130 drops a library version. On every other run nog does no extra work.
+- **It skips what cannot be a program** — headers, Python and Go sources, firmware, images. On the reference machine that cuts 143,000 candidate files to 46,000. A warm scan takes about a quarter of a second.
+- **A package that ships its own copy of the library is not broken by it**, so it is not counted — Thunderbird's bundled libraries were the noise that sank a simpler design.
+- **A package that ships the library file without declaring it keeps the library alive**, so nothing is held for it.
+- **An AUR package with no known next version is not treated as dropping anything.** Unknown is not the same as gone.
+
+Checked against `readelf` on the machine it was written on: nog names `ffmpeg-obs` and `ffmpeg4.4` as the users of `libbluray.so.4`, exactly what `readelf` finds. The test suite replays the August incident in both directions: the declarations alone miss it, and the scan catches it.
+
+**Also: the "continue?" question now ends its own line** when nog runs from a script ([#14](https://github.com/jetomev/nog/issues/14)). Checked by reading the code; the prompt appears only after a source step fails, which cannot be triggered on demand.
+
+Tests: 135 → 152. Warnings unchanged at 6.
+
 ### v1.4.1 — September 16, 2026
 
 **A snap that nog reported as held was not held.**

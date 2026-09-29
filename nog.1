@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.4.1" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.4.2" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -658,6 +658,29 @@ meaning the hold will not lift on its own: rebuild or update that package, or
 move the pair forward with
 .B nog install
 as above.
+.PP
+Since v1.4.2 the rule also reads the programs themselves. A package can link
+a library without declaring it at the right version \(em chaotic-aur's
+.B ffmpeg-obs
+declared plain
+.B libbluray
+while linking
+.BR libbluray.so.3 ,
+so when
+.B libbluray
+moved to
+.B .so.4
+pacman was satisfied and nine packages broke silently. When a pending update
+drops a library version,
+.B nog
+now reads the
+.B DT_NEEDED
+entries of every installed program and library and treats a real linker
+exactly like a declared one. The scan runs only when an update drops a library
+version, which is rare, and prints a line saying so. A package that ships its
+own copy of the library is not counted as a linker, and a package that ships
+the library file on the loader path keeps it available even without declaring
+it.
 .PP
 The raw pacman error is still reachable on v1.3.0 and earlier, or when the
 local package database at

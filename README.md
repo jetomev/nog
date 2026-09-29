@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.4.1](https://img.shields.io/badge/Version-1.4.1-purple.svg)
+![Version: 1.4.2](https://img.shields.io/badge/Version-1.4.2-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -295,7 +295,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.4.1"
+version = "1.4.2"
 log_level = "info"
 
 [paths]
@@ -379,7 +379,8 @@ nog/
 |   |-- commands/mod.rs   # Every subcommand's implementation
 |   |-- tiers.rs          # Tier classification, including auto-coupling and [groups]
 |   |-- holds.rs          # Hold evaluation and the foreign fence (pure functions)
-|   |-- local_db.rs       # Reads pacman's local database for the dependency graph (v1.3.1)
+|   |-- local_db.rs       # Reads pacman's local database: dependency graph (v1.3.1), who links what (v1.4.2)
+|   |-- elf.rs            # Reads which libraries a program needs  (v1.4.2)
 |   |-- reboot.rs         # Reboot advice: probes the running system  (v1.4.0)
 |   |-- pacman.rs         # pacman wrapper
 |   |-- aur.rs            # AUR helper detection and handoff
@@ -396,7 +397,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 6,950 lines of Rust, with 128 tests that run on every release.
+Around 7,950 lines of Rust, with 152 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -542,6 +543,8 @@ to inherit and the note reads `blocked by <package>` instead, which means the
 hold will not lift on its own: rebuild or update that package, or move the pair
 forward with `nog install` as above.
 
+**As of v1.4.2, nog also reads the programs themselves.** A package can link a library without declaring it at the right version — `ffmpeg-obs` declared plain `libbluray` while linking `libbluray.so.3` — and then pacman sees no conflict at all: the update goes through and the programs break silently. When a pending update drops a library version, nog reads which libraries every installed program actually needs, and treats a real user of the old version exactly like a declared one. You will see `Checking installed programs for 1 library version(s) this update removes...` when it runs; it is rare.
+
 You can still hit the raw pacman error on v1.3.0 and earlier, or if nog cannot
 read `/var/lib/pacman/local` (it says so, and carries on without the rule).
 
@@ -572,16 +575,27 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.4.1 shipped 2026-09-16** — snap holds are now placed in snapd ([#18](https://github.com/jetomev/nog/issues/18)), after a log review found snapd refreshing a snap in the same minute nog reported it held. v1.4.0 shipped 2026-08-30 — reboot advice ([#9](https://github.com/jetomev/nog/issues/9)), written after an NVIDIA upgrade left the old module loaded and cost twenty minutes of blaming a game. The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.4.2 tagged 2026-09-29** — nog reads which libraries programs actually use, not only what their packages declare ([#16](https://github.com/jetomev/nog/issues/16)), after an undeclared link let an update break nine packages silently. v1.4.1 shipped 2026-09-16 — snap holds placed in snapd ([#18](https://github.com/jetomev/nog/issues/18)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
+### Next — the run log tells the truth ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22))
+
+- [ ] **One outcome per package** — held packages are currently logged as `installed` (#19)
+- [ ] **A `source` column** — the Arch `snapd` package and the snap `snapd` are indistinguishable today (#20)
+- [ ] **Why a step failed** — only the exit code is kept (#21)
+- [ ] **Reboot advice leaves a trace** (#22)
+
+### Then — install a locally built package through nog ([#17](https://github.com/jetomev/nog/issues/17) · `priority-2`)
+
+- [ ] `nog install ./foo.pkg.tar.zst` — every Forge release currently has to leave nog for raw `pacman -U`
+
+### After that — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
 
 - [ ] **Run nog against paru.** nog has supported paru since v1.0.0 and has never once been run against it — every release so far was built and dogfooded on a machine running yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 
 ### Later
 
 - [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
-- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held. What remains is the versioned `=` dependency case, where the declaration is exact rather than a soname.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. What remains is the versioned `=` dependency case, where the declaration is exact rather than a soname.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog status` — a dashboard of what's held, ready, and overdue
 - [ ] `nog history` — a log of every tier change and package action
@@ -604,6 +618,28 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.4.2 — September 29, 2026
+
+**nog now reads the programs themselves, not only what their packages declare.**
+
+On August 29 a `nog update` installed `libbluray` 1.5.0, which moves its library from `libbluray.so.3` to `.so.4`. chaotic-aur's `ffmpeg-obs` still linked `.so.3` — but its package declared plain `libbluray`, with no version. The v1.3.1 soname rule reads declarations, so it saw nothing. pacman read the same declarations and was satisfied. The update succeeded, and nine packages that go through `ffmpeg-obs` broke silently: Thunderbird, VLC's ffmpeg plugin, Qt's ffmpeg multimedia backend, KDE's screen-capture library and five more. It went unnoticed for two days, until Spectacle refused to start ([#16](https://github.com/jetomev/nog/issues/16)).
+
+The worst part: the fixed `ffmpeg-obs` had been in the repository since August 26. nog was holding it. The hold protected one package by breaking nine.
+
+**When a pending update drops a library version, nog now opens every installed program and library and reads which libraries each one actually needs** — the `DT_NEEDED` entries the system loader acts on. A real linker is treated exactly like a declared one: the library is held until its users can move with it. A small ELF reader was written for this rather than taking on a dependency; it reads the dynamic section and nothing else.
+
+- **It only runs when it can matter.** About one pending update in 130 drops a library version. On every other run nog does no extra work.
+- **It skips what cannot be a program** — headers, Python and Go sources, firmware, images. On the reference machine that cuts 143,000 candidate files to 46,000. A warm scan takes about a quarter of a second.
+- **A package that ships its own copy of the library is not broken by it**, so it is not counted — Thunderbird's bundled libraries were the noise that sank a simpler design.
+- **A package that ships the library file without declaring it keeps the library alive**, so nothing is held for it.
+- **An AUR package with no known next version is not treated as dropping anything.** Unknown is not the same as gone.
+
+Checked against `readelf` on the machine it was written on: nog names `ffmpeg-obs` and `ffmpeg4.4` as the users of `libbluray.so.4`, exactly what `readelf` finds. The test suite replays the August incident in both directions: the declarations alone miss it, and the scan catches it.
+
+**Also: the "continue?" question now ends its own line** when nog runs from a script ([#14](https://github.com/jetomev/nog/issues/14)). Checked by reading the code; the prompt appears only after a source step fails, which cannot be triggered on demand.
+
+Tests: 135 → 152. Warnings unchanged at 6.
+
 ### v1.4.1 — September 16, 2026
 
 **A snap that nog reported as held was not held.**
@@ -625,28 +661,6 @@ nog's hold on a snap had never been a hold. It was a decision not to name it. sn
 **Two documentation claims were false and are corrected.** The man page described snap holds as working "the same way as flatpak: nog names exactly the snaps it cleared this run and nothing else" — the bug, written down as if it were the design. Separately, **PRIVILEGES AND SUDO** still said nog escalates in "exactly two places" and promised it modifies neither `/etc/pacman.conf` nor anything else; nog has commented out the Chaotic-AUR section of `pacman.conf` since v1.0.9, and the README's own escalation table has said so all along. Both sections now match the code.
 
 Tests: 128 → 135. Warnings unchanged at 6.
-
-### v1.4.0 — August 30, 2026
-
-**nog now tells you when the machine you are running is no longer the machine you have installed.**
-
-Found live on August 10. A `nog update` installed `nvidia-utils`, `lib32-nvidia-utils` and `nvidia-open-dkms`. DKMS rebuilt the modules correctly and the desktop kept working — until the first 3D application, which died with `Failed to initialize NVML: Driver/library version mismatch`. The old module was still loaded in memory. Twenty minutes went to suspecting the game, then Wine, then the server. nog knew exactly what it had just installed and said nothing.
-
-It says something now, and the rule is that it may never say it anonymously:
-
-- **Where nog can check, it checks, and marks the line `verified`** — the running kernel against what is installed, the loaded NVIDIA module against the installed driver, the running init system against the installed systemd. Those lines are observations, and they carry both versions.
-- **Where nog cannot check, it names the packages instead** and says in words that this is advice rather than a finding. `glibc`, `mkinitcpio` and `grub` offer no reliable way to ask what is currently running, so nog does not pretend otherwise.
-- **Session components are separated out.** `mesa`, `xorg-server`, `wayland` and `dbus` get "log out and back in", not "reboot". Demanding a reboot when a logout is enough is the same noise this feature exists to prevent.
-
-**The kernel check deliberately parses no version numbers.** A running kernel reports `7.0.5-zen1-1-zen` while its own package reports `7.0.5.zen1-1`; comparing those two strings is a false-alarm generator, and normalising them is a second one waiting for the next kernel flavour. `/usr/lib/modules/` is named for the running kernel and that directory is removed when the kernel is replaced — so its absence *is* the finding, with nothing to parse.
-
-**Silence is the common case, and it is enforced by test.** A package nog cleared but pacman never installed produces nothing — you can still decline individual packages at pacman's own prompt, and nog re-reads what actually landed rather than trusting its own request. A driver whose loaded module already matches produces nothing. An ordinary run performs no probing at all. Four tests exist for no purpose other than proving nog stays quiet, because a notice that appears after every run is one nobody reads — which is how the original twenty minutes were lost.
-
-**nog recommends. nog never reboots anything.**
-
-Also in this release: **the root `PKGBUILD` is gone.** It fetched `archive/refs/tags/` with `sha256sums=('SKIP')` and no `validpgpkeys`, while the AUR copy has used the signed release asset since v1.0.9 — and both files reported the same version, so every version check passed it. It was the only root PKGBUILD across seven repositories, it can never hold a correct checksum at the moment it is committed, and `makepkg` testing already happens against the AUR copy. Deleting it ends the divergence instead of promising to watch for it.
-
-Tests: 100 → 128. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

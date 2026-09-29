@@ -2,6 +2,15 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.4.2 — Tagged (undeclared library links, #16; prompt line, #14)
+- [x] New `elf` module: a minimal little-endian ELF32/ELF64 reader for `DT_NEEDED`, no new dependency
+- [x] `local_db::scan_linkage` walks every package's `%FILES%` for real linkers of a dropped soname
+- [x] Plain data extensions skipped: 143,000 candidate files → 46,000 opened
+- [x] A package bundling its own copy is not a linker; a package shipping the file on the loader path keeps it alive
+- [x] `dropped_sonames` is the trigger, computed once over Ready and Held; an unknown future is not a drop
+- [x] The August 29 break replayed in both directions: declarations alone miss it, the scan catches it
+- [x] The "continue?" prompt ends its own line when stdin is not a terminal (#14)
+
 ### v1.4.1 — Released (snap holds enforced in snapd, #18)
 - [x] Tier windows placed with `snap refresh --hold=<hours>`, grouped so one call covers every snap sharing a window
 - [x] Durations in hours — `d` is not a unit snapd parses — clamped to snapd's own 90-day ceiling for a named hold
