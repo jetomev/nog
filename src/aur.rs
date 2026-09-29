@@ -331,4 +331,39 @@ mod tests {
         let got = apply_list(&aur, &owned(&["z-pkg"]), &owned(&["a-pkg"]), &[]);
         assert_eq!(got, owned(&["z-pkg", "a-pkg"]));
     }
+
+    /// Issue #12: run nog's own helper-facing code against every helper
+    /// installed here and require the same answers. `#[ignore]`d because it
+    /// needs yay and paru both on PATH and reads the live AUR — a diagnostic
+    /// for the paru validation, not a regression test.
+    ///
+    /// `cargo test --release live_helpers_agree -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_helpers_agree() {
+        let y = pending_updates(Helper::Yay).expect("yay -Qua failed");
+        let p = pending_updates(Helper::Paru).expect("paru -Qua failed");
+        let key = |v: &[PendingUpdate]| {
+            let mut k: Vec<(String, String, String)> = v
+                .iter()
+                .map(|u| (u.name.clone(), u.old_version.clone(), u.new_version.clone()))
+                .collect();
+            k.sort();
+            k
+        };
+        println!("yay  -Qua: {:?}", key(&y));
+        println!("paru -Qua: {:?}", key(&p));
+        assert_eq!(key(&y), key(&p), "the helpers report different pending AUR updates");
+
+        let mut names: Vec<String> = y.iter().map(|u| u.name.clone()).collect();
+        names.push("paru".into());
+        names.push("yay".into());
+        let dy = build_dates_for(Helper::Yay, &names);
+        let dp = build_dates_for(Helper::Paru, &names);
+        println!("yay  dates: {:?}", dy);
+        println!("paru dates: {:?}", dp);
+        assert_eq!(dy.len(), names.len(), "yay left a package undated");
+        assert_eq!(dp.len(), names.len(), "paru left a package undated — it would classify as Unknown");
+        assert_eq!(dy, dp, "the helpers date the same packages differently");
+    }
 }
