@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.4.2](https://img.shields.io/badge/Version-1.4.2-purple.svg)
+![Version: 1.4.3](https://img.shields.io/badge/Version-1.4.3-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -57,7 +57,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - Every row shows which source it came from
 - Held packages sorted by how soon they release, so the list reads as a calendar
 - Packages with no usable date are never guessed at — nog asks you, one at a time
-- Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days
+- Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days — one row per package with its source and what actually happened to it, and the reason whenever a step did not complete *(v1.4.3)*
 - **Reboot advice** *(v1.4.0)* — when a kernel or driver update leaves the running system out of step with what is now installed, nog says so at the end of the run. Where it can check, it says `verified` and shows both versions; where it cannot, it names the package and says plainly that this is advice rather than a finding
 
 **Security**
@@ -205,7 +205,7 @@ nog --help
 6. Asks you about each **Unknown** package individually.
 7. Runs the upgrade, telling pacman and your helper to skip everything held.
 8. If everything is held, exits cleanly without running anything at all.
-9. Writes the run to a dated CSV log and prunes logs older than 90 days. If logging fails it warns you — it never blocks an update.
+9. Writes the run to a dated CSV log — each package with its source and its own outcome — and prunes logs older than 90 days. If logging fails it warns you — it never blocks an update. Any reboot advice goes to a companion `nog-reboot.csv` beside it.
 
 Everything is classified **before** anything is touched, so you always see the plan first.
 
@@ -295,7 +295,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.4.2"
+version = "1.4.3"
 log_level = "info"
 
 [paths]
@@ -389,6 +389,7 @@ nog/
 |   |-- sources.rs        # Kill-switch state and the pacman.conf toggle
 |   |-- sync_db.rs        # Reads pacman's databases for build dates
 |   |-- runlog.rs         # CSV run logging
+|   |-- handoff.rs        # Runs each source's tool, keeping why it failed  (v1.4.3)
 |   |-- config.rs         # Configuration loader
 |-- config/               # Default nog.conf and tier-pins.toml
 |-- testing/              # Test matrix, results, and release checklist for every version
@@ -397,7 +398,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 7,950 lines of Rust, with 152 tests that run on every release.
+Around 8,500 lines of Rust, with 166 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -575,16 +576,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.4.2 tagged 2026-09-29** — nog reads which libraries programs actually use, not only what their packages declare ([#16](https://github.com/jetomev/nog/issues/16)), after an undeclared link let an update break nine packages silently. v1.4.1 shipped 2026-09-16 — snap holds placed in snapd ([#18](https://github.com/jetomev/nog/issues/18)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.4.3 tagged 2026-09-29** — the run log records each package's own outcome and source, and why a step failed ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). v1.4.2 tagged the same day — nog reads which libraries programs actually use ([#16](https://github.com/jetomev/nog/issues/16)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — the run log tells the truth ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22))
-
-- [ ] **One outcome per package** — held packages are currently logged as `installed` (#19)
-- [ ] **A `source` column** — the Arch `snapd` package and the snap `snapd` are indistinguishable today (#20)
-- [ ] **Why a step failed** — only the exit code is kept (#21)
-- [ ] **Reboot advice leaves a trace** (#22)
-
-### Then — install a locally built package through nog ([#17](https://github.com/jetomev/nog/issues/17) · `priority-2`)
+### Next — install a locally built package through nog ([#17](https://github.com/jetomev/nog/issues/17) · `priority-2`)
 
 - [ ] `nog install ./foo.pkg.tar.zst` — every Forge release currently has to leave nog for raw `pacman -U`
 
@@ -618,6 +612,24 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.4.3 — September 29, 2026
+
+**The run log now tells the truth about every package in it.**
+
+nog writes every `nog update` to a dated CSV file. A routine read of those files on September 16 found four ways they were wrong or silent.
+
+**Held packages were recorded as installed** ([#19](https://github.com/jetomev/nog/issues/19)). The log's `outcome` was the verdict for the whole run, copied onto every row — so on a run that installed anything, every package nog had deliberately held back said `installed` too. 3,782 rows across 22 files. The holds themselves had worked; checked against pacman's own database, gimp, google-chrome, ark and the rest were still at their old versions. Only the record was false. Now each row carries its own outcome: `held`, `skipped` for an unknown you declined, and otherwise what **that package's own source step** did — `installed`, `did not complete (status N)`, `cancelled`, or `not run` when an earlier step stopped the run. An AUR failure no longer colours the pacman rows that installed fine.
+
+**Two identical-looking `snapd` rows** ([#20](https://github.com/jetomev/nog/issues/20)). The Arch package `snapd` and the snap called `snapd` are different things that both update. Nothing in the row said which was which. There is now a `source` column — `pacman`, `aur`, `flatpak`, `snap` — and it comes from the update itself rather than from looking the name up afterwards. The on-screen tables had the same flaw and tagged the Arch `snapd` package "snap" as well; that is fixed too.
+
+**A failed step kept only its exit code** ([#21](https://github.com/jetomev/nog/issues/21)). On September 13 an update stopped with `status 1`, succeeded a minute later, and the cause was a guess three days afterwards — pacman's own log records what it ran, not what went wrong. Each tool's error output now passes through nog on its way to your terminal, byte by byte and still live, and nog keeps the last few kilobytes. A new `detail` column records the line that explains a failure: the last `error:` line, makepkg's `==> ERROR:`, or the question you answered no to. pacman asks its questions on the error stream without a newline, which is why the relay forwards bytes, not lines: a line-based relay would have hidden the question you were being asked.
+
+**Reboot advice left no trace** ([#22](https://github.com/jetomev/nog/issues/22)). The first real firing of the v1.4.0 reboot advice happened on September 13, and nothing recorded whether it had spoken. It is now written to a companion file, `YYYYMMDD nog-reboot.csv`, one row per line of advice — or a single `checked` row when the probes found nothing to say. It is written after the run log is on disk, so a probe problem still cannot touch the main record.
+
+**The log's columns changed once, for all four:** `date,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail`. Older files keep their own ten-column header. On the day you upgrade, the rows already written stay under the old header, and a blank line and the new header go in before the new rows — checked on a real log file.
+
+Tests: 152 → 166. Warnings unchanged at 6.
+
 ### v1.4.2 — September 29, 2026
 
 **nog now reads the programs themselves, not only what their packages declare.**
@@ -639,28 +651,6 @@ Checked against `readelf` on the machine it was written on: nog names `ffmpeg-ob
 **Also: the "continue?" question now ends its own line** when nog runs from a script ([#14](https://github.com/jetomev/nog/issues/14)). Checked by reading the code; the prompt appears only after a source step fails, which cannot be triggered on demand.
 
 Tests: 135 → 152. Warnings unchanged at 6.
-
-### v1.4.1 — September 16, 2026
-
-**A snap that nog reported as held was not held.**
-
-Found during a routine read of nog's own update logs — the kind of check that exists precisely because nothing had gone visibly wrong. The log for September 15 showed `core20` in the Held bucket with `1 day remaining`. snapd's own change log showed it refreshing that same snap in that same minute.
-
-nog's hold on a snap had never been a hold. It was a decision not to name it. snapd runs its own auto-refresh on its own schedule — four times a day by default — and had never been told anything at all. Every snap nog held was refreshed on snapd's clock regardless.
-
-**The test that should have caught this was called `held_snaps_can_never_be_refreshed`.** It asserted that nog's apply-list excluded held snaps. That was true, and beside the point: it proved *nog* would not refresh a held snap and asked nothing about anyone else. The gap between the name and the assertion is exactly where the bug lived. It is now called `nog_itself_never_refreshes_a_held_snap`, which is what it actually checks.
-
-**The tier window is now placed where it binds** — in snapd, with `snap refresh --hold=<hours>`, grouped so one call covers every snap sharing a window. Durations are in hours because `d` is not a unit snapd parses, and they are clamped to snapd's own 90-day ceiling for a named hold: asking for more fails the call outright, which would leave the snap unheld.
-
-**A zero-day window takes the ceiling, not zero.** Zero days means a Tier 1 package awaiting manual signoff — held until a person says otherwise. Left to plain arithmetic it clamped to a **one-hour hold**, which is a hold in name only, for precisely the packages that matter most. It surfaced only because the test asserted the promise rather than the arithmetic.
-
-**If a hold cannot be placed, nog says `NOT HELD` in red.** Reporting a hold that did not happen is the shape of this bug, not a smaller version of it.
-
-**No unhold is needed before nog's own refresh, and that is snapd's own asymmetry doing the work.** A named hold blocks auto-refreshes and blanket `snap refresh`, while leaving a *specifically named* refresh unblocked — and nog always names what it refreshes. That behaviour was verified on a real machine rather than taken from the help text: a one-hour hold on `hello` reported `General refreshes of "hello" held until …`, and `snap refresh hello` then proceeded normally.
-
-**Two documentation claims were false and are corrected.** The man page described snap holds as working "the same way as flatpak: nog names exactly the snaps it cleared this run and nothing else" — the bug, written down as if it were the design. Separately, **PRIVILEGES AND SUDO** still said nog escalates in "exactly two places" and promised it modifies neither `/etc/pacman.conf` nor anything else; nog has commented out the Chaotic-AUR section of `pacman.conf` since v1.0.9, and the README's own escalation table has said so all along. Both sections now match the code.
-
-Tests: 128 → 135. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

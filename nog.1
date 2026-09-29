@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.4.2" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.4.3" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -123,15 +123,33 @@ under
 .BR "[paths] run_logs" ,
 default
 .IR ~/.local/share/nog/logs )
-mirroring the report tables plus the run's outcome
-.RB ( installed ,
-.BR cancelled ,
-.BR "all held" ,
-.BR "up to date" ,
-.BR "pacman handoff did not complete" ,
-.BR "installed with incomplete steps: ..." );
-logs older than 90 days are pruned automatically. Logging soft-fails with a
-warning and never blocks an update.
+with one row per pending package. Since v1.4.3 each row records its own
+.B source
+.RB ( pacman ,
+.BR aur ,
+.BR flatpak ,
+.BR snap )
+and its own
+.B outcome
+\(em
+.B held
+for a package nog held,
+.B skipped
+for an unknown you declined, and otherwise the result of that package's own
+source step:
+.BR installed ,
+.BR "did not complete (status N)" ,
+.B cancelled
+(you said no at nog's own prompt) or
+.B not run
+(an earlier step stopped the run). When a step does not complete, the
+.B detail
+column keeps the line that explains it: the tool's last
+.B error:
+line, or the question that was declined. The tool's own output still reaches
+the terminal live; nog keeps a copy of the end of its error stream, nothing
+more. Logs older than 90 days are pruned automatically. Logging soft-fails with
+a warning and never blocks an update.
 .PP
 Before the buckets render,
 .B nog update
@@ -348,6 +366,16 @@ produce a log-out notice instead of a reboot recommendation.
 packages produce nothing: they are never loaded into a running system and they
 accompany every kernel.
 .PP
+Since v1.4.3 the advice is also written down, to
+.B YYYYMMDD nog-reboot.csv
+beside the run logs: one row per line of advice with its level
+.RB ( IMPORTANT ,
+.BR NOTE ),
+or a single
+.B checked
+row when the probes ran and found nothing to say. It is written after the run
+log is already on disk, so a probe problem can never cost the main record.
+.PP
 Nothing is printed when there is nothing to report. A package
 .B nog
 cleared but pacman did not install produces no notice \(em installed versions are
@@ -395,7 +423,12 @@ backup (\fIpacman.conf.nog-bak-<stamp>\fR).
 .TP
 .I ~/.local/share/nog/logs/
 Per-run CSV update logs (\fBYYYYMMDD nog-update.csv\fR), one row per pending
-package per run plus the run's outcome. Location configurable via
+package per run with its source, its own outcome and, when a step did not
+complete, the reason; plus reboot advice (\fBYYYYMMDD nog-reboot.csv\fR).
+Columns since v1.4.3:
+\fBdate,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail\fR.
+Earlier files keep their original ten-column header; on the day of the upgrade
+the new header follows a blank line in the same file. Location configurable via
 .B [paths] run_logs
 in
 .IR nog.conf ;

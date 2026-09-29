@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.4.3 — Tagged (the run log tells the truth, #19–#22)
+- [x] `outcome` per package, from its own source's step: `held`, `skipped`, `installed`, `did not complete (status N)`, `cancelled`, `not run` (#19)
+- [x] `source` column, carried on `PendingUpdate` itself; the report tables use it too (#20)
+- [x] New `handoff` module relays each tool's stderr live, byte by byte, and keeps an 8 KB tail; `detail` column records the reason (#21)
+- [x] Reboot advice written to `YYYYMMDD nog-reboot.csv` after the run log is on disk; pruned with it (#22)
+- [x] One header change for all four; the upgrade day gets a blank line and the new header, old rows untouched
+
 ### v1.4.2 — Tagged (undeclared library links, #16; prompt line, #14)
 - [x] New `elf` module: a minimal little-endian ELF32/ELF64 reader for `DT_NEEDED`, no new dependency
 - [x] `local_db::scan_linkage` walks every package's `%FILES%` for real linkers of a dropped soname
