@@ -1218,7 +1218,7 @@ fn prompt_proceed() -> bool {
 /// a non-interactive run must never carry on through an error it cannot show
 /// anyone. Ctrl-D stops, same as answering no.
 fn prompt_continue_after_failure(step: &str, code: i32) -> bool {
-    use std::io::{self, Write};
+    use std::io::{self, IsTerminal, Write};
     eprintln!();
     eprintln!("{}nog: the {} step exited with status {}.{}", C_BOLD, step, code, C_RESET);
     eprintln!("{}     That is either a declined prompt or an error — the exit status{}",
@@ -1233,7 +1233,14 @@ fn prompt_continue_after_failure(step: &str, code: i32) -> bool {
         return false;
     }
     let mut buf = String::new();
-    match io::stdin().read_line(&mut buf) {
+    let read = io::stdin().read_line(&mut buf);
+    // Issue #14: at a terminal the user's Enter ends the prompt line. From a
+    // pipe or /dev/null nothing does, and the next message lands on the same
+    // line as the question. End it ourselves, on the stream it was printed to.
+    if !io::stdin().is_terminal() {
+        println!();
+    }
+    match read {
         Ok(0) => {
             eprintln!("nog: no input — stopping here.");
             false
