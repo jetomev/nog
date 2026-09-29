@@ -27,7 +27,7 @@
 use std::collections::HashMap;
 use std::process::{Command, ExitStatus};
 
-use crate::pacman::PendingUpdate;
+use crate::pacman::{PendingUpdate, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Helper {
@@ -136,7 +136,7 @@ pub fn pending_updates(helper: Helper) -> Result<Vec<PendingUpdate>, String> {
         let old_version = parts.next().unwrap_or("").to_string();
         let _arrow = parts.next();
         let new_version = parts.next().unwrap_or("").to_string();
-        updates.push(PendingUpdate { name, old_version, new_version });
+        updates.push(PendingUpdate { name, old_version, new_version, source: Source::Aur });
     }
 
     Ok(updates)
@@ -174,7 +174,7 @@ pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
 ///
 /// `excluded` is still passed as `--ignore`: an AUR build can pull a repo
 /// package in as a dependency, and a held package must stay held even then.
-pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String]) -> ExitStatus {
+pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String]) -> crate::handoff::Handoff {
     let mut args: Vec<String> = vec!["-S".to_string()];
     args.extend(packages.iter().cloned());
     if !excluded.is_empty() {
@@ -182,10 +182,7 @@ pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String])
         args.push(excluded.join(","));
     }
     let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    Command::new(helper.binary())
-        .args(&str_args)
-        .status()
-        .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
+    crate::handoff::run(Command::new(helper.binary()).args(&str_args), helper.binary())
 }
 
 /// Which AUR packages this run cleared: Ready ones, plus Unknowns the user

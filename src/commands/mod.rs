@@ -3,7 +3,8 @@ use crate::tiers::{Tier, TierManager};
 use crate::reboot;
 use crate::config::NogConfig;
 use crate::holds::{self, HoldStatus};
-use crate::pacman::{self, CheckUpdatesError, PendingUpdate};
+use crate::pacman::{self, CheckUpdatesError, PendingUpdate, Source};
+use std::collections::HashMap;
 use crate::local_db;
 use crate::runlog;
 use crate::flatpak;
@@ -889,13 +890,15 @@ pub fn update(realign: bool) {
     }
 
     // Final ignore list = tier-held packages + user-skipped unknowns.
+    let extra_ignore_log = extra_ignore.clone();
     let mut ignore: Vec<String> = held.iter().map(|(u, _, _, _)| u.name.clone()).collect();
     ignore.extend(extra_ignore);
 
     if ready.is_empty() && ignore.len() == pending.len() {
         println!();
         println!("nog: Nothing to install — every pending update is held.");
-        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "all held");
+        write_run_log(&cfg, &run_date, &run_time, &run_user,
+            settle_rows(&log_rows, &extra_ignore_log, &RunEnd::AllHeld), "");
         return;
     }
 
@@ -943,7 +946,8 @@ pub fn update(realign: bool) {
     println!();
     if !prompt_proceed() {
         println!("nog: Cancelled — nothing was installed.");
-        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, "cancelled");
+        write_run_log(&cfg, &run_date, &run_time, &run_user,
+            settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Cancelled), "");
         return;
     }
 
@@ -963,13 +967,17 @@ pub fn update(realign: bool) {
     let ready_names: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
     let unknown_names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
     let mut step_failures: Vec<String> = Vec::new();
+    // v1.4.3 (issue #19): what each source's step actually did, so every row
+    // of the run log can say what became of its own package.
+    let mut steps: HashMap<Source, StepState> = HashMap::new();
 
     // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
     println!("{}nog: Handing off official packages to pacman ...{}", C_BOLD, C_RESET);
-    let status = pacman::update_excluding(&ignore);
-    if !status.success() {
-        let code = status.code().unwrap_or(-1);
+    let pac = pacman::update_excluding(&ignore);
+    steps.insert(Source::Pacman, StepState::from(&pac));
+    if !pac.status.success() {
+        let code = pac.status.code().unwrap_or(-1);
         eprintln!();
         eprintln!("{}nog: pacman exited with status {} — cancelling.{}", C_BOLD, code, C_RESET);
         eprintln!("     That is either a declined prompt or a pacman error — the exit");
@@ -977,9 +985,9 @@ pub fn update(realign: bool) {
         eprintln!("     No other source was touched. AUR packages are built against");
         eprintln!("     official libraries, so nog will not build them on a system");
         eprintln!("     whose repo upgrade did not complete.");
-        write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-            &format!("pacman handoff did not complete (status {})", code));
-        std::process::exit(status.code().unwrap_or(1));
+        write_run_log(&cfg, &run_date, &run_time, &run_user,
+            settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
+        std::process::exit(pac.status.code().unwrap_or(1));
     }
 
     // Step 2 — the AUR, by name. Only what nog cleared this run is ever passed,
@@ -992,13 +1000,14 @@ pub fn update(realign: bool) {
                 C_BOLD, aur_apply.len(), h, C_RESET);
             println!("{}     ({} shows its own build and transaction below){}",
                 C_SUBTEXT, h, C_RESET);
-            let aur_status = aur::upgrade_cleared(h, &aur_apply, &ignore);
-            if !aur_status.success() {
-                let code = aur_status.code().unwrap_or(-1);
+            let aur_run = aur::upgrade_cleared(h, &aur_apply, &ignore);
+            steps.insert(Source::Aur, StepState::from(&aur_run));
+            if !aur_run.status.success() {
+                let code = aur_run.status.code().unwrap_or(-1);
                 step_failures.push(format!("aur (status {})", code));
                 if !prompt_continue_after_failure(&h.to_string(), code) {
-                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after the aur step did not complete (status {})", code));
+                    write_run_log(&cfg, &run_date, &run_time, &run_user,
+                        settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
                     return;
                 }
             }
@@ -1015,13 +1024,14 @@ pub fn update(realign: bool) {
             println!();
             println!("{}nog: Handing off {} app(s) to flatpak ...{}", C_BOLD, fp_apply.len(), C_RESET);
             println!("{}     (flatpak shows its own transaction below){}", C_SUBTEXT, C_RESET);
-            let fp_status = flatpak::update(&fp_apply);
-            if !fp_status.success() {
-                let code = fp_status.code().unwrap_or(-1);
+            let fp_run = flatpak::update(&fp_apply);
+            steps.insert(Source::Flatpak, StepState::from(&fp_run));
+            if !fp_run.status.success() {
+                let code = fp_run.status.code().unwrap_or(-1);
                 step_failures.push(format!("flatpak (status {})", code));
                 if !prompt_continue_after_failure("flatpak", code) {
-                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after the flatpak step did not complete (status {})", code));
+                    write_run_log(&cfg, &run_date, &run_time, &run_user,
+                        settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
                     return;
                 }
             }
@@ -1037,13 +1047,14 @@ pub fn update(realign: bool) {
             println!("{}nog: Handing off {} snap(s) to snapd ...{}", C_BOLD, sn_apply.len(), C_RESET);
             println!("{}     (snap refresh needs root — sudo may prompt; snap shows its own progress){}",
                 C_SUBTEXT, C_RESET);
-            let sn_status = snap::refresh(&sn_apply);
-            if !sn_status.success() {
-                let code = sn_status.code().unwrap_or(-1);
+            let sn_run = snap::refresh(&sn_apply);
+            steps.insert(Source::Snap, StepState::from(&sn_run));
+            if !sn_run.status.success() {
+                let code = sn_run.status.code().unwrap_or(-1);
                 step_failures.push(format!("snap (status {})", code));
                 if !prompt_continue_after_failure("snap", code) {
-                    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows,
-                        &format!("cancelled after the snap step did not complete (status {})", code));
+                    write_run_log(&cfg, &run_date, &run_time, &run_user,
+                        settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
                     return;
                 }
             }
@@ -1051,21 +1062,20 @@ pub fn update(realign: bool) {
     }
 
     println!();
-    // The log's outcome describes the run as a whole: a run the user chose to
-    // carry through after a step failed is neither a clean install nor a
-    // cancellation, and reading it back later should not suggest either.
-    // "did not complete" rather than "failed": a non-zero exit is equally a
-    // user declining the tool's own prompt, and the run log is permanent.
-    let outcome = if step_failures.is_empty() {
+    // v1.4.3 (issue #19): the outcome is written per package, from what its
+    // own source's step did. It used to be the run's verdict copied onto
+    // every row, which recorded held packages as installed. "did not
+    // complete" rather than "failed": a non-zero exit is equally a user
+    // declining the tool's own prompt, and the run log is permanent.
+    if step_failures.is_empty() {
         println!("nog: Update finished!");
-        "installed".to_string()
     } else {
         println!("{}nog: Update finished, with {} step(s) that did not complete.{}",
             C_BOLD, step_failures.len(), C_RESET);
         println!("{}     Incomplete: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
-        format!("installed with incomplete steps: {}", step_failures.join("; "))
-    };
-    write_run_log(&cfg, &run_date, &run_time, &run_user, log_rows, &outcome);
+    }
+    write_run_log(&cfg, &run_date, &run_time, &run_user,
+        settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
 
     // Issue #9 — reboot advice. Deliberately placed after the handoff, so the
     // probes see what pacman actually did rather than what nog asked for; and
@@ -1082,7 +1092,18 @@ pub fn update(realign: bool) {
             }
         }))
         .collect();
-    print_reboot_advice(&cleared_for_reboot, &tm);
+    let advice = print_reboot_advice(&cleared_for_reboot, &tm);
+    // Issue #22: the advice leaves a trace. A separate file, written after
+    // the run log is safely on disk, so a probe problem cannot touch it.
+    if !advice.is_empty() {
+        if let Some((today, _)) = runlog::today_and_cutoff() {
+            if let Err(e) = runlog::append_reboot(
+                &cfg.paths.run_logs, &today, &run_date, &run_time, &run_user, &advice,
+            ) {
+                eprintln!("{}nog: warning — reboot advice not logged: {}{}", C_SUBTEXT, e, C_RESET);
+            }
+        }
+    }
 
     println!();
     println!("Thank you for using nog!");
@@ -1095,7 +1116,12 @@ pub fn update(realign: bool) {
 ///
 /// Verified findings are printed in Tier 1 red because they are facts about a
 /// broken state; the announcement that follows is muted, because it is advice.
-fn print_reboot_advice(cleared: &[(String, String)], tm: &TierManager) {
+///
+/// Returns what it concluded as `(level, text)` pairs for the reboot log
+/// (issue #22): empty when nothing relevant was handed off, one `checked`
+/// line when the probes ran and found nothing, otherwise one pair per line
+/// printed.
+fn print_reboot_advice(cleared: &[(String, String)], tm: &TierManager) -> Vec<(String, String)> {
     let tier1 = tm.tier1_packages();
 
     // Probe only if something relevant was handed off. On an ordinary run this
@@ -1106,13 +1132,16 @@ fn print_reboot_advice(cleared: &[(String, String)], tm: &TierManager) {
         .map(|(name, _)| name.clone())
         .collect();
     if candidates.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let probe = reboot::SystemProbe::read(&candidates);
     let lines = reboot::render(&reboot::assess(cleared, &tier1, &probe));
     if lines.is_empty() {
-        return;
+        return vec![(
+            "checked".to_string(),
+            format!("no reboot needed after: {}", candidates.join(" ")),
+        )];
     }
 
     println!();
@@ -1125,6 +1154,28 @@ fn print_reboot_advice(cleared: &[(String, String)], tm: &TierManager) {
             println!("{}{}{}", C_SUBTEXT, line, C_RESET);
         }
     }
+    advice_levels(&lines)
+}
+
+/// Pair each printed advice line with the level of the heading it sits
+/// under (issue #22). A notice is an `IMPORTANT:` or `NOTE:` line followed
+/// by explanation lines; in a spreadsheet each row must still say which one
+/// it belongs to. Blank spacer lines carry nothing and are dropped.
+fn advice_levels(lines: &[String]) -> Vec<(String, String)> {
+    let mut level = "info".to_string();
+    let mut out = Vec::new();
+    for line in lines {
+        if let Some((head, _)) = line.split_once(':') {
+            if head == "IMPORTANT" || head == "NOTE" {
+                level = head.to_string();
+            }
+        }
+        let text = line.trim();
+        if !text.is_empty() {
+            out.push((level.clone(), text.to_string()));
+        }
+    }
+    out
 }
 
 enum PromptOutcome { Yes, No, Eof }
@@ -1403,14 +1454,15 @@ fn print_buckets(
     snap_names: &[String],
 ) {
     // Ruling #2 of the v2 arc: the user always sees WHERE a package comes
-    // from. Non-pacman rows carry their source in the Note column.
-    let tag = |name: &str, note: String| -> String {
-        let src = if flatpak_names.iter().any(|n| n == name) {
-            Some("flatpak")
-        } else if snap_names.iter().any(|n| n == name) {
-            Some("snap")
-        } else {
-            None
+    // from. Flatpak and snap rows carry their source in the Note column.
+    // v1.4.3 (#20): read from the update itself. Looking the name up in the
+    // snap list tagged the Arch `snapd` package "snap" as well.
+    let _ = (flatpak_names, snap_names);
+    let tag = |upd: &PendingUpdate, note: String| -> String {
+        let src = match upd.source {
+            Source::Flatpak => Some("flatpak"),
+            Source::Snap => Some("snap"),
+            Source::Pacman | Source::Aur => None,
         };
         match src {
             None => note,
@@ -1419,13 +1471,13 @@ fn print_buckets(
         }
     };
     let ready_rows: Vec<TableRow> = ready.iter()
-        .map(|(upd, tier, reason)| TableRow::from(upd, tier, tag(&upd.name, ready_note(reason))))
+        .map(|(upd, tier, reason)| TableRow::from(upd, tier, tag(upd, ready_note(reason))))
         .collect();
     let held_rows: Vec<TableRow> = held.iter()
-        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, tag(&upd.name, held_note(*remaining, reason))))
+        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, tag(upd, held_note(*remaining, reason))))
         .collect();
     let unknown_rows: Vec<TableRow> = unknown.iter()
-        .map(|(upd, tier)| TableRow::from(upd, tier, tag(&upd.name, "no build date in sync DB".to_string())))
+        .map(|(upd, tier)| TableRow::from(upd, tier, tag(upd, "no build date in sync DB".to_string())))
         .collect();
 
     println!();
@@ -1445,12 +1497,16 @@ fn runlog_rows(
     unknown: &[(PendingUpdate, Tier)],
 ) -> Vec<runlog::RunRow> {
     let row = |bucket: &str, upd: &PendingUpdate, tier: &Tier, note: String| runlog::RunRow {
+        source: upd.source.as_str().to_string(),
         bucket: bucket.to_string(),
         package: upd.name.clone(),
         old_version: upd.old_version.clone(),
         new_version: upd.new_version.clone(),
         tier: tier_num(tier).to_string(),
         note,
+        // Filled in by `settle_rows` once the run has ended.
+        outcome: String::new(),
+        detail: String::new(),
     };
     let mut rows = Vec::new();
     for (upd, tier, reason) in ready {
@@ -1468,13 +1524,89 @@ fn runlog_rows(
 /// Write the run record and prune expired logs (v1.0.8). Every failure path
 /// is a warning, never an abort — the update itself has already succeeded or
 /// failed on its own terms by the time this runs.
+/// What one source's step did this run (issue #19).
+#[derive(Debug, Clone, PartialEq)]
+enum StepState {
+    Done,
+    DidNotComplete { code: i32, reason: Option<String> },
+}
+
+impl From<&crate::handoff::Handoff> for StepState {
+    fn from(h: &crate::handoff::Handoff) -> Self {
+        if h.status.success() {
+            StepState::Done
+        } else {
+            StepState::DidNotComplete {
+                code: h.status.code().unwrap_or(-1),
+                reason: h.reason.clone(),
+            }
+        }
+    }
+}
+
+/// How the run ended, from the log's point of view.
+enum RunEnd {
+    /// Nothing was cleared, so nothing was handed off.
+    AllHeld,
+    /// The user answered no at nog's own gate, before any handoff.
+    Cancelled,
+    /// Handoffs ran. A source missing from the map never got its turn —
+    /// an earlier step stopped the run.
+    Steps(HashMap<Source, StepState>),
+}
+
+/// Give every row its own outcome (v1.4.3, issue #19).
+///
+/// A held package is `held` and a declined unknown is `skipped`, however the
+/// run went. Everything else — Ready, and unknowns the user approved — takes
+/// the result of **its own source's** step, so an AUR failure no longer
+/// colours the pacman rows that installed fine, and a source the run never
+/// reached says `not run` rather than borrowing a verdict.
+fn settle_rows(rows: &[runlog::RunRow], skipped: &[String], end: &RunEnd) -> Vec<runlog::RunRow> {
+    rows.iter()
+        .cloned()
+        .map(|mut r| {
+            let (outcome, detail) = if r.bucket == "held" {
+                ("held".to_string(), String::new())
+            } else if r.bucket == "unknown" && skipped.contains(&r.package) {
+                ("skipped".to_string(), String::new())
+            } else {
+                match end {
+                    RunEnd::Cancelled => ("cancelled".to_string(), String::new()),
+                    RunEnd::AllHeld => ("not run".to_string(), String::new()),
+                    RunEnd::Steps(steps) => match steps.get(&source_of(&r.source)) {
+                        Some(StepState::Done) => ("installed".to_string(), String::new()),
+                        Some(StepState::DidNotComplete { code, reason }) => (
+                            format!("did not complete (status {})", code),
+                            reason.clone().unwrap_or_default(),
+                        ),
+                        None => ("not run".to_string(), String::new()),
+                    },
+                }
+            };
+            r.outcome = outcome;
+            r.detail = detail;
+            r
+        })
+        .collect()
+}
+
+fn source_of(word: &str) -> Source {
+    match word {
+        "aur" => Source::Aur,
+        "flatpak" => Source::Flatpak,
+        "snap" => Source::Snap,
+        _ => Source::Pacman,
+    }
+}
+
 fn write_run_log(
     cfg: &NogConfig,
     date: &str,
     time: &str,
     user: &str,
     rows: Vec<runlog::RunRow>,
-    outcome: &str,
+    marker: &str,
 ) {
     let (today, cutoff) = match runlog::today_and_cutoff() {
         Some(pair) => pair,
@@ -1489,7 +1621,7 @@ fn write_run_log(
         time: time.to_string(),
         user: user.to_string(),
         rows,
-        outcome: outcome.to_string(),
+        marker: marker.to_string(),
     };
     match runlog::append_run(&cfg.paths.run_logs, &today, &record) {
         Ok(path) => {
@@ -1595,6 +1727,98 @@ mod output_tests {
                 "note does not lead with its countdown: {note:?}"
             );
         }
+    }
+
+    // ---- v1.4.3: the run log tells the truth (#19, #20, #21, #22) -----------
+
+    fn lrow(source: &str, bucket: &str, pkg: &str) -> runlog::RunRow {
+        runlog::RunRow {
+            source: source.into(),
+            bucket: bucket.into(),
+            package: pkg.into(),
+            old_version: "1-1".into(),
+            new_version: "2-1".into(),
+            tier: "3".into(),
+            note: String::new(),
+            outcome: String::new(),
+            detail: String::new(),
+        }
+    }
+
+    fn outcomes(rows: &[runlog::RunRow]) -> Vec<(String, String, String)> {
+        rows.iter()
+            .map(|r| (r.package.clone(), r.outcome.clone(), r.detail.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn held_rows_say_held_on_a_run_that_installed() {
+        // The 2026-09-15 run: gimp held, 7zip ready, pacman step fine.
+        let rows = vec![lrow("pacman", "ready", "7zip"), lrow("pacman", "held", "gimp")];
+        let steps: HashMap<Source, StepState> = [(Source::Pacman, StepState::Done)].into();
+        let out = outcomes(&settle_rows(&rows, &[], &RunEnd::Steps(steps)));
+        assert_eq!(out[0].1, "installed");
+        assert_eq!(out[1].1, "held", "a held package was logged as {:?}", out[1].1);
+    }
+
+    #[test]
+    fn each_source_gets_its_own_steps_result() {
+        // pacman fine, the AUR build failed and the user stopped there, so
+        // flatpak never ran. Three sources, three different truths.
+        let rows = vec![
+            lrow("pacman", "ready", "7zip"),
+            lrow("aur", "ready", "discord"),
+            lrow("flatpak", "ready", "org.gimp.GIMP"),
+        ];
+        let steps: HashMap<Source, StepState> = [
+            (Source::Pacman, StepState::Done),
+            (Source::Aur, StepState::DidNotComplete {
+                code: 1,
+                reason: Some("error: failed to build 'discord'".into()),
+            }),
+        ].into();
+        let out = outcomes(&settle_rows(&rows, &[], &RunEnd::Steps(steps)));
+        assert_eq!(out[0], ("7zip".into(), "installed".into(), "".into()));
+        assert_eq!(
+            out[1],
+            ("discord".into(), "did not complete (status 1)".into(), "error: failed to build 'discord'".into())
+        );
+        assert_eq!(out[2].1, "not run");
+    }
+
+    #[test]
+    fn a_skipped_unknown_and_a_cancelled_run_say_so() {
+        let rows = vec![
+            lrow("pacman", "ready", "7zip"),
+            lrow("aur", "unknown", "odd-pkg"),
+            lrow("pacman", "held", "gimp"),
+        ];
+        let out = outcomes(&settle_rows(&rows, &["odd-pkg".into()], &RunEnd::Cancelled));
+        assert_eq!(out[0].1, "cancelled");
+        assert_eq!(out[1].1, "skipped");
+        assert_eq!(out[2].1, "held");
+    }
+
+    #[test]
+    fn source_words_round_trip() {
+        for s in [Source::Pacman, Source::Aur, Source::Flatpak, Source::Snap] {
+            assert_eq!(source_of(s.as_str()), s);
+        }
+    }
+
+    #[test]
+    fn reboot_advice_lines_keep_their_heading_level() {
+        let lines: Vec<String> = [
+            "IMPORTANT: the running kernel is no longer installed.",
+            "  Reboot before loading any new module.",
+            "",
+            "NOTE: glibc was updated; a reboot is recommended.",
+        ].iter().map(|s| s.to_string()).collect();
+        let got = advice_levels(&lines);
+        assert_eq!(got.len(), 3, "blank spacer lines are not advice");
+        assert_eq!(got[0].0, "IMPORTANT");
+        assert_eq!(got[1], ("IMPORTANT".into(), "Reboot before loading any new module.".into()));
+        assert_eq!(got[2].0, "NOTE");
     }
 
     /// The one row with no countdown (v1.3.1, issue #13): a soname coupling

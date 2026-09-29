@@ -24,9 +24,9 @@
 //   flatpak update -y [--noninteractive] <app-ids…>              apply
 
 use std::collections::HashMap;
-use std::process::{Command, ExitStatus};
+use std::process::Command;
 
-use crate::pacman::PendingUpdate;
+use crate::pacman::{PendingUpdate, Source};
 
 /// PATH check, same convention as aur::is_on_path.
 pub fn is_available() -> bool {
@@ -162,13 +162,10 @@ pub fn parse_remote_info_date(stdout: &str) -> Option<u64> {
 /// the same way the pacman/AUR handoff shows its own. `-y` still answers the
 /// confirmation (nog already gated the run at its own Proceed? prompt), but
 /// flatpak keeps its voice.
-pub fn update(app_ids: &[String]) -> ExitStatus {
+pub fn update(app_ids: &[String]) -> crate::handoff::Handoff {
     let mut args: Vec<&str> = vec!["update", "-y"];
     args.extend(app_ids.iter().map(|s| s.as_str()));
-    Command::new("flatpak")
-        .args(&args)
-        .status()
-        .unwrap_or_else(|e| panic!("nog: failed to launch flatpak: {}", e))
+    crate::handoff::run(Command::new("flatpak").args(&args), "flatpak")
 }
 
 /// Which flatpak refs may be handed to `flatpak update` this run.
@@ -203,6 +200,7 @@ pub fn to_pending(u: &FlatpakUpdate, installed: &HashMap<String, String>) -> Pen
         name: u.app_id.clone(),
         old_version: if old.is_empty() { "?".to_string() } else { old.to_string() },
         new_version: if u.new_version.is_empty() { "?".to_string() } else { u.new_version.clone() },
+        source: Source::Flatpak,
     }
 }
 

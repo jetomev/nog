@@ -1,5 +1,6 @@
 mod snap;
 mod flatpak;
+mod handoff;
 mod aur;
 mod commands;
 mod config;

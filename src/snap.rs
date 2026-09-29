@@ -28,7 +28,7 @@
 use std::collections::HashMap;
 use std::process::{Command, ExitStatus};
 
-use crate::pacman::PendingUpdate;
+use crate::pacman::{PendingUpdate, Source};
 
 /// PATH check, same convention as aur::is_on_path / flatpak::is_available.
 pub fn is_available() -> bool {
@@ -301,13 +301,10 @@ pub fn place_hold(hours: u64, names: &[String]) -> ExitStatus {
 /// Refresh exactly the named snaps. Requires root — nog stays unprivileged
 /// and escalates through `sudo`, as it does for its own root-owned files.
 /// snap's progress output is left intact (issue #8: show the work).
-pub fn refresh(names: &[String]) -> ExitStatus {
+pub fn refresh(names: &[String]) -> crate::handoff::Handoff {
     let mut args: Vec<&str> = vec!["snap", "refresh"];
     args.extend(names.iter().map(|s| s.as_str()));
-    Command::new("sudo")
-        .args(&args)
-        .status()
-        .unwrap_or_else(|e| panic!("nog: failed to launch sudo snap refresh: {}", e))
+    crate::handoff::run(Command::new("sudo").args(&args), "sudo snap refresh")
 }
 
 /// Convert a SnapUpdate into the shared PendingUpdate shape.
@@ -317,6 +314,7 @@ pub fn to_pending(u: &SnapUpdate, installed: &HashMap<String, String>) -> Pendin
         name: u.name.clone(),
         old_version: if old.is_empty() { "?".to_string() } else { old.to_string() },
         new_version: if u.new_version.is_empty() { "?".to_string() } else { u.new_version.clone() },
+        source: Source::Snap,
     }
 }
 

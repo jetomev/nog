@@ -1,0 +1,208 @@
+//! Run a handoff and remember why it failed (v1.4.3, issue #21).
+//!
+//! Until now every source step ran with `.status()`: the tool's output went
+//! straight to the terminal and nog kept only the exit code. A `status 1`
+//! from pacman covers a download failure, a dependency conflict, a bad
+//! signature and a user answering "n" alike, and once the terminal closed
+//! there was no way back to which one it was.
+//!
+//! stderr is now passed through nog on its way to the terminal. Every byte is
+//! forwarded the moment it arrives — not line by line — because pacman writes
+//! its questions to stderr with no trailing newline (`:: Proceed with
+//! installation? [Y/n] `) and a line-buffered relay would hide the prompt the
+//! user is being asked to answer. Issue #8's rule stands: the handoff's own
+//! output stays live and visible. nog only keeps the last few kilobytes.
+//!
+//! stdout is untouched, so progress bars, which pacman draws only when stdout
+//! is a terminal, behave exactly as before.
+
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::process::{Command, ExitStatus, Stdio};
+
+/// How much of the tail of stderr is kept. The reason is always near the end;
+/// a full build log from an AUR helper can run to megabytes.
+const TAIL_BYTES: usize = 8 * 1024;
+/// Longest reason written to the log. A reason is one line a person reads in
+/// a spreadsheet cell, not a transcript.
+const MAX_REASON: usize = 200;
+
+pub struct Handoff {
+    pub status: ExitStatus,
+    /// The line that best explains a failure. Always `None` on success.
+    pub reason: Option<String>,
+}
+
+/// Run `cmd` with stderr relayed live, and return its status plus a reason
+/// when it did not succeed.
+///
+/// Panics only if the program cannot be launched at all, matching every
+/// `.status().unwrap_or_else(panic)` call this replaces.
+pub fn run(cmd: &mut Command, what: &str) -> Handoff {
+    let mut child = cmd
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", what, e));
+
+    let mut pipe = child.stderr.take().expect("stderr was piped");
+    let relay = std::thread::spawn(move || {
+        let mut tail: VecDeque<u8> = VecDeque::with_capacity(TAIL_BYTES);
+        let mut buf = [0u8; 4096];
+        let mut out = std::io::stderr();
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let _ = out.write_all(&buf[..n]);
+                    let _ = out.flush();
+                    for &b in &buf[..n] {
+                        if tail.len() == TAIL_BYTES {
+                            tail.pop_front();
+                        }
+                        tail.push_back(b);
+                    }
+                }
+            }
+        }
+        tail.into_iter().collect::<Vec<u8>>()
+    });
+
+    let status = child
+        .wait()
+        .unwrap_or_else(|e| panic!("nog: failed to wait for {}: {}", what, e));
+    let tail = relay.join().unwrap_or_default();
+    let reason = if status.success() { None } else { reason_from(&tail) };
+    Handoff { status, reason }
+}
+
+/// Pick the line that explains the failure out of the end of stderr.
+///
+/// pacman and the AUR helpers put the cause on an `error:` line and then
+/// usually add a summary (`Errors occurred, no packages were upgraded.`) that
+/// says less. So the last `error:` line wins; failing that, the last line
+/// with anything on it — which, when the user declined, is the question they
+/// said no to.
+pub fn reason_from(tail: &[u8]) -> Option<String> {
+    let text = strip_ansi(&String::from_utf8_lossy(tail));
+    let lines: Vec<&str> = text
+        .split(|c| c == '\n' || c == '\r')
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let pick = lines
+        .iter()
+        .rev()
+        .find(|l| {
+            // pacman and the helpers say `error:`; makepkg, which the AUR
+            // helpers run, says `==> ERROR:`. The trailing summary pacman adds
+            // ("Errors occurred, ...") must not match: it names no cause.
+            let l = l.to_ascii_lowercase();
+            l.starts_with("error:") || l.starts_with("==> error:")
+        })
+        .or_else(|| lines.last())?;
+    let mut s: String = pick.chars().take(MAX_REASON).collect();
+    if pick.chars().count() > MAX_REASON {
+        s.push('…');
+    }
+    Some(s)
+}
+
+/// Drop terminal colour and cursor sequences (`ESC [ … letter`), which pacman
+/// and yay emit when colour is on and which would otherwise land in the log.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for n in chars.by_ref() {
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_error_line_beats_the_summary_after_it() {
+        let tail = b"(3/3) checking for file conflicts\n\
+error: failed to commit transaction (conflicting files)\n\
+foo: /usr/bin/foo exists in filesystem\n\
+Errors occurred, no packages were upgraded.\n";
+        assert_eq!(
+            reason_from(tail).as_deref(),
+            Some("error: failed to commit transaction (conflicting files)")
+        );
+    }
+
+    #[test]
+    fn a_makepkg_failure_inside_an_aur_build_is_found() {
+        let tail = b"==> ERROR: A failure occurred in build().\n    Aborting...\n -> error making: discord\n";
+        assert_eq!(
+            reason_from(tail).as_deref(),
+            Some("==> ERROR: A failure occurred in build().")
+        );
+    }
+
+    #[test]
+    fn a_declined_prompt_is_its_own_reason() {
+        // pacman's question has no newline; the user's "n" went to the tty.
+        let tail = b"Total Installed Size:  12.00 MiB\n\n:: Proceed with installation? [Y/n] ";
+        assert_eq!(
+            reason_from(tail).as_deref(),
+            Some(":: Proceed with installation? [Y/n]")
+        );
+    }
+
+    #[test]
+    fn colour_and_progress_redraws_are_cleaned_out() {
+        let tail = b"\x1b[1;31merror:\x1b[0m failed retrieving file 'x.pkg.tar.zst' from mirror\r\n";
+        assert_eq!(
+            reason_from(tail).as_deref(),
+            Some("error: failed retrieving file 'x.pkg.tar.zst' from mirror")
+        );
+    }
+
+    #[test]
+    fn nothing_printed_means_no_reason() {
+        assert_eq!(reason_from(b""), None);
+        assert_eq!(reason_from(b"\n\n  \r\n"), None);
+    }
+
+    #[test]
+    fn a_huge_line_is_cut_to_a_cell_sized_reason() {
+        let long = format!("error: {}", "x".repeat(1000));
+        let r = reason_from(long.as_bytes()).unwrap();
+        assert_eq!(r.chars().count(), MAX_REASON + 1);
+        assert!(r.ends_with('…'));
+    }
+
+    #[test]
+    fn a_failing_command_reports_its_stderr_and_a_passing_one_reports_nothing() {
+        // Real processes, so the relay thread and the tail are exercised
+        // rather than only the text picking.
+        let bad = run(
+            Command::new("sh").args(["-c", "echo 'error: no space left' >&2; exit 1"]),
+            "sh",
+        );
+        assert!(!bad.status.success());
+        assert_eq!(bad.reason.as_deref(), Some("error: no space left"));
+
+        let good = run(
+            Command::new("sh").args(["-c", "echo 'warning: noisy but fine' >&2"]),
+            "sh",
+        );
+        assert!(good.status.success());
+        assert_eq!(good.reason, None);
+    }
+}

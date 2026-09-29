@@ -1,12 +1,39 @@
 use std::collections::HashMap;
 use std::process::{Command, ExitStatus, Output};
 
-/// One pending upgrade reported by `checkupdates`.
+/// Which package manager a pending update belongs to.
+///
+/// v1.4.3 (issue #20): carried on the update itself rather than inferred from
+/// the name afterwards. A name is not unique across sources — the Arch
+/// package `snapd` and the snap `snapd` are both real, both update, and a
+/// name lookup tags both rows with whichever list it checks first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Source {
+    Pacman,
+    Aur,
+    Flatpak,
+    Snap,
+}
+
+impl Source {
+    /// The word written to the run log's `source` column.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Source::Pacman => "pacman",
+            Source::Aur => "aur",
+            Source::Flatpak => "flatpak",
+            Source::Snap => "snap",
+        }
+    }
+}
+
+/// One pending upgrade reported by `checkupdates` or a source's own query.
 #[derive(Debug, Clone)]
 pub struct PendingUpdate {
     pub name: String,
     pub old_version: String,
     pub new_version: String,
+    pub source: Source,
 }
 
 /// Invoke pacman through sudo so `nog` itself never needs to run as root.
@@ -79,7 +106,7 @@ pub fn checkupdates_capture() -> Result<Vec<PendingUpdate>, CheckUpdatesError> {
         let old_version = parts.next().unwrap_or("").to_string();
         let _arrow = parts.next(); // "->"
         let new_version = parts.next().unwrap_or("").to_string();
-        updates.push(PendingUpdate { name, old_version, new_version });
+        updates.push(PendingUpdate { name, old_version, new_version, source: Source::Pacman });
     }
 
     Ok(updates)
@@ -103,12 +130,13 @@ pub fn update() -> ExitStatus {
     run(&["-Syu"])
 }
 
-pub fn update_excluding(excluded: &[String]) -> ExitStatus {
-    if excluded.is_empty() {
-        return run(&["-Syu"]);
+pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
+    let mut cmd = Command::new("sudo");
+    cmd.args(["pacman", "-Syu"]);
+    if !excluded.is_empty() {
+        cmd.args(["--ignore", &excluded.join(",")]);
     }
-    let ignore_list = excluded.join(",");
-    run(&["-Syu", "--ignore", &ignore_list])
+    crate::handoff::run(&mut cmd, "sudo pacman")
 }
 
 /// List installed foreign packages (`pacman -Qmq`) — everything that did not

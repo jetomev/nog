@@ -19,14 +19,32 @@ use std::path::PathBuf;
 pub const RETENTION_DAYS: u32 = 90;
 
 /// Column header written once when a day's log file is created. Every data
-/// line carries the full run context (date/time/user/outcome) so a single
-/// file with multiple runs — or a `cat` across files — stays self-describing.
+/// line carries the full run context (date/time/user) so a single file with
+/// multiple runs — or a `cat` across files — stays self-describing.
+///
+/// v1.4.3 changed it, once, for three issues together:
+///   * `source` (#20) — which package manager the row belongs to. A name is
+///     not unique across sources: `snapd` the Arch package and `snapd` the
+///     snap were two identical-looking rows.
+///   * `outcome` is now **per package** (#19). It used to be the run's
+///     verdict copied onto every row, so 3,782 held packages were recorded
+///     as `installed`.
+///   * `detail` (#21) — why a step did not complete, taken from the tool's
+///     own error output. Empty when there is nothing to explain.
+///
+/// Files written before v1.4.3 keep their old ten-column header and remain
+/// readable on their own terms; see `append_run` for the one day that holds
+/// both.
 pub const CSV_HEADER: &str =
-    "date,time,user,bucket,package,old_version,new_version,tier,note,outcome";
+    "date,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail";
 
-/// One package row of the run record — the update-table columns plus the
-/// bucket the package landed in ("ready" / "held" / "unknown").
+/// One package row of the run record — the update-table columns, the bucket
+/// the package landed in ("ready" / "held" / "unknown"), and what became of
+/// it.
+#[derive(Clone)]
 pub struct RunRow {
+    /// "pacman", "aur", "flatpak" or "snap".
+    pub source: String,
     pub bucket: String,
     pub package: String,
     pub old_version: String,
@@ -34,17 +52,22 @@ pub struct RunRow {
     /// The tier digit as text; empty for the no-pending-updates marker row.
     pub tier: String,
     pub note: String,
+    /// What happened to this package: "installed", "held", "skipped",
+    /// "cancelled", "not run", or "did not complete (status N)".
+    pub outcome: String,
+    /// Why, when the outcome needs a why. Empty otherwise.
+    pub detail: String,
 }
 
-/// A full `nog update` run: the banner context, what the report showed, and
-/// how the run ended ("installed", "cancelled", "up to date", "all held",
-/// "handoff did not complete (status N)").
+/// A full `nog update` run: the banner context and one row per package.
 pub struct RunRecord {
     pub date: String,
     pub time: String,
     pub user: String,
     pub rows: Vec<RunRow>,
-    pub outcome: String,
+    /// Written as the outcome of the single marker line a run with no rows
+    /// leaves behind ("up to date"). Unused when there are rows.
+    pub marker: String,
 }
 
 /// Escape one CSV field per RFC 4180: quote when the value contains a comma,
@@ -62,27 +85,24 @@ fn csv_field(s: &str) -> String {
 /// updates still emits one marker line with empty package columns, so the
 /// log remains a complete history of every `nog update` invocation.
 pub fn render_run(record: &RunRecord) -> String {
-    let ctx = |bucket: &str, pkg: &str, old: &str, new: &str, tier: &str, note: &str| {
-        format!(
-            "{},{},{},{},{},{},{},{},{},{}\n",
+    let line = |fields: [&str; 9]| {
+        let mut out = vec![
             csv_field(&record.date),
             csv_field(&record.time),
             csv_field(&record.user),
-            csv_field(bucket),
-            csv_field(pkg),
-            csv_field(old),
-            csv_field(new),
-            csv_field(tier),
-            csv_field(note),
-            csv_field(&record.outcome),
-        )
+        ];
+        out.extend(fields.iter().map(|f| csv_field(f)));
+        out.join(",") + "\n"
     };
 
     if record.rows.is_empty() {
-        return ctx("", "", "", "", "", "");
+        return line(["", "", "", "", "", "", "", &record.marker, ""]);
     }
     record.rows.iter()
-        .map(|r| ctx(&r.bucket, &r.package, &r.old_version, &r.new_version, &r.tier, &r.note))
+        .map(|r| line([
+            &r.source, &r.bucket, &r.package, &r.old_version, &r.new_version,
+            &r.tier, &r.note, &r.outcome, &r.detail,
+        ]))
         .collect()
 }
 
@@ -94,11 +114,24 @@ pub fn filename_for(yyyymmdd: &str) -> String {
     format!("{} nog-update.csv", yyyymmdd)
 }
 
-/// Extract the date stamp from a run-log filename; `None` for anything that
-/// isn't exactly `YYYYMMDD nog-update.csv` (so foreign files in the log
-/// directory are never prune candidates).
+/// The per-day reboot-advice filename (v1.4.3, issue #22).
+pub fn reboot_filename_for(yyyymmdd: &str) -> String {
+    format!("{} nog-reboot.csv", yyyymmdd)
+}
+
+/// Header of the reboot-advice file: one line per line of advice nog printed.
+/// `level` is the advice's own first word — `IMPORTANT` for a verified broken
+/// state, `NOTE` for advice, `checked` when the probes ran and found nothing
+/// to say, so a quiet result still leaves a trace.
+pub const REBOOT_HEADER: &str = "date,time,user,level,advice";
+
+/// Extract the date stamp from a log filename; `None` for anything that
+/// isn't exactly `YYYYMMDD nog-update.csv` or `YYYYMMDD nog-reboot.csv` (so
+/// foreign files in the log directory are never prune candidates).
 fn log_date(name: &str) -> Option<&str> {
-    let stamp = name.strip_suffix(" nog-update.csv")?;
+    let stamp = name
+        .strip_suffix(" nog-update.csv")
+        .or_else(|| name.strip_suffix(" nog-reboot.csv"))?;
     if stamp.len() == 8 && stamp.bytes().all(|b| b.is_ascii_digit()) {
         Some(stamp)
     } else {
@@ -152,28 +185,79 @@ fn date_stamp(args: &[&str]) -> Option<String> {
 /// Append a run to the day's log file, creating the directory and writing
 /// the CSV header if the file is new. Returns the path written, or a
 /// human-readable error for the caller's soft-fail warning.
+///
+/// The day nog is upgraded to v1.4.3 can already hold rows in the old
+/// ten-column layout. Appending twelve-column rows under that header would
+/// make every later row read wrongly, so when the existing header is not the
+/// current one a blank line and the new header go in first. The file then
+/// reads as two tables, each under its own header.
 pub fn append_run(dir: &str, yyyymmdd: &str, record: &RunRecord) -> Result<PathBuf, String> {
+    append_block(dir, &filename_for(yyyymmdd), CSV_HEADER, &render_run(record))
+}
+
+/// Append reboot advice to the day's `nog-reboot.csv` (issue #22). Written
+/// after the run log is already on disk, so nothing here can cost the main
+/// record — the property v1.4.0 placed the advice after the log to keep.
+pub fn append_reboot(
+    dir: &str,
+    yyyymmdd: &str,
+    date: &str,
+    time: &str,
+    user: &str,
+    lines: &[(String, String)],
+) -> Result<PathBuf, String> {
+    let body: String = lines
+        .iter()
+        .map(|(level, text)| {
+            [date, time, user, level.as_str(), text.as_str()]
+                .iter()
+                .map(|f| csv_field(f))
+                .collect::<Vec<_>>()
+                .join(",")
+                + "\n"
+        })
+        .collect();
+    append_block(dir, &reboot_filename_for(yyyymmdd), REBOOT_HEADER, &body)
+}
+
+fn append_block(dir: &str, filename: &str, header: &str, body: &str) -> Result<PathBuf, String> {
     let dir = expand_home(dir);
     fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {}", dir, e))?;
 
-    let path = PathBuf::from(&dir).join(filename_for(yyyymmdd));
-    let is_new = !path.exists();
+    let path = PathBuf::from(&dir).join(filename);
+    let existing = fs::read_to_string(&path).ok();
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .map_err(|e| format!("could not open {}: {}", path.display(), e))?;
 
-    let mut body = String::new();
-    if is_new {
-        body.push_str(CSV_HEADER);
-        body.push('\n');
-    }
-    body.push_str(&render_run(record));
-    f.write_all(body.as_bytes())
+    let mut out = String::new();
+    out.push_str(&header_prefix(existing.as_deref(), header));
+    out.push_str(body);
+    f.write_all(out.as_bytes())
         .map_err(|e| format!("could not write {}: {}", path.display(), e))?;
     Ok(path)
+}
+
+/// What must be written before new rows: the header for a new or empty file,
+/// a blank line and the header when the file's *latest* header differs (the
+/// upgrade day), nothing otherwise.
+fn header_prefix(existing: Option<&str>, header: &str) -> String {
+    let Some(text) = existing.filter(|t| !t.trim().is_empty()) else {
+        return format!("{}\n", header);
+    };
+    // The last header in the file governs the rows being appended to it.
+    let current = text
+        .lines()
+        .filter(|l| l.starts_with("date,time,user,"))
+        .last();
+    if current == Some(header) {
+        String::new()
+    } else {
+        format!("\n{}\n", header)
+    }
 }
 
 /// Delete run logs dated before the cutoff. Returns the pruned filenames.
@@ -203,13 +287,27 @@ pub fn prune_old(dir: &str, cutoff_yyyymmdd: &str) -> Result<Vec<String>, String
 mod tests {
     use super::*;
 
-    fn record(rows: Vec<RunRow>, outcome: &str) -> RunRecord {
+    fn record(rows: Vec<RunRow>, marker: &str) -> RunRecord {
         RunRecord {
             date: "07/29/2026".into(),
             time: "10:15 AM".into(),
             user: "jetomev".into(),
             rows,
+            marker: marker.into(),
+        }
+    }
+
+    fn row(source: &str, bucket: &str, pkg: &str, tier: &str, note: &str, outcome: &str) -> RunRow {
+        RunRow {
+            source: source.into(),
+            bucket: bucket.into(),
+            package: pkg.into(),
+            old_version: "1-1".into(),
+            new_version: "2-1".into(),
+            tier: tier.into(),
+            note: note.into(),
             outcome: outcome.into(),
+            detail: String::new(),
         }
     }
 
@@ -222,66 +320,71 @@ mod tests {
     }
 
     #[test]
-    fn render_run_mirrors_table_columns() {
+    fn render_run_writes_one_outcome_per_package() {
+        // Issue #19: a held row says held, whatever the run did.
         let rec = record(vec![
-            RunRow {
-                bucket: "ready".into(),
-                package: "libnm".into(),
-                old_version: "1.56.1-1".into(),
-                new_version: "1.56.1-2".into(),
-                tier: "2".into(),
-                note: "9 days past window".into(),
-            },
-            RunRow {
-                bucket: "held".into(),
-                package: "lib32-nvidia-utils".into(),
-                old_version: "580.65-1".into(),
-                new_version: "580.76-1".into(),
-                tier: "1".into(),
-                note: "coupled to nvidia-utils · 12 days".into(),
-            },
-        ], "installed");
+            row("pacman", "ready", "libnm", "2", "9 days past window", "installed"),
+            row("pacman", "held", "gimp", "3", "1 day remaining", "held"),
+        ], "");
         let csv = render_run(&rec);
         let lines: Vec<&str> = csv.lines().collect();
-        assert_eq!(lines.len(), 2);
         assert_eq!(
             lines[0],
-            "07/29/2026,10:15 AM,jetomev,ready,libnm,1.56.1-1,1.56.1-2,2,9 days past window,installed"
+            "07/29/2026,10:15 AM,jetomev,pacman,ready,libnm,1-1,2-1,2,9 days past window,installed,"
         );
-        // Every line carries the full run context and the outcome last.
-        assert!(lines[1].starts_with("07/29/2026,10:15 AM,jetomev,held,lib32-nvidia-utils,"));
-        assert!(lines[1].ends_with(",installed"));
-        // Field count survives the note's interpunct (no stray commas).
-        assert_eq!(lines[0].split(',').count(), 10);
+        assert!(lines[1].contains(",held,gimp,"));
+        assert!(lines[1].ends_with(",held,"), "held row claims: {}", lines[1]);
+        assert_eq!(lines[0].split(',').count(), CSV_HEADER.split(',').count());
+    }
+
+    #[test]
+    fn the_two_snapd_rows_are_told_apart() {
+        // Issue #20, from the 2026-09-15 log.
+        let rec = record(vec![
+            row("pacman", "ready", "snapd", "3", "hold just expired", "installed"),
+            row("snap", "ready", "snapd", "3", "hold just expired", "installed"),
+        ], "");
+        let csv = render_run(&rec);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert!(lines[0].contains(",pacman,ready,snapd,"));
+        assert!(lines[1].contains(",snap,ready,snapd,"));
+    }
+
+    #[test]
+    fn a_failure_reason_is_quoted_into_detail() {
+        let mut r = row("aur", "ready", "discord", "3", "", "did not complete (status 1)");
+        r.detail = "error: failed to build 'discord', see log, line 12".into();
+        let csv = render_run(&record(vec![r], ""));
+        assert!(csv.trim_end().ends_with(
+            ",did not complete (status 1),\"error: failed to build 'discord', see log, line 12\""
+        ));
     }
 
     #[test]
     fn render_run_empty_emits_marker_line() {
         let csv = render_run(&record(vec![], "up to date"));
-        assert_eq!(csv, "07/29/2026,10:15 AM,jetomev,,,,,,,up to date\n");
+        assert_eq!(csv, "07/29/2026,10:15 AM,jetomev,,,,,,,,up to date,\n");
+        assert_eq!(csv.trim_end().split(',').count(), CSV_HEADER.split(',').count());
     }
 
     #[test]
-    fn render_run_quotes_comma_notes() {
-        let rec = record(vec![RunRow {
-            bucket: "held".into(),
-            package: "systemd".into(),
-            old_version: "257.7-1".into(),
-            new_version: "258.1-1".into(),
-            tier: "1".into(),
-            note: "manual sign-off required, run `nog unlock` to release".into(),
-        }], "cancelled");
-        let csv = render_run(&rec);
-        assert!(csv.contains("\"manual sign-off required, run `nog unlock` to release\""));
-        // The quoted comma must not change the parsed field count. Cheap
-        // check: splitting on `","` boundaries is overkill here; instead
-        // confirm exactly one quoted region exists.
-        assert_eq!(csv.matches('"').count(), 2);
+    fn header_goes_in_once_and_again_only_when_the_layout_changes() {
+        assert_eq!(header_prefix(None, CSV_HEADER), format!("{}\n", CSV_HEADER));
+        assert_eq!(header_prefix(Some(""), CSV_HEADER), format!("{}\n", CSV_HEADER));
+        let current = format!("{}\nrow\n", CSV_HEADER);
+        assert_eq!(header_prefix(Some(&current), CSV_HEADER), "");
+        // The upgrade day: rows under the pre-v1.4.3 header already exist.
+        let old = "date,time,user,bucket,package,old_version,new_version,tier,note,outcome\nrow\n";
+        assert_eq!(header_prefix(Some(old), CSV_HEADER), format!("\n{}\n", CSV_HEADER));
+        // ...and after that the new header governs, so it is not repeated.
+        let both = format!("{}\n{}\nrow\n", old, CSV_HEADER);
+        assert_eq!(header_prefix(Some(&both), CSV_HEADER), "");
     }
 
     #[test]
     fn filename_is_spreadsheet_friendly_csv() {
         assert_eq!(filename_for("20260729"), "20260729 nog-update.csv");
+        assert_eq!(reboot_filename_for("20260729"), "20260729 nog-reboot.csv");
     }
 
     #[test]
@@ -294,9 +397,14 @@ mod tests {
             "notes.txt".into(),               // foreign file — never touch
             "2026 nog-update.csv".into(),     // malformed stamp — never touch
             "20260401 something-else.csv".into(), // wrong suffix — never touch
+            "20260402 nog-reboot.csv".into(), // reboot log, expired — prune
+            "20260801 nog-reboot.csv".into(), // reboot log, fresh — keep
         ];
         let pruned = prune_candidates(&names, "20260501");
-        assert_eq!(pruned, vec!["20260401 nog-update.csv", "20260430 nog-update.csv"]);
+        assert_eq!(
+            pruned,
+            vec!["20260401 nog-update.csv", "20260430 nog-update.csv", "20260402 nog-reboot.csv"]
+        );
     }
 
     #[test]
