@@ -16,7 +16,7 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [ ] Watch the first real update that installs something: pacman's own "Proceed?" visible, `installed` rows in the log (matrix 7.3, 7.4)
 - [ ] Not seen yet on real data: the library scan firing (2.7), the reboot log (4.10), the #14 prompt line (3.1)
 - [x] AUR search index caught up to 1.5.0-1 (checked 29 Sep, ~17:30)
-- [ ] README AUR badge shows 1.5.1 on github.com — shields.io itself still served 1.4.1 at ~17:30 (its cache); recheck, bust per checklist if stuck
+- [x] README AUR badge shows 1.5.1 on github.com (checked through GitHub's own image cache, ~18:10)
 
 ## Next up — in this order
 
