@@ -11,12 +11,12 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through its own `nog install <file>`. Tags v1.4.2 and v1.4.3 ride along. Issues #14, #16, #17, #19–#22 closed. 172 tests, 6 warnings.
 
 ## Still open from this release
-- [x] **#24 (F-1)** — fixed and shipped as v1.5.1
+- [x] **#24 (F-1)** — fixed and shipped as v1.5.1; installed on this desktop with `nog install <file>` (17:3x)
 - [x] Fresh install from the AUR through yay — works (Javier, 17:15)
 - [ ] Watch the first real update that installs something: pacman's own "Proceed?" visible, `installed` rows in the log (matrix 7.3, 7.4)
 - [ ] Not seen yet on real data: the library scan firing (2.7), the reboot log (4.10), the #14 prompt line (3.1)
 - [x] AUR search index caught up to 1.5.0-1 (checked 29 Sep, ~17:30)
-- [ ] README AUR badge shows 1.5.0 on github.com (image caches can lag an hour)
+- [ ] README AUR badge shows 1.5.1 on github.com — shields.io itself still served 1.4.1 at ~17:30 (its cache); recheck, bust per checklist if stuck
 
 ## Next up — in this order
 
@@ -35,7 +35,7 @@ One change to the log file fixes all four, so they ship together.
 - [x] **#17 · priority-2** · *code done 29 Sep, `01bbe94`* · `nog install` can't install a package file we built ourselves, so every Forge release falls back to raw pacman. It should accept a file and still show its tier.
 
 ### 4 · Prove nog works with paru
-- [ ] **#12 · priority-3** · nog has claimed to support paru (another AUR helper) since v1.0.0 and has never been tested with it. Install paru, run the full test list, then do the same with yay again. This must happen before nogForge is built.
+- [ ] **#12 · priority-3** · **IN PROGRESS 29 Sep** — step 1: Javier installs paru (`nog install paru`, from chaotic-aur) · nog has claimed to support paru (another AUR helper) since v1.0.0 and has never been tested with it. Install paru, run the full test list, then do the same with yay again. This must happen before nogForge is built.
 
 ### 5 · Cache cleanup
 - [ ] **#15 · priority-3** · `nog clean`: clear out old package downloads, but keep the ones a held package may still need.
