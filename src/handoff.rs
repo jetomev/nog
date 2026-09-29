@@ -39,6 +39,12 @@ pub struct Handoff {
 /// Panics only if the program cannot be launched at all, matching every
 /// `.status().unwrap_or_else(panic)` call this replaces.
 pub fn run(cmd: &mut Command, what: &str) -> Handoff {
+    run_into(cmd, what, std::io::stderr())
+}
+
+/// `run`, relaying to any sink. The terminal in real use; in tests, a sink
+/// that records *when* bytes arrive, which is the property that matters.
+fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W) -> Handoff {
     let mut child = cmd
         .stderr(Stdio::piped())
         .spawn()
@@ -48,7 +54,6 @@ pub fn run(cmd: &mut Command, what: &str) -> Handoff {
     let relay = std::thread::spawn(move || {
         let mut tail: VecDeque<u8> = VecDeque::with_capacity(TAIL_BYTES);
         let mut buf = [0u8; 4096];
-        let mut out = std::io::stderr();
         loop {
             match pipe.read(&mut buf) {
                 Ok(0) | Err(_) => break,
@@ -185,6 +190,45 @@ Errors occurred, no packages were upgraded.\n";
         let r = reason_from(long.as_bytes()).unwrap();
         assert_eq!(r.chars().count(), MAX_REASON + 1);
         assert!(r.ends_with('…'));
+    }
+
+    /// A sink that notes when its first byte arrived.
+    struct Clock(std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>, Vec<u8>);
+    impl Write for Clock {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            let mut t = self.0.lock().unwrap();
+            if t.is_none() && !b.is_empty() {
+                *t = Some(std::time::Instant::now());
+            }
+            self.1.extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_question_without_a_newline_reaches_the_user_immediately() {
+        // pacman asks on stderr with no newline, then waits for an answer.
+        // A relay that waited for a full line would show nothing until the
+        // user had already answered a question they could not see. The child
+        // here asks, then keeps the stream open for a full second: the
+        // question must arrive long before that.
+        let first = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let start = std::time::Instant::now();
+        let h = run_into(
+            Command::new("sh").args(["-c", "printf ':: Proceed with installation? [Y/n] ' >&2; sleep 1"]),
+            "sh",
+            Clock(first.clone(), Vec::new()),
+        );
+        assert!(h.status.success());
+        let arrived = first.lock().unwrap().expect("the question never arrived");
+        assert!(
+            arrived - start < std::time::Duration::from_millis(500),
+            "the question took {:?} to reach the user",
+            arrived - start
+        );
     }
 
     #[test]
