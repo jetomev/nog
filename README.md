@@ -581,9 +581,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 > **v1.5.1 shipped 2026-09-29** — a clean build log ([#24](https://github.com/jetomev/nog/issues/24)). **v1.5.0 shipped the same day** — `nog install` takes a package file you built ([#17](https://github.com/jetomev/nog/issues/17)), and carries v1.4.2 (nog reads which libraries programs actually use, [#16](https://github.com/jetomev/nog/issues/16)) and v1.4.3 (a truthful run log, [#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
+### Next — a failing AUR helper must not look like "nothing to update" ([#25](https://github.com/jetomev/nog/issues/25) · `priority-3`)
 
-- [ ] **Run nog against paru.** nog has supported paru since v1.0.0 and has never once been run against it — every release so far was built and dogfooded on a machine running yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
+- [ ] When the helper fails before printing anything, nog currently reports `0 AUR update(s)` and discards the error. Holds stay safe; updates go unseen. Found while validating paru.
+
+**Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
 
 ### Later
 
@@ -602,7 +604,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [ ] **C3 · v1.6.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up one: v1.5.0 went to `nog install <file>`, #17)*
 - [ ] **C4 · v1.7.0** — Full command surface plus `--json` output
 - [ ] **C5 · v1.8.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions ([#15](https://github.com/jetomev/nog/issues/15) `nog clean` belongs here)
-- [ ] **C6** — nogForge, the visual companion, built on forgekit *(gated on [#12](https://github.com/jetomev/nog/issues/12) — validate against paru first)*
+- [ ] **C6** — nogForge, the visual companion, built on forgekit *(its gate, paru validation [#12](https://github.com/jetomev/nog/issues/12), was cleared 2026-09-29)*
 - [ ] **C7 · v2.0.0** — the crown release
 
 *Every released version's roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).*
