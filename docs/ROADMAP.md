@@ -2,6 +2,15 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.0 — Released (install a package file, #17; carries v1.4.2 and v1.4.3)
+- [x] `nog install` recognises an argument containing `.pkg.tar` as a file and hands it to `pacman -U`
+- [x] Name, version and tier read from the file itself (`pacman -Qip`, `LC_ALL=C`)
+- [x] Names and files in one command refused; a mistyped path reported as a missing file
+- [x] No signature gate: an explicit command does what was asked; pacman's `LocalFileSigLevel` still applies
+- [x] Relay timing test: a question with no newline reaches the user at once — proven against a sabotaged relay
+- [x] Man page: column list no longer an unbreakable line (M-1); privilege sections corrected — `update` always uses `sudo pacman` for the official repos since v1.3.0 (M-2)
+- [x] v2 arc renumbered: C3 → v1.6.0, C4 → v1.7.0, C5 → v1.8.0
+
 ### v1.4.3 — Tagged (the run log tells the truth, #19–#22)
 - [x] `outcome` per package, from its own source's step: `held`, `skipped`, `installed`, `did not complete (status N)`, `cancelled`, `not run` (#19)
 - [x] `source` column, carried on `PendingUpdate` itself; the report tables use it too (#20)

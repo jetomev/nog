@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.4.3](https://img.shields.io/badge/Version-1.4.3-purple.svg)
+![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -165,6 +165,9 @@ sudo install -Dm644 nog.1 /usr/share/man/man1/nog.1
 # Install a package (respects tier rules, routes to your AUR helper if needed)
 nog install <package>
 
+# Install a package file you built yourself, e.g. with makepkg
+nog install ./<package>-<version>-<arch>.pkg.tar.zst
+
 # Update everything (tier holds applied across all sources)
 nog update
 
@@ -295,7 +298,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.4.3"
+version = "1.5.0"
 log_level = "info"
 
 [paths]
@@ -398,7 +401,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 8,500 lines of Rust, with 166 tests that run on every release.
+Around 8,650 lines of Rust, with 172 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -434,7 +437,7 @@ Four places. That's the complete list.
 
 | What | Command | When |
 |---|---|---|
-| Package transactions | `sudo pacman ...` | `install`, `remove`, `update`, `unlock --promote` — **only when no AUR helper is configured**. With a helper, nog calls the helper as you, and the helper runs its own `sudo pacman` internally. |
+| Package transactions | `sudo pacman ...` | `nog update` always hands the official repositories to `sudo pacman -Syu` itself (v1.3.0), and `nog install` of a package file always uses `sudo pacman -U` (v1.5.0). `install` by name, `remove` and `unlock --promote` use it **only when no AUR helper is configured**; with a helper, nog calls the helper as you, and the helper runs its own `sudo pacman` internally. |
 | Snap holds and updates | `sudo snap refresh ...` | Placing a tier hold (`--hold`, v1.4.1) and applying snap updates. snapd requires root for both; nothing else about snap does. |
 | Its own config files | `sudo tee <file>` | Writing `tier-pins.toml` (during `nog pin`) and `sources.toml` (during `activate`/`deactivate`). The new contents are built in memory and piped to `tee` — nog itself never runs as root, only `tee` does. |
 | pacman.conf backup | `sudo cp --preserve=all` | Only during `nog activate|deactivate chaotic-aur`, to take a timestamped backup before editing that one section. |
@@ -576,13 +579,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.4.3 tagged 2026-09-29** — the run log records each package's own outcome and source, and why a step failed ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). v1.4.2 tagged the same day — nog reads which libraries programs actually use ([#16](https://github.com/jetomev/nog/issues/16)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.5.0 shipped 2026-09-29** — `nog install` takes a package file you built ([#17](https://github.com/jetomev/nog/issues/17)), and carries v1.4.2 (nog reads which libraries programs actually use, [#16](https://github.com/jetomev/nog/issues/16)) and v1.4.3 (a truthful run log, [#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — install a locally built package through nog ([#17](https://github.com/jetomev/nog/issues/17) · `priority-2`)
-
-- [ ] `nog install ./foo.pkg.tar.zst` — every Forge release currently has to leave nog for raw `pacman -U`
-
-### After that — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
+### Next — validate against paru ([#12](https://github.com/jetomev/nog/issues/12) · `priority-3`)
 
 - [ ] **Run nog against paru.** nog has supported paru since v1.0.0 and has never once been run against it — every release so far was built and dogfooded on a machine running yay. Scheduled deliberately for **before C6 (nogForge)**, since nogForge builds a UI over these same code paths and helper-level surprises are far cheaper to find first.
 
@@ -600,9 +599,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [x] **C1 · v1.1.0** — Flatpak
 - [x] **C2 · v1.2.0** — Snap
-- [ ] **C3 · v1.5.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing
-- [ ] **C4 · v1.6.0** — Full command surface plus `--json` output
-- [ ] **C5 · v1.7.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions
+- [ ] **C3 · v1.6.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up one: v1.5.0 went to `nog install <file>`, #17)*
+- [ ] **C4 · v1.7.0** — Full command surface plus `--json` output
+- [ ] **C5 · v1.8.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions ([#15](https://github.com/jetomev/nog/issues/15) `nog clean` belongs here)
 - [ ] **C6** — nogForge, the visual companion, built on forgekit *(gated on [#12](https://github.com/jetomev/nog/issues/12) — validate against paru first)*
 - [ ] **C7 · v2.0.0** — the crown release
 
@@ -611,6 +610,30 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.5.0 — September 29, 2026
+
+**`nog install` now installs a package file you built yourself** ([#17](https://github.com/jetomev/nog/issues/17)).
+
+```bash
+nog install ./grubforge-1.1.1-1-any.pkg.tar.zst
+# nog: 'grubforge' 1.1.1-1 (local file) is Tier 3 — installing from ./grubforge-1.1.1-1-any.pkg.tar.zst.
+```
+
+Every Forge release ends with a `makepkg` build and a test run against the installed result. Until now that one step had to leave nog for raw `sudo pacman -U`, on the machine whose whole purpose is to exercise nog. nog now recognises a package file — anything whose name contains `.pkg.tar`, which no repository package name can — and hands it to `pacman -U`.
+
+- **The tier comes from the file itself.** A local build has no repository entry, so nog reads the name and version from the package (`pacman -Qip`, with the language forced to English so the field labels cannot be translated out from under it).
+- **Names and files cannot be mixed.** `pacman -S` and `pacman -U` are separate transactions; splitting one request into two could install half of it. nog says so and asks for two commands.
+- **A mistyped path is a missing file**, reported as one — never searched for in the repositories as if it were a package name.
+- **No signature gate.** Like every `nog install`, this is a command you typed, and it does what you asked; pacman's own `LocalFileSigLevel` applies exactly as it would without nog. Protection lives in `nog update`, the path that runs without you choosing each package.
+
+**This release also carries v1.4.2 and v1.4.3**, tagged the same day without GitHub Releases of their own: nog now reads which libraries programs actually use before letting a library change ([#16](https://github.com/jetomev/nog/issues/16)), and the run log records each package's own outcome, its source, and why a step failed ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). Both entries follow below.
+
+**A new check on the error relay from v1.4.3.** pacman asks `Proceed with installation? [Y/n]` without a newline and then waits. A relay that waited for whole lines would hide the question you were being asked. A test now times the question's arrival — and was run once against a deliberately broken relay to prove it fails when it should (the question took a full second; the test caught it).
+
+**Two documentation corrections.** The man page listed the run log's twelve column names as one unbreakable word, which the formatter could not fit — introduced in v1.4.3 and caught by the release checklist's formatting check. And both privilege sections said nog runs `sudo pacman` for updates "only when no AUR helper is configured"; since v1.3.0 the update always hands the official repositories to `sudo pacman` itself. They now say so, and name the new `pacman -U`.
+
+Tests: 166 → 172. Warnings unchanged at 6.
 
 ### v1.4.3 — September 29, 2026
 
@@ -629,28 +652,6 @@ nog writes every `nog update` to a dated CSV file. A routine read of those files
 **The log's columns changed once, for all four:** `date,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail`. Older files keep their own ten-column header. On the day you upgrade, the rows already written stay under the old header, and a blank line and the new header go in before the new rows — checked on a real log file.
 
 Tests: 152 → 166. Warnings unchanged at 6.
-
-### v1.4.2 — September 29, 2026
-
-**nog now reads the programs themselves, not only what their packages declare.**
-
-On August 29 a `nog update` installed `libbluray` 1.5.0, which moves its library from `libbluray.so.3` to `.so.4`. chaotic-aur's `ffmpeg-obs` still linked `.so.3` — but its package declared plain `libbluray`, with no version. The v1.3.1 soname rule reads declarations, so it saw nothing. pacman read the same declarations and was satisfied. The update succeeded, and nine packages that go through `ffmpeg-obs` broke silently: Thunderbird, VLC's ffmpeg plugin, Qt's ffmpeg multimedia backend, KDE's screen-capture library and five more. It went unnoticed for two days, until Spectacle refused to start ([#16](https://github.com/jetomev/nog/issues/16)).
-
-The worst part: the fixed `ffmpeg-obs` had been in the repository since August 26. nog was holding it. The hold protected one package by breaking nine.
-
-**When a pending update drops a library version, nog now opens every installed program and library and reads which libraries each one actually needs** — the `DT_NEEDED` entries the system loader acts on. A real linker is treated exactly like a declared one: the library is held until its users can move with it. A small ELF reader was written for this rather than taking on a dependency; it reads the dynamic section and nothing else.
-
-- **It only runs when it can matter.** About one pending update in 130 drops a library version. On every other run nog does no extra work.
-- **It skips what cannot be a program** — headers, Python and Go sources, firmware, images. On the reference machine that cuts 143,000 candidate files to 46,000. A warm scan takes about a quarter of a second.
-- **A package that ships its own copy of the library is not broken by it**, so it is not counted — Thunderbird's bundled libraries were the noise that sank a simpler design.
-- **A package that ships the library file without declaring it keeps the library alive**, so nothing is held for it.
-- **An AUR package with no known next version is not treated as dropping anything.** Unknown is not the same as gone.
-
-Checked against `readelf` on the machine it was written on: nog names `ffmpeg-obs` and `ffmpeg4.4` as the users of `libbluray.so.4`, exactly what `readelf` finds. The test suite replays the August incident in both directions: the declarations alone miss it, and the scan catches it.
-
-**Also: the "continue?" question now ends its own line** when nog runs from a script ([#14](https://github.com/jetomev/nog/issues/14)). Checked by reading the code; the prompt appears only after a source step fails, which cannot be triggered on demand.
-
-Tests: 135 → 152. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

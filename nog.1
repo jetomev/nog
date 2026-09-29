@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.4.3" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.5.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -45,13 +45,26 @@ section below for the complete privilege model.
 .
 .SH COMMANDS
 .TP
-.B nog install \fIpackage\fR [\fIpackage\fR...]
+.B nog install \fIpackage\fR [\fIpackage\fR...] | \fIfile\fR.pkg.tar.* [\fIfile\fR...]
 Install one or more packages. Tier classification is printed as informational
 output; installs are never blocked or gated — explicit user commands execute
 user intent. If an AUR helper is configured (see
 .BR nog.conf (5)),
 the install routes through the helper, so AUR-only packages work transparently
 without any pre-check. Tier protection applies to future updates, not to installs.
+.IP
+Since v1.5.0 a locally built package file \(em any argument containing
+.B .pkg.tar
+\(em is installed with
+.BR "pacman -U" ,
+for example the output of
+.BR makepkg (8).
+Its name, version and tier are read from the file itself, since a local build
+has no repository entry. Names and files cannot be mixed in one command; they
+are separate pacman operations, and splitting one request could leave half of
+it installed. A mistyped path is reported as a missing file, never searched for
+in the repositories. There is no signature gate beyond pacman's own
+.BR LocalFileSigLevel .
 .TP
 .B nog remove \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
@@ -426,7 +439,10 @@ Per-run CSV update logs (\fBYYYYMMDD nog-update.csv\fR), one row per pending
 package per run with its source, its own outcome and, when a step did not
 complete, the reason; plus reboot advice (\fBYYYYMMDD nog-reboot.csv\fR).
 Columns since v1.4.3:
-\fBdate,time,user,source,bucket,package,old_version,new_version,tier,note,outcome,detail\fR.
+.nf
+.B "  date,time,user,source,bucket,package,"
+.B "  old_version,new_version,tier,note,outcome,detail"
+.fi
 Earlier files keep their original ten-column header; on the day of the upgrade
 the new header follows a blank line in the same file. Location configurable via
 .B [paths] run_logs
@@ -564,18 +580,23 @@ nog escalates to root in exactly four places, all as transparent
 .BR sudo (8)
 subprocess invocations:
 .TP
-.B sudo pacman -S | -R | -Syu ...
-For package transactions during
-.BR install ,
-.BR remove ,
-.BR update ,
-and
-.B "unlock --promote"
-\(em but only when no AUR helper is configured. When a helper is configured,
-nog hands the transaction to the helper (as the invoking user), and the
-helper runs its own
+.B sudo pacman -S | -U | -R | -Syu ...
+For package transactions.
+.B "nog update"
+always hands the official repositories to
+.B "sudo pacman -Syu"
+directly (since v1.3.0, one manager per source), and
+.B "nog install"
+of a package file always uses
+.B "sudo pacman -U"
+(v1.5.0).
+.BR install " by name, " remove " and " "unlock --promote"
+use
 .B sudo pacman
-internally for the pacman step.
+only when no AUR helper is configured; with a helper, nog hands the
+transaction to the helper as the invoking user, and the helper runs its own
+.B sudo pacman
+internally.
 .TP
 .B "sudo snap refresh --hold=<hours> | sudo snap refresh <names>"
 For snap holds and snap refreshes (v1.2.0; the hold step added in v1.4.1).

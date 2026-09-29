@@ -1,19 +1,22 @@
 # nog — the list
 
-**Current release: v1.4.1** (16 Sep 2026). 135 tests pass. Installed on this desktop and live on the AUR.
+**Current release: v1.4.1** (16 Sep 2026) — installed and on the AUR. **v1.5.0 is being released** (172 tests).
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
 
 ---
 
-## Right now — steps 1–3 are written, not released
-Code for #16, #14, #19–#22 and #17 is committed on this computer (not pushed). 171 tests pass, warnings unchanged at 6.
-- [ ] Javier decides how to release it: one release or three, and the version numbers
-- [ ] Docs: README, man page, changelog, config version, every version string
-- [ ] Test run on this desktop with the installed build. **First check: pacman's own "Proceed?" question still shows up live** (the new error capture sits in its path)
-- [ ] Push, tag, GitHub Release, AUR, then close the issues with explanations
-- [ ] Not seen yet on real data: the library scan firing during a real update (no pending update drops a library version today)
+## Right now — v1.5.0 release (29 Sep 2026)
+Tags v1.4.2 (#16, #14) and v1.4.3 (#19–#22) made; v1.5.0 (#17) carries the GitHub Release. 172 tests, 6 warnings.
+- [x] Code, docs and version strings for all three tags
+- [x] Test matrix: 36 checks — 25 pass, 4 failed and fixed (M-1, M-2, M-3), 7 waiting for a real run
+- [ ] Push `main` and the three tags, then the GitHub Release for v1.5.0
+- [ ] AUR: bump the PKGBUILD, `makepkg` smoke build, push
+- [ ] Javier installs v1.5.0 — using `nog install <file>` itself (§7.2)
+- [ ] Dogfood §7: pacman's own "Proceed?" question still visible during `nog update` (§7.3), real log rows (§7.4)
+- [ ] Close #14, #16, #17, #19, #20, #21, #22 with explanations
+- [ ] Not seen yet on real data: the library scan firing (2.7), the reboot log (4.10), the #14 prompt line (3.1)
 
 ## Next up — in this order
 

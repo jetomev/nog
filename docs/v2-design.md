@@ -41,6 +41,11 @@ whole chain works.
 
 ## The cycles
 
+> **The versions below are as locked on 2026-08-10 and are no longer current.**
+> Hotfix and tooling releases have moved every cycle since; as of v1.5.0, C3 is
+> v1.6.0, C4 v1.7.0 and C5 v1.8.0. The live numbering is in the
+> [README roadmap](../README.md#roadmap). The content of each cycle stands.
+
 | Cycle | Ships | Content |
 |---|---|---|
 | **C1** | v1.1.0 | **Flatpak backend**: detect/offer, `activate/deactivate flatpak`, flatpak updates in `nog update` tables (Source column) + gated apply, tier aging on flatpak refs |

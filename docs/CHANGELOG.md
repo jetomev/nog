@@ -2,6 +2,30 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.0 — September 29, 2026
+
+**`nog install` now installs a package file you built yourself** ([#17](https://github.com/jetomev/nog/issues/17)).
+
+```bash
+nog install ./grubforge-1.1.1-1-any.pkg.tar.zst
+# nog: 'grubforge' 1.1.1-1 (local file) is Tier 3 — installing from ./grubforge-1.1.1-1-any.pkg.tar.zst.
+```
+
+Every Forge release ends with a `makepkg` build and a test run against the installed result. Until now that one step had to leave nog for raw `sudo pacman -U`, on the machine whose whole purpose is to exercise nog. nog now recognises a package file — anything whose name contains `.pkg.tar`, which no repository package name can — and hands it to `pacman -U`.
+
+- **The tier comes from the file itself.** A local build has no repository entry, so nog reads the name and version from the package (`pacman -Qip`, with the language forced to English so the field labels cannot be translated out from under it).
+- **Names and files cannot be mixed.** `pacman -S` and `pacman -U` are separate transactions; splitting one request into two could install half of it. nog says so and asks for two commands.
+- **A mistyped path is a missing file**, reported as one — never searched for in the repositories as if it were a package name.
+- **No signature gate.** Like every `nog install`, this is a command you typed, and it does what you asked; pacman's own `LocalFileSigLevel` applies exactly as it would without nog. Protection lives in `nog update`, the path that runs without you choosing each package.
+
+**This release also carries v1.4.2 and v1.4.3**, tagged the same day without GitHub Releases of their own: nog now reads which libraries programs actually use before letting a library change ([#16](https://github.com/jetomev/nog/issues/16)), and the run log records each package's own outcome, its source, and why a step failed ([#19](https://github.com/jetomev/nog/issues/19)–[#22](https://github.com/jetomev/nog/issues/22)). Both entries follow below.
+
+**A new check on the error relay from v1.4.3.** pacman asks `Proceed with installation? [Y/n]` without a newline and then waits. A relay that waited for whole lines would hide the question you were being asked. A test now times the question's arrival — and was run once against a deliberately broken relay to prove it fails when it should (the question took a full second; the test caught it).
+
+**Two documentation corrections.** The man page listed the run log's twelve column names as one unbreakable word, which the formatter could not fit — introduced in v1.4.3 and caught by the release checklist's formatting check. And both privilege sections said nog runs `sudo pacman` for updates "only when no AUR helper is configured"; since v1.3.0 the update always hands the official repositories to `sudo pacman` itself. They now say so, and name the new `pacman -U`.
+
+Tests: 166 → 172. Warnings unchanged at 6.
+
 ### v1.4.3 — September 29, 2026
 
 **The run log now tells the truth about every package in it.**
