@@ -1,22 +1,20 @@
 # nog — the list
 
-**Current release: v1.4.1** (16 Sep 2026) — installed and on the AUR. **v1.5.0 is being released** (172 tests).
+**Current release: v1.5.0** (29 Sep 2026). 172 tests pass. Installed on this desktop and live on GitHub and the AUR.
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
 
 ---
 
-## Right now — v1.5.0 release (29 Sep 2026)
-Tags v1.4.2 (#16, #14) and v1.4.3 (#19–#22) made; v1.5.0 (#17) carries the GitHub Release. 172 tests, 6 warnings.
-- [x] Code, docs and version strings for all three tags
-- [x] Test matrix: 36 checks — 25 pass, 4 failed and fixed (M-1, M-2, M-3), 7 waiting for a real run
-- [ ] Push `main` and the three tags, then the GitHub Release for v1.5.0
-- [ ] AUR: bump the PKGBUILD, `makepkg` smoke build, push
-- [ ] Javier installs v1.5.0 — using `nog install <file>` itself (§7.2)
-- [ ] Dogfood §7: pacman's own "Proceed?" question still visible during `nog update` (§7.3), real log rows (§7.4)
-- [ ] Close #14, #16, #17, #19, #20, #21, #22 with explanations
+## Done — v1.5.0 released (29 Sep 2026)
+v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through its own `nog install <file>`. Tags v1.4.2 and v1.4.3 ride along. Issues #14, #16, #17, #19–#22 closed. 172 tests, 6 warnings.
+
+## Still open from this release
+- [ ] **#24 (F-1)** — a test prints a fake error into every build log. Fix in the next batch
+- [ ] Watch the first real update that installs something: pacman's own "Proceed?" visible, `installed` rows in the log (matrix 7.3, 7.4)
 - [ ] Not seen yet on real data: the library scan firing (2.7), the reboot log (4.10), the #14 prompt line (3.1)
+- [ ] AUR search index still said 1.4.1-1 an hour after the push (its git copy is 1.5.0). Re-check, then the README badge
 
 ## Next up — in this order
 
