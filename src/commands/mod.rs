@@ -87,6 +87,23 @@ pub fn install(packages: &[String]) {
     guard_not_sudo_with_helper(helper);
 
     let tm = load_tiers();
+
+    // Issue #17: a locally built package file goes to `pacman -U`. Every Forge
+    // release installs one for its dogfood, and until now that step had to
+    // leave nog for raw pacman.
+    let files = match split_install_args(packages, |p| std::path::Path::new(p).is_file()) {
+        Ok(InstallArgs::Names) => None,
+        Ok(InstallArgs::Files) => Some(packages),
+        Err(msg) => {
+            eprintln!("nog: {}", msg);
+            std::process::exit(1);
+        }
+    };
+    if let Some(files) = files {
+        install_files(files, &tm);
+        return;
+    }
+
     for pkg in packages {
         let tier = tm.classify(pkg);
         match tier {
@@ -111,6 +128,78 @@ pub fn install(packages: &[String]) {
         Some(h) => aur::install(h, packages),
         None    => pacman::install(packages),
     };
+    if !status.success() {
+        eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+/// What `nog install` was given (issue #17).
+#[derive(Debug, PartialEq)]
+enum InstallArgs {
+    /// Package names, resolved from the repositories (and the AUR).
+    Names,
+    /// Package files on disk, installed as they are.
+    Files,
+}
+
+/// Does this argument name a package file rather than a package?
+///
+/// Decided by the name: a repository package name can never contain
+/// `.pkg.tar`, and every file makepkg writes does. Whether the file exists
+/// is checked separately, so a typo in a path is reported as a missing file
+/// instead of being searched for in the repositories.
+fn looks_like_package_file(arg: &str) -> bool {
+    arg.contains(".pkg.tar")
+}
+
+/// Sort the arguments, refusing the mixes nog will not guess at.
+///
+/// Names and files together are refused: pacman installs them with
+/// different operations (`-S` and `-U`), and splitting one request into two
+/// transactions could leave half of it installed. The user runs two
+/// commands instead, and knows exactly what each one did.
+fn split_install_args(args: &[String], exists: impl Fn(&str) -> bool) -> Result<InstallArgs, String> {
+    let files: Vec<&String> = args.iter().filter(|a| looks_like_package_file(a)).collect();
+    if files.is_empty() {
+        return Ok(InstallArgs::Names);
+    }
+    if files.len() != args.len() {
+        return Err(
+            "package names and package files cannot be mixed in one install.\n     \
+             Run `nog install` once for the names and once for the files."
+                .to_string(),
+        );
+    }
+    if let Some(missing) = files.iter().find(|f| !exists(f)) {
+        return Err(format!("no such package file: {}", missing));
+    }
+    Ok(InstallArgs::Files)
+}
+
+/// `nog install ./foo-1.0-1-any.pkg.tar.zst` (issue #17).
+///
+/// The tier is read from the file's own metadata — a local build has no
+/// repository entry to look up. No signature gate: this is an explicit
+/// command, and like every `nog install` it does what was asked. pacman's
+/// own `LocalFileSigLevel` still applies exactly as it would without nog.
+fn install_files(files: &[String], tm: &TierManager) {
+    for f in files {
+        match pacman::file_identity(f) {
+            Some((name, version)) => {
+                let tier = tm.classify(&name);
+                println!(
+                    "nog: '{}' {} (local file) is {} — installing from {}.",
+                    name, version, tier, f
+                );
+            }
+            None => {
+                eprintln!("nog: pacman cannot read {} as a package file.", f);
+                std::process::exit(1);
+            }
+        }
+    }
+    let status = pacman::install_files(files);
     if !status.success() {
         eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
@@ -1819,6 +1908,37 @@ mod output_tests {
         assert_eq!(got[0].0, "IMPORTANT");
         assert_eq!(got[1], ("IMPORTANT".into(), "Reboot before loading any new module.".into()));
         assert_eq!(got[2].0, "NOTE");
+    }
+
+    // ---- issue #17: nog install <file> ------------------------------------
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn names_stay_names() {
+        assert_eq!(split_install_args(&args(&["gimp", "vlc"]), |_| false), Ok(InstallArgs::Names));
+    }
+
+    #[test]
+    fn a_built_package_is_a_file_install() {
+        let a = args(&["./grubforge-1.1.1-1-any.pkg.tar.zst"]);
+        assert_eq!(split_install_args(&a, |_| true), Ok(InstallArgs::Files));
+    }
+
+    #[test]
+    fn names_and_files_together_are_refused() {
+        let a = args(&["gimp", "./grubforge-1.1.1-1-any.pkg.tar.zst"]);
+        let e = split_install_args(&a, |_| true).unwrap_err();
+        assert!(e.contains("cannot be mixed"), "{e}");
+    }
+
+    #[test]
+    fn a_mistyped_path_is_a_missing_file_not_a_package_name() {
+        let a = args(&["./grubforge-1.1.1-1-any.pkg.tar.zts"]);
+        let e = split_install_args(&a, |_| false).unwrap_err();
+        assert!(e.starts_with("no such package file"), "{e}");
     }
 
     /// The one row with no countdown (v1.3.1, issue #13): a soname coupling

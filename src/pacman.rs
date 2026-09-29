@@ -119,6 +119,43 @@ pub fn install(packages: &[String]) -> ExitStatus {
     run(&args)
 }
 
+/// Install locally built package files (`pacman -U`, issue #17). Paths are
+/// passed after `--` so a file whose name begins with a dash is never read
+/// as an option.
+pub fn install_files(paths: &[String]) -> ExitStatus {
+    let mut args = vec!["-U", "--noconfirm", "--"];
+    args.extend(paths.iter().map(|s| s.as_str()));
+    run(&args)
+}
+
+/// Read a package file's own name and version (`pacman -Qip`), without
+/// touching any database and without root. `None` if pacman cannot read it
+/// as a package.
+///
+/// `LC_ALL=C` because the field labels are translated: on a Spanish system
+/// `Name` is `Nombre`, and parsing the translated label would fail silently.
+pub fn file_identity(path: &str) -> Option<(String, String)> {
+    let out = Command::new("pacman")
+        .args(["-Qip", "--", path])
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_identity(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_identity(text: &str) -> Option<(String, String)> {
+    let field = |key: &str| {
+        text.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            (k.trim() == key).then(|| v.trim().to_string())
+        })
+    };
+    Some((field("Name")?, field("Version")?))
+}
+
 pub fn remove(packages: &[String]) -> ExitStatus {
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
     let mut args = vec!["-Rs", "--noconfirm"];
@@ -207,4 +244,19 @@ pub fn installed_versions(packages: &[String]) -> HashMap<String, String> {
         }
     }
     out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_is_read_from_pacman_qip() {
+        // A colon inside a value must not end the field early.
+        let text = "Name            : grubforge\nVersion         : 1.1.1-1\nDescription     : A terminal UI: for GRUB\n";
+        assert_eq!(
+            parse_identity(text),
+            Some(("grubforge".to_string(), "1.1.1-1".to_string()))
+        );
+        assert_eq!(parse_identity("Description : no name here\n"), None);
+    }
 }
