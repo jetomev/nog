@@ -37,6 +37,7 @@ One change to the log file fixes all four, so they ship together.
 ### 4 · Prove nog works with paru — DONE 29 Sep
 - [x] **#12** · nog works with paru: install, auto-fallback, update plan, dates, and paru's AUR build path all checked; yay removed and restored. Results in `testing/20260929 - Test Results for nog v1-5-1-paru.md`
 - [ ] **#25 (F-2) · priority-3** · a failing AUR helper reads as "no AUR updates", silently. Found during #12
+- [ ] **#26 · priority-3** · with no terminal attached, `nog install <aur-pkg>` dies inside yay's menu with no plain explanation. Refuse up front and say why; do NOT auto-answer (that skips the PKGBUILD review). Found 29 Sep releasing grubForge v1.1.2
 - [ ] Still unseen: paru's "nothing to update" answer, and an AUR update handed to paru
 
 ### 5 · Cache cleanup
