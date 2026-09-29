@@ -372,6 +372,41 @@ pub struct SonameData {
     pub installed_depends: HashMap<String, Vec<String>>,
     /// candidate -> `%PROVIDES%` of the version that would be installed
     pub new_provides: HashMap<String, Vec<String>>,
+    /// soname -> installed packages whose binaries link it, read from the
+    /// files rather than the declarations (v1.4.2, issue #16). Filled only
+    /// for sonames some pending update drops; see `dropped_sonames`.
+    pub linked_by: HashMap<String, Vec<String>>,
+    /// soname -> installed packages shipping the library file on the loader
+    /// path, declared or not (issue #16).
+    pub file_providers: HashMap<String, Vec<String>>,
+}
+
+/// Every soname some pending candidate would stop providing.
+///
+/// This is the trigger for the file scan in issue #16, computed once per run
+/// over *all* pending candidates — Ready and Held — because the fixpoint loop
+/// can move a candidate between buckets but never changes what it provides.
+/// Measured at about one pending update in 130; on most runs it is empty and
+/// nothing is scanned.
+pub fn dropped_sonames(data: &SonameData, candidates: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = candidates
+        .iter()
+        // A candidate with no known future (an AUR package: the sync
+        // database does not describe it) has not dropped anything nog can
+        // see. Treating unknown as empty would scan on every run.
+        .filter(|c| data.new_provides.contains_key(**c))
+        .flat_map(|c| {
+            let before = soname_set(data.installed_provides.get(*c));
+            let after = soname_set(data.new_provides.get(*c));
+            before
+                .difference(&after)
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// Is this dependency entry a versioned soname (`libbluray.so=3-64`)?
@@ -467,20 +502,40 @@ pub fn soname_coupling_demotions(
                         !moving.contains(p) || soname_set(data.new_provides.get(*p)).contains(dropped)
                     })
                 })
-                .unwrap_or(false);
+                .unwrap_or(false)
+                // Issue #16: a package that ships the file without declaring
+                // it keeps the library on disk just the same, as long as it
+                // is not the one moving.
+                || data
+                    .file_providers
+                    .get(*dropped)
+                    .map(|ps| ps.iter().any(|p| p != &cand.name && !moving.contains(p.as_str())))
+                    .unwrap_or(false);
             if survives {
                 continue;
             }
 
-            // Everyone still requiring it who is not moving alongside.
+            // Everyone still requiring it who is not moving alongside —
+            // declared in `%DEPENDS%`, or (issue #16) linked in a binary.
             let mut broken: Vec<&str> = requirers
                 .get(dropped)
-                .map(|rs| rs.iter().copied().filter(|r| !moving.contains(r)).collect())
-                .unwrap_or_default();
+                .into_iter()
+                .flatten()
+                .copied()
+                .chain(
+                    data.linked_by
+                        .get(*dropped)
+                        .into_iter()
+                        .flatten()
+                        .map(|s| s.as_str()),
+                )
+                .filter(|r| !moving.contains(r) && *r != cand.name)
+                .collect();
             if broken.is_empty() {
                 continue;
             }
             broken.sort_unstable();
+            broken.dedup();
 
             // Name the partner the user can act on: prefer one that is itself
             // a held candidate, so the row inherits a real countdown and both
@@ -1001,6 +1056,95 @@ mod tests {
             soname_coupling_demotions(&ready, &held, &data)[0].1,
             "dep-later"
         );
+    }
+
+    // ---- issue #16: linkage read from the binaries ------------------------
+    //
+    // The 2026-08-29 break, as it stood that day: libbluray 1.5.0-1 Ready
+    // (soname 3 -> 4), ffmpeg-obs Held with 4 days left, and ffmpeg-obs's
+    // %DEPENDS% saying plain `libbluray` with no soname at all.
+
+    fn bluray_incident() -> (Vec<CouplingPkg>, Vec<CouplingPkg>, SonameData) {
+        let data = sd(
+            &[
+                ("libbluray", &["libbluray.so=3-64"], &[]),
+                ("ffmpeg-obs", &["libavformat.so=63-64"], &["libbluray"]),
+            ],
+            &[("libbluray", &["libbluray.so=4-64"])],
+        );
+        let ready = vec![pkg("libbluray", "1.4.1-1", "1.5.0-1", None, 0)];
+        let held = vec![pkg("ffmpeg-obs", "9.0-1", "9.0.1-1.2", None, 4)];
+        (ready, held, data)
+    }
+
+    #[test]
+    fn declarations_alone_miss_the_ffmpeg_obs_break() {
+        // The failing direction first: without the binary scan, the v1.3.1
+        // rule sees nothing. If this ever starts demoting, the fixture no
+        // longer describes the bug and the test below proves nothing.
+        let (ready, held, data) = bluray_incident();
+        assert!(soname_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn the_binary_scan_catches_the_ffmpeg_obs_break() {
+        let (ready, held, mut data) = bluray_incident();
+        data.linked_by
+            .insert("libbluray.so=3-64".into(), vec!["ffmpeg-obs".into()]);
+        assert_eq!(
+            soname_coupling_demotions(&ready, &held, &data),
+            vec![("libbluray".to_string(), "ffmpeg-obs".to_string())]
+        );
+    }
+
+    #[test]
+    fn an_undeclared_copy_of_the_library_keeps_it_alive() {
+        // A compat package ships libbluray.so.3 without declaring the provide.
+        // It stays, so the old soname stays, and nothing needs holding.
+        let (ready, held, mut data) = bluray_incident();
+        data.linked_by
+            .insert("libbluray.so=3-64".into(), vec!["ffmpeg-obs".into()]);
+        data.file_providers.insert(
+            "libbluray.so=3-64".into(),
+            vec!["libbluray".into(), "libbluray-compat".into()],
+        );
+        assert!(soname_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn the_moving_library_does_not_count_as_its_own_survivor() {
+        // libbluray owns usr/lib/libbluray.so.3 today, but it is the one
+        // moving away from it. Counting it would switch the rule off.
+        let (ready, held, mut data) = bluray_incident();
+        data.linked_by
+            .insert("libbluray.so=3-64".into(), vec!["ffmpeg-obs".into()]);
+        data.file_providers
+            .insert("libbluray.so=3-64".into(), vec!["libbluray".into()]);
+        assert_eq!(soname_coupling_demotions(&ready, &held, &data).len(), 1);
+    }
+
+    #[test]
+    fn dropped_sonames_is_the_scan_trigger() {
+        let (_, _, data) = bluray_incident();
+        assert_eq!(
+            dropped_sonames(&data, &["libbluray", "ffmpeg-obs"]),
+            vec!["libbluray.so=3-64".to_string()]
+        );
+        // ffmpeg-obs above had no known new version; an unknown future is
+        // not a drop. With one that keeps its soname, still nothing.
+        let mut d2 = sd(
+            &[("ffmpeg-obs", &["libavformat.so=63-64"], &[])],
+            &[("ffmpeg-obs", &["libavformat.so=63-64"])],
+        );
+        assert!(dropped_sonames(&d2, &["ffmpeg-obs"]).is_empty());
+        d2.new_provides.insert("ffmpeg-obs".into(), vec![]);
+        assert_eq!(dropped_sonames(&d2, &["ffmpeg-obs"]).len(), 1);
+        // Nothing dropped, nothing to scan.
+        let quiet = sd(
+            &[("zlib", &["libz.so=1-64"], &[])],
+            &[("zlib", &["libz.so=1-64"])],
+        );
+        assert!(dropped_sonames(&quiet, &["zlib"]).is_empty());
     }
 
     #[test]

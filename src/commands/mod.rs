@@ -702,7 +702,7 @@ pub fn update(realign: bool) {
                     C_SUBTEXT, C_RESET
                 );
             }
-            holds::SonameData {
+            let mut data = holds::SonameData {
                 new_provides: packages
                     .iter()
                     .map(|(n, d)| (n.clone(), d.provides.clone()))
@@ -715,7 +715,32 @@ pub fn update(realign: bool) {
                     .into_iter()
                     .map(|(n, d)| (n, d.depends))
                     .collect(),
+                ..Default::default()
+            };
+
+            // v1.4.2 (issue #16): `%DEPENDS%` is only what a package admits
+            // to. When an update would drop a soname, read the binaries
+            // themselves for who really links it. Rare enough — about one
+            // update in 130 — that the cost of opening every program on the
+            // system is paid only when it can matter.
+            let pending: Vec<&str> = ready
+                .iter()
+                .map(|(u, _, _)| u.name.as_str())
+                .chain(held.iter().map(|(u, _, _, _)| u.name.as_str()))
+                .collect();
+            let dropped = holds::dropped_sonames(&data, &pending);
+            if !dropped.is_empty() {
+                println!(
+                    "{}Checking installed programs for {} library version(s) this update removes...{}",
+                    C_SUBTEXT,
+                    dropped.len(),
+                    C_RESET
+                );
+                let linkage = local_db::scan_linkage(&dropped);
+                data.linked_by = linkage.linked_by;
+                data.file_providers = linkage.file_providers;
             }
+            data
         };
 
         loop {

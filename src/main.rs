@@ -4,6 +4,7 @@ mod aur;
 mod commands;
 mod config;
 mod holds;
+mod elf;
 mod local_db;
 mod pacman;
 mod reboot;
