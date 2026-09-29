@@ -14,7 +14,8 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [ ] **#24 (F-1)** — a test prints a fake error into every build log. Fix in the next batch
 - [ ] Watch the first real update that installs something: pacman's own "Proceed?" visible, `installed` rows in the log (matrix 7.3, 7.4)
 - [ ] Not seen yet on real data: the library scan firing (2.7), the reboot log (4.10), the #14 prompt line (3.1)
-- [ ] AUR search index still said 1.4.1-1 an hour after the push (its git copy is 1.5.0). Re-check, then the README badge
+- [x] AUR search index caught up to 1.5.0-1 (checked 29 Sep, ~17:30)
+- [ ] README AUR badge shows 1.5.0 on github.com (image caches can lag an hour)
 
 ## Next up — in this order
 
