@@ -245,6 +245,24 @@ pub fn installed_versions(packages: &[String]) -> HashMap<String, String> {
     }
     out
 }
+/// v1.5.5 (#15): every installed package and its version (`pacman -Q`).
+/// `None` if pacman could not be asked — `nog clean` must then stop, since an
+/// empty answer would read as "nothing installed" and clear the whole cache.
+pub fn all_installed_versions() -> Option<HashMap<String, String>> {
+    let output = Command::new("pacman").arg("-Q").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut out = HashMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split_whitespace();
+        if let (Some(name), Some(version)) = (parts.next(), parts.next()) {
+            out.insert(name.to_string(), version.to_string());
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

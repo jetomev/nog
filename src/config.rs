@@ -61,6 +61,28 @@ fn default_tier1_safety() -> u32 { 7 }
 fn default_tier2_safety() -> u32 { 3 }
 fn default_tier3_safety() -> u32 { 1 }
 
+/// v1.5.5 (#15): how many versions of each package `nog clean` keeps in
+/// pacman's cache, per tier. The installed version always counts as one.
+#[derive(Debug, Deserialize, Clone)]
+pub struct CleanConfig {
+    #[serde(default = "default_keep1")]
+    pub tier1_keep: u32,
+    #[serde(default = "default_keep2")]
+    pub tier2_keep: u32,
+    #[serde(default = "default_keep3")]
+    pub tier3_keep: u32,
+}
+
+fn default_keep1() -> u32 { 3 }
+fn default_keep2() -> u32 { 2 }
+fn default_keep3() -> u32 { 1 }
+
+impl Default for CleanConfig {
+    fn default() -> Self {
+        CleanConfig { tier1_keep: default_keep1(), tier2_keep: default_keep2(), tier3_keep: default_keep3() }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct AurConfig {
     /// One of: "auto" | "yay" | "paru" | "none".
@@ -86,6 +108,9 @@ pub struct NogConfig {
     // keep working with the default ("auto" helper).
     #[serde(default)]
     pub aur: AurConfig,
+    /// v1.5.5 (#15). Optional; defaults 3 / 2 / 1.
+    #[serde(default)]
+    pub clean: CleanConfig,
 }
 
 impl NogConfig {
@@ -159,6 +184,7 @@ impl NogConfig {
                 tier3_safety_days: default_tier3_safety(),
             },
             aur: AurConfig::default(),
+            clean: CleanConfig::default(),
         }
     }
 }

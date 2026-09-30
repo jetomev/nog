@@ -2,6 +2,7 @@ mod snap;
 mod flatpak;
 mod handoff;
 mod aur;
+mod cache;
 mod commands;
 mod config;
 mod holds;
@@ -106,6 +107,13 @@ enum Commands {
         /// Source to deactivate: "aur", "chaotic-aur", "flatpak", or "snap"
         source: String,
     },
+    /// Clear old package downloads from pacman's cache, keeping more of what matters
+    ///
+    /// Tier 1 keeps 3 versions, Tier 2 keeps 2, Tier 3 keeps 1 (set under
+    /// [clean] in nog.conf). The installed version is never removed, a newer
+    /// download is kept, and packages no longer installed are cleared. Shows
+    /// what it would remove and asks first; nothing is removed without a yes.
+    Clean,
     /// Reactivate a package source previously disabled with `nog deactivate`
     Activate {
         /// Source to activate: "aur", "chaotic-aur", "flatpak", or "snap"
@@ -134,6 +142,7 @@ fn main() {
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
         Commands::Deactivate { source } => commands::deactivate(&source),
         Commands::Activate { source } => commands::activate(&source),
+        Commands::Clean => commands::clean(),
         Commands::DebugDates { package } => debug_dates(&package),
         Commands::DebugHold { package } => debug_hold(&package),
     }

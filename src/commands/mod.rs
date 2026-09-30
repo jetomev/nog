@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::local_db;
 use crate::runlog;
 use crate::sightings;
+use crate::cache;
 use crate::flatpak;
 use crate::snap;
 use crate::sources;
@@ -249,6 +250,175 @@ pub fn remove(packages: &[String]) {
 
 pub fn deactivate(source: &str) {
     set_source(source, false);
+}
+
+/// v1.5.5 (#15): `nog clean` — tier-aware retention for pacman's download
+/// cache. Report first, then ask; nothing is removed without a yes. The
+/// decisions are `cache::plan`'s; this is the reporting and the one root step.
+pub fn clean() {
+    use std::io::{self, Write};
+    let cfg = load_config();
+    let tm = load_tiers();
+
+    let Some(installed) = pacman::all_installed_versions() else {
+        eprintln!("nog: could not ask pacman what is installed — stopping, nothing removed.");
+        eprintln!("     (Without that list every cached file would look unused.)");
+        std::process::exit(1);
+    };
+    let keep = |t: u8| -> usize {
+        (match t { 1 => cfg.clean.tier1_keep, 2 => cfg.clean.tier2_keep, _ => cfg.clean.tier3_keep }) as usize
+    };
+
+    let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
+    let mut stale: Vec<std::path::PathBuf> = Vec::new();
+    let mut rows: Vec<CleanRow> = Vec::new();
+    let mut total_files = 0usize;
+    let mut total_bytes = 0u64;
+    let mut kept_files = 0usize;
+    let mut kept_bytes = 0u64;
+
+    for dir in cache::cache_dirs(&cfg.paths.pacman_conf) {
+        let listing = cache::list_dir(&dir);
+        if listing.files.is_empty() && listing.stale_dirs.is_empty() {
+            continue;
+        }
+        total_files += listing.files.len();
+        total_bytes += listing.files.iter().map(|(_, b)| b).sum::<u64>();
+        let plan = cache::plan(
+            cache::read_listing(&listing.files),
+            &installed,
+            |n| tier_num(&tm.classify(n)),
+            keep,
+        );
+        for (f, reason) in &plan.remove {
+            let label = match reason {
+                cache::Reason::Older(t) => format!("Tier {} · older than the newest {}", t, keep(*t).max(1)),
+                cache::Reason::NotInstalled => "No longer installed".to_string(),
+            };
+            match rows.iter_mut().find(|r| r.what == label) {
+                Some(r) => { r.versions += 1; r.bytes += cache::Plan::bytes(f); }
+                None => rows.push(CleanRow { what: label, versions: 1, bytes: cache::Plan::bytes(f) }),
+            }
+            to_remove.push(dir.join(&f.file));
+            if let Some((sig, _)) = &f.sig {
+                to_remove.push(dir.join(sig));
+            }
+        }
+        for f in &plan.keep {
+            kept_files += 1;
+            kept_bytes += cache::Plan::bytes(f);
+        }
+        stale.extend(listing.stale_dirs.iter().map(|d| dir.join(d)));
+    }
+    rows.sort_by(|a, b| a.what.cmp(&b.what));
+
+    println!();
+    println!("nog: pacman's download cache — {} files, {}.", total_files, human_size(total_bytes));
+    println!();
+    print!("{}", format_clean_report(&rows, stale.len()));
+    println!();
+    println!("{}Kept: {} package versions ({}), including every installed version.{}",
+        C_SUBTEXT, kept_files, human_size(kept_bytes), C_RESET);
+
+    if to_remove.is_empty() && stale.is_empty() {
+        println!();
+        println!("nog: Nothing to clean.");
+        return;
+    }
+    if cache::pacman_is_running() {
+        eprintln!();
+        eprintln!("nog: pacman is running (its lock file exists) — stopping, nothing removed.");
+        std::process::exit(1);
+    }
+
+    println!();
+    print!("nog: Remove them? [y/N] ");
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    let got = io::stdin().read_line(&mut answer);
+    if !matches!(got, Ok(n) if n > 0) || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        println!();
+        println!("nog: Nothing removed.");
+        return;
+    }
+
+    let mut failed = false;
+    for batch in to_remove.chunks(400) {
+        let status = std::process::Command::new("sudo").args(["rm", "-f", "--"]).args(batch).status();
+        failed |= !matches!(status, Ok(s) if s.success());
+    }
+    for batch in stale.chunks(100) {
+        let status = std::process::Command::new("sudo").args(["rm", "-rf", "--"]).args(batch).status();
+        failed |= !matches!(status, Ok(s) if s.success());
+    }
+
+    let after: u64 = cache::cache_dirs(&cfg.paths.pacman_conf).iter()
+        .map(|d| cache::list_dir(d).files.iter().map(|(_, b)| b).sum::<u64>())
+        .sum();
+    println!();
+    if failed {
+        eprintln!("nog: some files could not be removed (see above).");
+    }
+    println!("nog: Cache is now {} (was {}): {} freed.",
+        human_size(after), human_size(total_bytes), human_size(total_bytes.saturating_sub(after)));
+    if failed {
+        std::process::exit(1);
+    }
+}
+
+/// One line of the `nog clean` report.
+#[derive(Debug, Clone, PartialEq)]
+struct CleanRow {
+    what: String,
+    versions: usize,
+    bytes: u64,
+}
+
+/// Render the `nog clean` report. Pure + unit-tested.
+fn format_clean_report(rows: &[CleanRow], stale_dirs: usize) -> String {
+    let title = "WHAT nog clean WOULD REMOVE:";
+    let mut out = format!("{}\n{}\n\n", title, "=".repeat(title.len()));
+    if rows.is_empty() && stale_dirs == 0 {
+        out.push_str("(nothing)\n");
+        return out;
+    }
+    let stale_label = "Leftover download folders";
+    let w_what = rows.iter().map(|r| r.what.chars().count())
+        .chain(["What".len(), "Total".len(), if stale_dirs > 0 { stale_label.len() } else { 0 }])
+        .max().unwrap();
+    let total_v: usize = rows.iter().map(|r| r.versions).sum();
+    let total_b: u64 = rows.iter().map(|r| r.bytes).sum();
+    let w_n = rows.iter().map(|r| r.versions.to_string().len())
+        .chain(["Versions".len(), total_v.to_string().len(), stale_dirs.to_string().len()]).max().unwrap();
+    let w_s = rows.iter().map(|r| human_size(r.bytes).len())
+        .chain(["Size".len(), human_size(total_b).len()]).max().unwrap();
+    let g = "   ";
+    let width = w_what + w_n + w_s + 2 * g.len();
+    out.push_str(&format!("{:<ww$}{g}{:>wn$}{g}{:>ws$}\n", "What", "Versions", "Size", ww = w_what, wn = w_n, ws = w_s, g = g));
+    out.push_str(&"-".repeat(width));
+    out.push('\n');
+    for r in rows {
+        let pad = w_what - r.what.chars().count();
+        out.push_str(&format!("{}{}{g}{:>wn$}{g}{:>ws$}\n", r.what, " ".repeat(pad), r.versions, human_size(r.bytes), wn = w_n, ws = w_s, g = g));
+    }
+    if stale_dirs > 0 {
+        out.push_str(&format!("{:<ww$}{g}{:>wn$}{g}{}\n", stale_label, stale_dirs, "size not readable", ww = w_what, wn = w_n, g = g));
+    }
+    out.push_str(&"-".repeat(width));
+    out.push('\n');
+    out.push_str(&format!("{:<ww$}{g}{:>wn$}{g}{:>ws$}\n", "Total", total_v, human_size(total_b), ww = w_what, wn = w_n, ws = w_s, g = g));
+    out
+}
+
+/// Bytes as a person reads them: "19.0 GB", "812 MB", "4 KB". Powers of 1024,
+/// the same as `du -h`.
+fn human_size(b: u64) -> String {
+    const K: f64 = 1024.0;
+    let f = b as f64;
+    if f >= K * K * K { format!("{:.1} GB", f / (K * K * K)) }
+    else if f >= K * K { format!("{:.0} MB", f / (K * K)) }
+    else if f >= K { format!("{:.0} KB", f / K) }
+    else { format!("{} B", b) }
 }
 
 pub fn activate(source: &str) {
@@ -2228,6 +2398,36 @@ mod output_tests {
         let strip = |t: String| { let mut o = String::new(); let mut esc = false;
             for c in t.chars() { if c == '\x1b' { esc = true; continue; } if esc { if c == 'm' { esc = false; } continue; } o.push(c); } o };
         assert_eq!(strip(format_table("READY TO INSTALL", &rows, true)), format_table("READY TO INSTALL", &rows, false));
+    }
+
+    #[test]
+    fn the_clean_report_aligns_and_totals() {
+        let rows = vec![
+            CleanRow { what: "No longer installed".into(), versions: 300, bytes: 2 * 1024 * 1024 * 1024 },
+            CleanRow { what: "Tier 3 · older than the newest 1".into(), versions: 2100, bytes: 11 * 1024 * 1024 * 1024 },
+        ];
+        let t = format_clean_report(&rows, 134);
+        let l: Vec<&str> = t.lines().collect();
+        assert_eq!(l[0], "WHAT nog clean WOULD REMOVE:");
+        assert!(l[3].starts_with("What") && l[3].trim_end().ends_with("Size"));
+        assert!(l[5].starts_with("No longer installed") && l[5].ends_with("2.0 GB"));
+        assert!(l[6].starts_with("Tier 3 · older") && l[6].ends_with("11.0 GB"));
+        assert!(l[7].starts_with("Leftover download folders") && l[7].ends_with("size not readable"));
+        assert!(l[9].starts_with("Total") && l[9].ends_with("13.0 GB") && l[9].contains("2400"));
+        assert_eq!(l[4].chars().count(), l[5].chars().count(), "rule as wide as a row");
+    }
+
+    #[test]
+    fn an_empty_clean_report_says_nothing() {
+        assert!(format_clean_report(&[], 0).ends_with("(nothing)\n"));
+    }
+
+    #[test]
+    fn sizes_read_like_du() {
+        assert_eq!(human_size(19 * 1024 * 1024 * 1024 + 50 * 1024 * 1024), "19.0 GB");
+        assert_eq!(human_size(812 * 1024 * 1024), "812 MB");
+        assert_eq!(human_size(4096), "4 KB");
+        assert_eq!(human_size(12), "12 B");
     }
 
     #[test]
