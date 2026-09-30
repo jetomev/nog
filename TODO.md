@@ -20,6 +20,11 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 
 ## Next up — in this order
 
+### 0 · Javier's concerns, raised 30 Sep (the "two-week topic") — in this order
+- [ ] **A · #27 · priority-1 · Holds that never end.** The waiting period is counted from the build date of the *newest* version, so every new build restarts the clock. Proven on this desktop 30 Sep: linux-zen has been held since at least 29 Jul (7.0.5 installed; 9 different new versions came and went, the countdown never reached 0; the newest, 7.2.7, is 9 days old). Tier 1 waiting longer than its own 30 days: linux-zen (+headers), linux-lts (+headers, 12 versions), mesa, lib32-mesa, mkinitcpio. Tier 2 today: none. Tier 3: python-platformdirs (31 days, 7 versions). The logs start 29 Jul, so these are minimums. Needs a ruling on the fix, then an issue. **Ruled 30 Sep: count from the first new version + a safety wait (T1 7 days, T2 3, T3 1, settable)**
+- [ ] **B · #28 · priority-2 · Say where every held/ready package comes from.** Today only Flatpak and Snap rows get a word in the Note column; AUR rows are not marked at all, and official ones don't say which repository. Wanted: a Source column on every table. Flatpak (v1.1.0) and Snap (v1.2.0) updates already work with holds; installing through them is the unbuilt part (#7). Installed here: 2 Flatpaks (Flatseal, Termius), 1 snap (hello)
+- [ ] **C · then #25 and #26** (below)
+
 ### 1 · The next fix release — stop silent breakage
 - [x] **#16 · priority-1** · *code done 29 Sep, `51ac397`; not released yet* · A program can break silently after an update when it uses a shared library it never declared (seen with OBS and a Blu-ray library). nog has to spot these hidden links and hold both sides together.
 - [x] **#14 · priority-4, rides along** · *code done 29 Sep, `587ff28`; checked by reading only* · When nog runs from a script, the "continue?" question runs into the next line. It needs one missing line break.
