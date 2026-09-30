@@ -46,7 +46,7 @@
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 5.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **DEFERRED** | |
+| 5.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **PASS** | release fetched, sha256 + signature verified, 204 passed in `check()`; pushed to the AUR as `4db32d7` |
 | 5.2 | Installed through `nog install <file>` | `nog --version` → 1.5.4 | **DEFERRED** | |
 | 5.3 | Next real `nog update`: summary, Source column, warnings one per line (v1.5.3) | as stated | **DEFERRED** | the pipewire family releases 1 Oct |
 

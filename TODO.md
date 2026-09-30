@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.4** (30 Sep 2026) — summary table + Source column (#28), `could not check` (#25), no-keyboard AUR install refused (#26). 204 tests pass. Same day: v1.5.3 (warnings one per line, #29) and v1.5.2 (a hold always ends, #27). Release steps in progress.
+**Current release: v1.5.4** (30 Sep 2026) — summary table + Source column (#28), `could not check` (#25), no-keyboard AUR install refused (#26). 204 tests pass. Same day: v1.5.3 (warnings one per line, #29) and v1.5.2 (a hold always ends, #27). On GitHub (Latest) and the AUR (`4db32d7`); #25, #26, #28 closed. Next: install here, restart into kernel 7.2.7, watch the 1 Oct update (summary, Source column, warnings one per line).
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
