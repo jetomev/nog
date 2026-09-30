@@ -20,11 +20,16 @@ VERDICTS = ["PASS", "FAIL", "N/A", "DEFERRED", "CANNOT TEST"]
 
 def tally(path):
     section = None
+    result_col = None
     rows = []
     for line in open(path, encoding="utf-8"):
         m = re.match(r"^## (§\d+)", line)
         if m:
             section = m.group(1)
+        if re.match(r"^\|\s*#\s*\|", line):
+            header = [c.strip().lower() for c in re.split(r"(?<!\\)\|", line)]
+            result_col = header.index("result") if "result" in header else None
+            continue
         m = re.match(r"^\|\s*(\d+\.\d+)\s*\|", line)
         if not m:
             continue
@@ -32,6 +37,11 @@ def tally(path):
         # Split on unescaped pipes only: a check's text may contain a literal \|
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)]
         verdict = None
+        # Read the Result column when the table's header names one. Scanning
+        # every cell took "failure" in an Expected cell, or "Failing direction"
+        # in a Check cell, for a FAIL verdict (v1.5.4 matrix, 2 false FAILs).
+        if result_col is not None and result_col < len(cells):
+            cells = [cells[result_col]]
         for cell in cells:
             text = cell.replace("*", "").strip().upper()
             # Classify on the LEADING token: result cells carry prose that

@@ -7,6 +7,8 @@
 
 37 checks · **29 PASS** · 4 FAIL, all fixed before release (M-1, M-2, M-3, plus 1.5 which is M-1) · **4 CANNOT TEST**
 
+> **Correction, 2026-09-30:** the true count is **30 PASS · 3 FAIL** (1.5, 6.3, 6.4 = M-1, M-2, M-3). The fourth "FAIL" was check 4.5, *"Failure reason picked from real process output"*, which passed: `tally-matrix.py` read the first cell that *started* with a verdict word, and the check's own title starts with "Failure". The line above then explained the phantom away as "plus 1.5 which is M-1". The script now reads only the Result column (fixed in the v1.5.4 cycle); re-tallying every earlier matrix changed no other count except the v1.5.3 and v1.5.4 matrices, which had the same false FAIL before they were published.
+
 ## What happened, in order
 
 1. Unit and live checks on the dev build (§1–§6). Three documentation findings, fixed in the v1.5.0 docs commit.
