@@ -28,7 +28,7 @@
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 3.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **DEFERRED** | |
+| 3.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **PASS** | release fetched, sha256 + signature verified, 193 passed in `check()`; pushed to the AUR as `60a2398` |
 | 3.2 | Installed through `nog install <file>` | `nog --version` → 1.5.3 | **DEFERRED** | |
 | 3.3 | Next real `nog update` under sudo's `use_pty` | one warning per line, left-aligned | **DEFERRED** | the pipewire family releases 1 Oct, so the next run has held rows to warn about |
 
