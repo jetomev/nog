@@ -15,6 +15,16 @@
 //!
 //! stdout is untouched, so progress bars, which pacman draws only when stdout
 //! is a terminal, behave exactly as before.
+//!
+//! v1.5.3 (F-1 of v1.5.2): when stderr is a terminal, every bare line feed is
+//! relayed as CR LF. sudo 1.9.14+ runs the command in its own pseudo-terminal
+//! (`use_pty`, on by default) and switches the user's terminal to raw mode
+//! while it runs. stdout passes through that pty and gets its carriage
+//! returns; our stderr pipe does not, so each `\n` moved the cursor down but
+//! not back to the left edge, and pacman's `ignoring package upgrade`
+//! warnings came out as a staircase. A CR before the LF is invisible on a
+//! terminal in its normal mode, so the translation is safe either way. When
+//! stderr is a file or a pipe, bytes pass through untouched.
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -39,12 +49,14 @@ pub struct Handoff {
 /// Panics only if the program cannot be launched at all, matching every
 /// `.status().unwrap_or_else(panic)` call this replaces.
 pub fn run(cmd: &mut Command, what: &str) -> Handoff {
-    run_into(cmd, what, std::io::stderr())
+    use std::io::IsTerminal;
+    let crlf = std::io::stderr().is_terminal();
+    run_into(cmd, what, std::io::stderr(), crlf)
 }
 
 /// `run`, relaying to any sink. The terminal in real use; in tests, a sink
 /// that records *when* bytes arrive, which is the property that matters.
-fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W) -> Handoff {
+fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W, crlf: bool) -> Handoff {
     let mut child = cmd
         .stderr(Stdio::piped())
         .spawn()
@@ -54,11 +66,16 @@ fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W
     let relay = std::thread::spawn(move || {
         let mut tail: VecDeque<u8> = VecDeque::with_capacity(TAIL_BYTES);
         let mut buf = [0u8; 4096];
+        let mut after_cr = false;
         loop {
             match pipe.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    let _ = out.write_all(&buf[..n]);
+                    if crlf {
+                        let _ = out.write_all(&to_crlf(&buf[..n], &mut after_cr));
+                    } else {
+                        let _ = out.write_all(&buf[..n]);
+                    }
                     let _ = out.flush();
                     for &b in &buf[..n] {
                         if tail.len() == TAIL_BYTES {
@@ -78,6 +95,21 @@ fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W
     let tail = relay.join().unwrap_or_default();
     let reason = if status.success() { None } else { reason_from(&tail) };
     Handoff { status, reason }
+}
+
+/// Turn every bare `\n` into `\r\n`, leaving an existing `\r\n` alone.
+/// `after_cr` carries the last byte's state across reads, so a CR at the end
+/// of one chunk and its LF at the start of the next stay one line ending.
+fn to_crlf(chunk: &[u8], after_cr: &mut bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(chunk.len() + chunk.len() / 16);
+    for &b in chunk {
+        if b == b'\n' && !*after_cr {
+            out.push(b'\r');
+        }
+        out.push(b);
+        *after_cr = b == b'\r';
+    }
+    out
 }
 
 /// Pick the line that explains the failure out of the end of stderr.
@@ -221,6 +253,7 @@ Errors occurred, no packages were upgraded.\n";
             Command::new("sh").args(["-c", "printf ':: Proceed with installation? [Y/n] ' >&2; sleep 1"]),
             "sh",
             Clock(first.clone(), Vec::new()),
+            true,
         );
         assert!(h.status.success());
         let arrived = first.lock().unwrap().expect("the question never arrived");
@@ -229,6 +262,45 @@ Errors occurred, no packages were upgraded.\n";
             "the question took {:?} to reach the user",
             arrived - start
         );
+    }
+
+    #[test]
+    fn every_line_ending_returns_to_the_left_edge_on_a_terminal() {
+        // F-1 of v1.5.2: under sudo's use_pty the user's terminal is raw, and
+        // a bare LF leaves the cursor in its column — the staircase.
+        let mut cr = false;
+        assert_eq!(to_crlf(b"warning: a\nwarning: b\n", &mut cr), b"warning: a\r\nwarning: b\r\n");
+        // Already CR LF: untouched, never doubled.
+        let mut cr = false;
+        assert_eq!(to_crlf(b"x\r\ny\r\n", &mut cr), b"x\r\ny\r\n");
+        // A CR LF split across two reads stays one line ending.
+        let mut cr = false;
+        let mut both = to_crlf(b"x\r", &mut cr);
+        both.extend(to_crlf(b"\ny\n", &mut cr));
+        assert_eq!(both, b"x\r\ny\r\n");
+        // A progress redraw (CR alone) passes as it is.
+        let mut cr = false;
+        assert_eq!(to_crlf(b"10%\r20%\r", &mut cr), b"10%\r20%\r");
+    }
+
+    #[test]
+    fn the_relay_translates_for_a_terminal_and_not_for_a_file() {
+        use std::sync::{Arc, Mutex};
+        struct Keep(Arc<Mutex<Vec<u8>>>);
+        impl Write for Keep {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let script = "printf 'warning: a\\nwarning: b\\n' >&2";
+        let term = Arc::new(Mutex::new(Vec::new()));
+        run_into(Command::new("sh").args(["-c", script]), "sh", Keep(term.clone()), true);
+        assert_eq!(&*term.lock().unwrap(), b"warning: a\r\nwarning: b\r\n");
+        let file = Arc::new(Mutex::new(Vec::new()));
+        run_into(Command::new("sh").args(["-c", script]), "sh", Keep(file.clone()), false);
+        assert_eq!(&*file.lock().unwrap(), b"warning: a\nwarning: b\n");
     }
 
     #[test]
@@ -241,6 +313,7 @@ Errors occurred, no packages were upgraded.\n";
             Command::new("sh").args(["-c", "echo 'error: no space left' >&2; exit 1"]),
             "sh",
             std::io::sink(),
+            false,
         );
         assert!(!bad.status.success());
         assert_eq!(bad.reason.as_deref(), Some("error: no space left"));
@@ -249,6 +322,7 @@ Errors occurred, no packages were upgraded.\n";
             Command::new("sh").args(["-c", "echo 'warning: noisy but fine' >&2"]),
             "sh",
             std::io::sink(),
+            false,
         );
         assert!(good.status.success());
         assert_eq!(good.reason, None);
