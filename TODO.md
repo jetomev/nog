@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.2** (30 Sep 2026) — a hold always ends (#27). 191 tests pass. Release steps in progress: GitHub, then AUR, then install here.
+**Current release: v1.5.2** (30 Sep 2026) — a hold always ends (#27). 191 tests pass. On GitHub (Latest, signed) and pushed to the AUR (`8cc2a41`; the AUR's website index still shows 1.5.1 for a while, as on 29 Sep). #27 closed. Next: install here, then the first real update (kernel 7.0 → 7.2) and a restart.
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
