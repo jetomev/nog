@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.4** (30 Sep 2026) — summary table + Source column (#28), `could not check` (#25), no-keyboard AUR install refused (#26). 204 tests pass. Same day: v1.5.3 (warnings one per line, #29) and v1.5.2 (a hold always ends, #27). On GitHub (Latest) and the AUR (`4db32d7`); #25, #26, #28 closed. Next: install here, restart into kernel 7.2.7, watch the 1 Oct update (summary, Source column, warnings one per line).
+**Current release: v1.5.5** (30 Sep 2026) — `nog clean` (#15). 217 tests pass. Same day: v1.5.4 (summary + Source, #28/#25/#26), v1.5.3 (#29), v1.5.2 (#27). Release steps in progress.
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
@@ -47,7 +47,7 @@ One change to the log file fixes all four, so they ship together.
 - [ ] Still unseen: paru's "nothing to update" answer, and an AUR update handed to paru
 
 ### 5 · Cache cleanup
-- [ ] **#15 · priority-3** · `nog clean`: clear out old package downloads, but keep the ones a held package may still need.
+- [x] **#15 · priority-3** *(v1.5.5: pacman's cache; orphans, AUR build caches, Flatpak runtimes and Snap revisions stay in C5)* · `nog clean`: clear out old package downloads, but keep the ones a held package may still need.
 
 ### 6 · The v2 plan
 - [ ] **#7 · priority-3** · nog manages Flatpak and Snap as well as pacman, gains a JSON output mode, and gets its own app (nogForge).

@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.4](https://img.shields.io/badge/Version-1.5.4-purple.svg)
+![Version: 1.5.5](https://img.shields.io/badge/Version-1.5.5-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -61,6 +61,9 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - Packages with no usable date are never guessed at — nog asks you, one at a time
 - Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days — one row per package with its source and what actually happened to it, and the reason whenever a step did not complete *(v1.4.3)*
 - **Reboot advice** *(v1.4.0)* — when a kernel or driver update leaves the running system out of step with what is now installed, nog says so at the end of the run. Where it can check, it says `verified` and shows both versions; where it cannot, it names the package and says plainly that this is advice rather than a finding
+
+**Maintenance**
+- **`nog clean`** *(v1.5.5)* — clears old downloads from pacman's cache, keeping more of what hurts to lose: 3 versions of each Tier 1 package, 2 of Tier 2, 1 of Tier 3. The installed version is never removed, and packages you no longer have are cleared. It shows what it would remove, per tier, and asks first
 
 **Security**
 - **One manager per source** *(v1.3.0)* — pacman upgrades official packages; your AUR helper is handed only the AUR packages nog cleared, **by name**. Nothing unnamed can move, so a failed AUR lookup cannot release a hold by omission. Born from a real bypass we caught on our own machine, originally patched by the foreign fence *(v1.0.9)*, which now backs it up as a second layer.
@@ -193,6 +196,9 @@ nog unlock <package> --promote
 # Remove a package
 nog remove <package>
 
+# Clear old downloads from pacman's cache (asks first)
+nog clean
+
 # Kill switches — cut off a source during a security incident
 nog deactivate aur           # every AUR path refuses until reactivated
 nog deactivate chaotic-aur   # repo commented out of pacman.conf (backup taken first)
@@ -202,6 +208,32 @@ nog activate chaotic-aur     # restore, byte for byte, then refresh
 nog --version
 nog --help
 ```
+
+### Example: `nog clean`
+
+A real report on the development machine (30 Sep 2026), with the question answered no:
+
+```
+nog: pacman's download cache — 6706 files, 18.4 GB.
+
+WHAT nog clean WOULD REMOVE:
+============================
+
+What                               Versions      Size
+-----------------------------------------------------
+No longer installed                     346    1.9 GB
+Tier 2 · older than the newest 2         10     45 MB
+Tier 3 · older than the newest 1       1489    8.9 GB
+Leftover download folders               123   size not readable
+-----------------------------------------------------
+Total                                  1845   10.8 GB
+
+Kept: 1520 package versions (7.6 GB), including every installed version.
+
+nog: Remove them? [y/N]
+```
+
+Every installed version stays, so a bad update can always be rolled back from the cache. The kernels keep three versions each — the rollback path a black-screen night needs.
 
 ### What `nog update` actually does
 
@@ -306,7 +338,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.4"
+version = "1.5.5"
 log_level = "info"
 
 [paths]
@@ -329,6 +361,13 @@ tier3_days = 7
 tier1_safety_days = 7
 tier2_safety_days = 3
 tier3_safety_days = 1
+
+[clean]
+# How many versions of each package `nog clean` keeps (v1.5.5). The installed
+# version always counts as one. Optional; these are the defaults.
+tier1_keep = 3
+tier2_keep = 2
+tier3_keep = 1
 
 [aur]
 # Which AUR helper to use.
@@ -399,6 +438,7 @@ nog/
 |   |-- tiers.rs          # Tier classification, including auto-coupling and [groups]
 |   |-- holds.rs          # Hold evaluation and the foreign fence (pure functions)
 |   |-- sightings.rs      # When each update was first seen, so holds always end  (v1.5.2)
+|   |-- cache.rs          # nog clean: pacman's version order, per-tier cache retention  (v1.5.5)
 |   |-- local_db.rs       # Reads pacman's local database: dependency graph (v1.3.1), who links what (v1.4.2)
 |   |-- elf.rs            # Reads which libraries a program needs  (v1.4.2)
 |   |-- reboot.rs         # Reboot advice: probes the running system  (v1.4.0)
@@ -418,7 +458,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 10,000 lines of Rust, with 204 tests that run on every release.
+Around 10,700 lines of Rust, with 217 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -450,13 +490,14 @@ If you forget and type `sudo nog` while an AUR helper is configured, nog notices
 
 ### Where nog escalates
 
-Four places. That's the complete list.
+Five places. That's the complete list.
 
 | What | Command | When |
 |---|---|---|
 | Package transactions | `sudo pacman ...` | `nog update` always hands the official repositories to `sudo pacman -Syu` itself (v1.3.0), and `nog install` of a package file always uses `sudo pacman -U` (v1.5.0). `install` by name, `remove` and `unlock --promote` use it **only when no AUR helper is configured**; with a helper, nog calls the helper as you, and the helper runs its own `sudo pacman` internally. |
 | Snap holds and updates | `sudo snap refresh ...` | Placing a tier hold (`--hold`, v1.4.1) and applying snap updates. snapd requires root for both; nothing else about snap does. |
 | Its own config files | `sudo tee <file>` | Writing `tier-pins.toml` (during `nog pin`) and `sources.toml` (during `activate`/`deactivate`). The new contents are built in memory and piped to `tee` — nog itself never runs as root, only `tee` does. |
+| Cache cleanup | `sudo rm -f --` | Only in `nog clean` (v1.5.5), only after you answer yes, and only on package files and day-old leftover `download-XXXXXX` folders directly inside pacman's cache directories. |
 | pacman.conf backup | `sudo cp --preserve=all` | Only during `nog activate|deactivate chaotic-aur`, to take a timestamped backup before editing that one section. |
 
 ### What nog reads
@@ -606,11 +647,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.4 shipped 2026-09-30** — a summary table and a Source column ([#28](https://github.com/jetomev/nog/issues/28)), a failing AUR helper reads `could not check` ([#25](https://github.com/jetomev/nog/issues/25)), and AUR installs with nobody at the keyboard are refused up front ([#26](https://github.com/jetomev/nog/issues/26)). **v1.5.3 shipped the same day** — pacman's warnings print one per line again ([#29](https://github.com/jetomev/nog/issues/29)). v1.5.2 before it: a hold always ends ([#27](https://github.com/jetomev/nog/issues/27)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.5.5 shipped 2026-09-30** — `nog clean`: tier-aware cleanup of pacman's download cache ([#15](https://github.com/jetomev/nog/issues/15)). **v1.5.4 shipped the same day** — a summary table and a Source column ([#28](https://github.com/jetomev/nog/issues/28)), `could not check` ([#25](https://github.com/jetomev/nog/issues/25)), no-keyboard AUR installs refused ([#26](https://github.com/jetomev/nog/issues/26)). Earlier that day: v1.5.3 ([#29](https://github.com/jetomev/nog/issues/29)) and v1.5.2 ([#27](https://github.com/jetomev/nog/issues/27)).
 
-### Next — `nog clean`, tier-aware cache cleanup ([#15](https://github.com/jetomev/nog/issues/15) · `priority-3`)
+### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.6.0)
 
-- [ ] Clear out old package downloads, but keep the ones a held package may still need to roll back to.
+- [ ] `nog install` tries pacman, then the AUR, then Flatpak, then Snap — and always shows which source it picked before installing.
 
 **Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
 
@@ -630,7 +671,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [x] **C2 · v1.2.0** — Snap
 - [ ] **C3 · v1.6.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up one: v1.5.0 went to `nog install <file>`, #17)*
 - [ ] **C4 · v1.7.0** — Full command surface plus `--json` output
-- [ ] **C5 · v1.8.0** — Maintenance and cleanup: orphans, caches, unused runtimes, old snap revisions ([#15](https://github.com/jetomev/nog/issues/15) `nog clean` belongs here)
+- [ ] **C5 · v1.8.0** — Maintenance and cleanup: orphans, AUR build caches, unused Flatpak runtimes, old Snap revisions. *Its first piece shipped early: `nog clean` for pacman's cache, v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)).*
 - [ ] **C6** — nogForge, the visual companion, built on forgekit *(its gate, paru validation [#12](https://github.com/jetomev/nog/issues/12), was cleared 2026-09-29)*
 - [ ] **C7 · v2.0.0** — the crown release
 
@@ -639,6 +680,22 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.5.5 — September 30, 2026
+
+**`nog clean` — tier-aware cleanup of pacman's download cache** ([#15](https://github.com/jetomev/nog/issues/15)). pacman keeps every package it ever downloads and never removes one by itself; on the development machine the cache had grown to 28 GB by August and was back to 18.4 GB by the end of September. Tools like `paccache` keep the last N of everything. nog already knows how much each package matters, so it keeps more of what hurts to lose:
+
+- **Tier 1 keeps 3 versions, Tier 2 keeps 2, Tier 3 keeps 1** — set under `[clean]` in `nog.conf`. Tier 1 is the rollback path: the August black-screen night needed a known-good package in the cache.
+- **The installed version is never removed**, so a held package always has what it runs. A newer version already downloaded stays too.
+- **Packages you no longer have are cleared**, and so are day-old leftover `download-…` folders from interrupted downloads.
+- **Report first, then a `[y/N]` question.** With no answer, nothing is removed. It refuses while pacman is running.
+- **Versions are ordered exactly as pacman orders them** — pacman's own comparison, ported and checked against `vercmp` over every version pair in a real cache.
+
+On the development machine: 10.8 GB of 18.4 GB could go — 1,845 old versions and 123 leftover folders — while every installed version and three of each kernel stay. The "no longer installed" count matches `paccache` exactly (346 versions, 1.9 GB).
+
+Also in this release: the test-tally script now reads only a matrix's Result column. It had counted a check *titled* "Failure reason…" as a FAIL, so the published v1.5.0 test record said 4 FAIL where the truth was 3; that record now carries a dated correction.
+
+Tests: 204 → 217. Warnings unchanged at 6.
 
 ### v1.5.4 — September 30, 2026
 
@@ -650,16 +707,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - **`nog install` refuses an AUR package when nobody is at the keyboard** (#26). The helper stops to let you review each build recipe; from a script it read end-of-input in its menu and died there, with the reason buried in its output. nog now says so before starting, in plain words. It does not answer the review for you — that review is the one moment of scrutiny the AUR offers.
 
 Tests: 193 → 204. Warnings unchanged at 6.
-
-### v1.5.3 — September 30, 2026
-
-**pacman's warnings print one per line again** ([#29](https://github.com/jetomev/nog/issues/29), F-1 of v1.5.2). During `nog update`, every `warning: <package>: ignoring package upgrade` line started where the previous one ended, drifting across the screen in a staircase. Found on the first real update after v1.5.2, which was also the first to install through the error relay added in v1.4.3.
-
-The cause is an interaction with sudo. Since 1.9.14, sudo runs the command in its own private terminal and switches yours to "raw" mode while it runs — a security default (`use_pty`). pacman's normal output passes through sudo's terminal and is fixed up on the way. The warning channel, which nog relays itself so it can remember why a step failed, is not — and in raw mode a line break moves the cursor down without returning it to the left edge. nog now adds that return itself whenever it is writing to a terminal; a file or pipe gets the output untouched.
-
-Display only: nothing was installed or skipped wrongly, and the run log was unaffected.
-
-Tests: 191 → 193. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

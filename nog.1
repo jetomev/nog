@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.5.4" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.5.5" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -71,6 +71,21 @@ in any enabled repository (so the helper would build it from the AUR), nog
 refuses before handing off and says why: the helper stops to let you review the
 build recipe, and nothing is at the keyboard to answer. Answering for you would
 skip that review, so nog does not.
+.TP
+.B nog clean
+Clear old package downloads from pacman's cache (every \fBCacheDir\fR in
+.IR pacman.conf ).
+Since v1.5.5. Retention follows the tier: Tier 1 keeps 3 versions of each
+package, Tier 2 keeps 2, Tier 3 keeps 1 (\fBtier1_keep\fR, \fBtier2_keep\fR,
+\fBtier3_keep\fR under \fB[clean]\fR in
+.IR nog.conf ).
+The installed version always counts as one and is never removed; a version
+newer than the installed one (downloaded, not yet installed) is kept; every file
+of a package that is no longer installed is removed; a \fB.sig\fR goes with its
+package. Leftover \fBdownload-XXXXXX\fR folders older than a day are removed
+too. Versions are ordered exactly as pacman orders them. nog shows what it would
+remove, per tier, with sizes, and asks \fB[y/N]\fR; with no answer nothing is
+removed. It refuses while pacman's lock file exists.
 .TP
 .B nog remove \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
@@ -613,7 +628,7 @@ and
 .BR paru (8)
 refuse to run as root.
 .PP
-nog escalates to root in exactly four places, all as transparent
+nog escalates to root in exactly five places, all as transparent
 .BR sudo (8)
 subprocess invocations:
 .TP
@@ -634,6 +649,12 @@ only when no AUR helper is configured; with a helper, nog hands the
 transaction to the helper as the invoking user, and the helper runs its own
 .B sudo pacman
 internally.
+.TP
+.B "sudo rm -f -- <cache files> | sudo rm -rf -- <cache>/download-XXXXXX"
+Only in
+.B "nog clean"
+(v1.5.5), only after you answer yes, and only on package files and stale
+leftover download folders directly inside pacman's configured cache directories.
 .TP
 .B "sudo snap refresh --hold=<hours> | sudo snap refresh <names>"
 For snap holds and snap refreshes (v1.2.0; the hold step added in v1.4.1).

@@ -2,6 +2,22 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.5 — September 30, 2026
+
+**`nog clean` — tier-aware cleanup of pacman's download cache** ([#15](https://github.com/jetomev/nog/issues/15)). pacman keeps every package it ever downloads and never removes one by itself; on the development machine the cache had grown to 28 GB by August and was back to 18.4 GB by the end of September. Tools like `paccache` keep the last N of everything. nog already knows how much each package matters, so it keeps more of what hurts to lose:
+
+- **Tier 1 keeps 3 versions, Tier 2 keeps 2, Tier 3 keeps 1** — set under `[clean]` in `nog.conf`. Tier 1 is the rollback path: the August black-screen night needed a known-good package in the cache.
+- **The installed version is never removed**, so a held package always has what it runs. A newer version already downloaded stays too.
+- **Packages you no longer have are cleared**, and so are day-old leftover `download-…` folders from interrupted downloads.
+- **Report first, then a `[y/N]` question.** With no answer, nothing is removed. It refuses while pacman is running.
+- **Versions are ordered exactly as pacman orders them** — pacman's own comparison, ported and checked against `vercmp` over every version pair in a real cache.
+
+On the development machine: 10.8 GB of 18.4 GB could go — 1,845 old versions and 123 leftover folders — while every installed version and three of each kernel stay. The "no longer installed" count matches `paccache` exactly (346 versions, 1.9 GB).
+
+Also in this release: the test-tally script now reads only a matrix's Result column. It had counted a check *titled* "Failure reason…" as a FAIL, so the published v1.5.0 test record said 4 FAIL where the truth was 3; that record now carries a dated correction.
+
+Tests: 204 → 217. Warnings unchanged at 6.
+
 ### v1.5.4 — September 30, 2026
 
 **See where everything comes from, and when a source could not be checked** ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)). Asked for by Javier: *"more information, more power."*

@@ -2,6 +2,14 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.5 — Released (nog clean, #15 — the first piece of C5, shipped early)
+- [x] `cache` module: pacman's `alpm_pkg_vercmp` ported; checked against `vercmp` over every pair in a real cache
+- [x] Retention per tier: 3 / 2 / 1 versions (`[clean]` in nog.conf); installed never removed; newer downloads kept; uninstalled cleared; `.sig` with its package
+- [x] Stale `download-XXXXXX` folders (a day old) cleared; refuses while pacman's lock exists
+- [x] Report per tier with sizes, then `[y/N]`; deletion via `sudo rm` only inside configured cache dirs
+- [x] Test tally reads only the Result column (T-1); v1.5.0 record corrected (4 FAIL → 3)
+- [ ] Still in C5: orphans, AUR helper build caches, unused Flatpak runtimes, old Snap revisions, `--json`
+
 ### v1.5.4 — Released (summary table + Source column, #28; could not check, #25; no-keyboard AUR install, #26)
 - [x] `PackageDesc.repo`: the repository each sync-DB entry came from, first enabled repo wins
 - [x] SUMMARY table replaces the four "reported by" lines; `could not check` / `off` / no row for an absent source; "Ask you" column only when needed
