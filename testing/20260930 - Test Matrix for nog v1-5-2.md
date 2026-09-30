@@ -56,8 +56,8 @@ not passed in advance.
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **DEFERRED** | |
-| 4.2 | Installed through `nog install <file>` | `nog --version` → 1.5.2 | **DEFERRED** | |
+| 4.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **PASS** | source fetched from the release, sha256 and signature verified, 191 passed in `check()` |
+| 4.2 | Installed through `nog install <file>` | `nog --version` → 1.5.2 | **PASS** | 30 Sep ~15:35, by Javier; pacman 1.5.1-1 → 1.5.2-1. `/etc/nog/nog.conf` was unmodified, so pacman replaced it: the safety-wait keys are in it now |
 | 4.3 | First real `nog update` with the fix: the kernels and mesa install | installed, reboot advised | **DEFERRED** | Javier's run; a 7.0 → 7.2 kernel jump with a DKMS rebuild |
 | 4.4 | After reboot: running kernel 7.2.7, NVIDIA module loaded | verified | **DEFERRED** | |
 | 4.5 | Fresh install from the AUR through yay | `nog --version` → 1.5.2 | **DEFERRED** | |
