@@ -18,10 +18,19 @@ pub struct PathsConfig {
     /// Existing installs without the key keep working via the serde default.
     #[serde(default = "default_run_logs")]
     pub run_logs: String,
+    /// v1.6.0 (#27): the hold record — when each pending update was first
+    /// seen, so a new build no longer restarts its countdown. User space, like
+    /// the run logs.
+    #[serde(default = "default_hold_record")]
+    pub hold_record: String,
 }
 
 fn default_run_logs() -> String {
     "~/.local/share/nog/logs".to_string()
+}
+
+fn default_hold_record() -> String {
+    "~/.local/state/nog/holds.tsv".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -36,7 +45,21 @@ pub struct HoldsConfig {
     pub tier1_days: u32,
     pub tier2_days: u32,
     pub tier3_days: u32,
+    /// v1.6.0 (#27): the safety wait. The window is clocked from the FIRST new
+    /// version seen, so it can end while the newest build is only days old;
+    /// that build must still be at least this many days old to be released.
+    /// Existing nog.conf files without the keys get these defaults.
+    #[serde(default = "default_tier1_safety")]
+    pub tier1_safety_days: u32,
+    #[serde(default = "default_tier2_safety")]
+    pub tier2_safety_days: u32,
+    #[serde(default = "default_tier3_safety")]
+    pub tier3_safety_days: u32,
 }
+
+fn default_tier1_safety() -> u32 { 7 }
+fn default_tier2_safety() -> u32 { 3 }
+fn default_tier3_safety() -> u32 { 1 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AurConfig {
@@ -120,6 +143,7 @@ impl NogConfig {
                 pacman_conf: "/etc/pacman.conf".to_string(),
                 log_file: "/var/log/nog.log".to_string(),
                 run_logs: default_run_logs(),
+                hold_record: default_hold_record(),
             },
             repos: ReposConfig {
                 staging: "https://repo.kognog.org/staging".to_string(),
@@ -130,6 +154,9 @@ impl NogConfig {
                 tier1_days: 30,
                 tier2_days: 15,
                 tier3_days: 7,
+                tier1_safety_days: default_tier1_safety(),
+                tier2_safety_days: default_tier2_safety(),
+                tier3_safety_days: default_tier3_safety(),
             },
             aur: AurConfig::default(),
         }

@@ -10,6 +10,7 @@ mod local_db;
 mod pacman;
 mod reboot;
 mod runlog;
+mod sightings;
 mod sources;
 mod sync_db;
 mod tiers;
@@ -214,6 +215,12 @@ fn debug_hold(package: &str) {
         }
         holds::HoldStatus::Holding { days_remaining } => {
             println!("status:    HELD ({} day{} remaining)",
+                days_remaining,
+                if days_remaining == 1 { "" } else { "s" },
+            );
+        }
+        holds::HoldStatus::SafetyWait { days_remaining } => {
+            println!("status:    HELD (safety wait, {} day{} remaining)",
                 days_remaining,
                 if days_remaining == 1 { "" } else { "s" },
             );

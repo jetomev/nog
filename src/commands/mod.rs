@@ -7,6 +7,7 @@ use crate::pacman::{self, CheckUpdatesError, PendingUpdate, Source};
 use std::collections::HashMap;
 use crate::local_db;
 use crate::runlog;
+use crate::sightings;
 use crate::flatpak;
 use crate::snap;
 use crate::sources;
@@ -438,6 +439,24 @@ fn timestamp_for_backup() -> String {
 enum ReadyReason {
     Expired { days_past_window: u64 },
     Realigned,
+    /// v1.6.0 (#27): released after newer builds kept arriving during the
+    /// hold. Before v1.6.0 this package would still be waiting.
+    AfterWaiting(Waited),
+}
+
+/// v1.6.0 (#27): how long an update has been waiting, and how many new
+/// versions came and went meanwhile. Only carried when at least one did.
+#[derive(Clone, Debug, PartialEq)]
+struct Waited {
+    since: String,
+    skipped: usize,
+}
+
+impl Waited {
+    fn describe(&self) -> String {
+        let v = if self.skipped == 1 { "version" } else { "versions" };
+        format!("waiting since {} · {} newer {} skipped", self.since, self.skipped, v)
+    }
 }
 
 /// Why this package landed in the Held bucket. Drives the reason string shown in
@@ -446,6 +465,12 @@ enum ReadyReason {
 enum HeldReason {
     /// Normal hold — the tier's window is still open (`days_remaining` left).
     Window,
+    /// v1.6.0 (#27): the window is still open, and newer builds have arrived
+    /// meanwhile. They no longer restart it; the row says so.
+    Waiting(Waited),
+    /// v1.6.0 (#27): the window is over, but the newest build is younger than
+    /// the tier's safety wait (`days_remaining` left on that).
+    SafetyWait(Option<Waited>),
     /// Expert-mode `manual_signoff = true` on a Tier 1 package. Released with
     /// `nog unlock`.
     ManualSignoff,
@@ -483,9 +508,13 @@ pub fn update(realign: bool) {
     // via the helper's cached metadata below.
     let mut aur_names: Vec<String> = Vec::new();
     let mut aur_count = 0usize;
+    // v1.6.0 (#27): which sources answered this run. The hold record only
+    // forgets a package when its own source said it is no longer pending.
+    let mut checked_sources: std::collections::HashSet<&str> = ["pacman"].into_iter().collect();
     if let Some(h) = helper {
         match aur::pending_updates(h) {
             Ok(aur_list) => {
+                checked_sources.insert("aur");
                 aur_count = aur_list.len();
                 for u in &aur_list {
                     aur_names.push(u.name.clone());
@@ -511,6 +540,7 @@ pub fn update(realign: bool) {
     if flatpak_present {
         match flatpak::pending_updates() {
             Ok(fp_list) => {
+                checked_sources.insert("flatpak");
                 flatpak_count = fp_list.len();
                 let installed = flatpak::installed_versions();
                 flatpak_dates = flatpak::commit_dates_for(&fp_list);
@@ -536,6 +566,7 @@ pub fn update(realign: bool) {
     if snap_present {
         match snap::pending_updates() {
             Ok(sn_list) => {
+                checked_sources.insert("snap");
                 snap_count = sn_list.len();
                 let installed = snap::installed_versions();
                 snap_dates = snap::publish_dates_for(&sn_list);
@@ -634,6 +665,10 @@ pub fn update(realign: bool) {
 
     let now = std::time::SystemTime::now();
 
+    // v1.6.0 (#27): bring the hold record up to date, so each window is
+    // clocked from the first time an update was seen, not the newest build.
+    let hold_record = update_hold_record(&cfg, &pending, &packages, &checked_sources, now);
+
     // Evaluate every pending update and bucket it.
     let mut ready: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
     let mut held: Vec<(PendingUpdate, Tier, u64, HeldReason)> = Vec::new(); // (upd, tier, days_remaining, reason)
@@ -641,14 +676,21 @@ pub fn update(realign: bool) {
 
     for upd in &pending {
         let tier = tm.classify(&upd.name);
+        let record = hold_record.get(&sightings::key(upd.source.as_str(), &upd.name));
         let status = holds::evaluate_candidate(
             &upd.name,
             tier.clone(),
             &upd.new_version,
             &packages,
             &cfg.holds,
+            record.map(|r| r.first_seen),
             now,
         );
+        // Shown on the row when newer builds have come and gone (#27).
+        let history = record.filter(|r| r.skipped() > 0).map(|r| Waited {
+            since: sightings::short_date(r.first_seen),
+            skipped: r.skipped(),
+        });
 
         // Expert-mode override: `manual_signoff = true` on Tier 1 forces every
         // Tier 1 package into the held bucket regardless of date. Escape hatch
@@ -661,11 +703,16 @@ pub fn update(realign: bool) {
                 // "manual sign-off" reason instead of a countdown.
                 held.push((upd.clone(), tier, 0, HeldReason::ManualSignoff));
             }
-            HoldStatus::Expired { days_past_window } => {
-                ready.push((upd.clone(), tier, ReadyReason::Expired { days_past_window }));
-            }
-            HoldStatus::Holding { days_remaining } => {
-                held.push((upd.clone(), tier, days_remaining, HeldReason::Window));
+            HoldStatus::Expired { days_past_window } => match history {
+                Some(w) => ready.push((upd.clone(), tier, ReadyReason::AfterWaiting(w))),
+                None => ready.push((upd.clone(), tier, ReadyReason::Expired { days_past_window })),
+            },
+            HoldStatus::Holding { days_remaining } => match history {
+                Some(w) => held.push((upd.clone(), tier, days_remaining, HeldReason::Waiting(w))),
+                None => held.push((upd.clone(), tier, days_remaining, HeldReason::Window)),
+            },
+            HoldStatus::SafetyWait { days_remaining } => {
+                held.push((upd.clone(), tier, days_remaining, HeldReason::SafetyWait(history)));
             }
             HoldStatus::Unknown => {
                 unknown.push((upd.clone(), tier));
@@ -1507,6 +1554,7 @@ fn ready_note(reason: &ReadyReason) -> String {
         ReadyReason::Expired { days_past_window: 1 } => "1 day past window".to_string(),
         ReadyReason::Expired { days_past_window } => format!("{} days past window", days_past_window),
         ReadyReason::Realigned => "realigned to match installed headers".to_string(),
+        ReadyReason::AfterWaiting(w) => w.describe(),
     }
 }
 
@@ -1532,6 +1580,14 @@ fn held_note(remaining: u64, reason: &HeldReason) -> String {
             1 => "1 day remaining".to_string(),
             n => format!("{} days remaining", n),
         },
+        HeldReason::Waiting(w) => format!("{} · {}", held_note(remaining, &HeldReason::Window), w.describe()),
+        HeldReason::SafetyWait(w) => {
+            let days = if remaining == 1 { "1 day".to_string() } else { format!("{} days", remaining) };
+            match w {
+                Some(w) => format!("{} · newest build too new · {}", days, w.describe()),
+                None => format!("{} · newest build too new", days),
+            }
+        }
     }
 }
 
@@ -1608,6 +1664,56 @@ fn runlog_rows(
         rows.push(row("unknown", upd, tier, "no build date in sync DB".to_string()));
     }
     rows
+}
+
+/// v1.6.0 (#27): load, update and save the hold record. Returns the record
+/// this run evaluates with. Every failure is a warning: without a record the
+/// holds fall back to the pre-v1.6.0 rule for this run, never to "no hold".
+fn update_hold_record(
+    cfg: &NogConfig,
+    pending: &[PendingUpdate],
+    packages: &HashMap<String, sync_db::PackageDesc>,
+    checked_sources: &std::collections::HashSet<&str>,
+    now: std::time::SystemTime,
+) -> sightings::Sightings {
+    let path = runlog::expand_home(&cfg.paths.hold_record);
+    let previous = sightings::load(&path);
+    let now_ts = now.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+
+    // The candidate's build date, only when the date belongs to THIS version
+    // (the same guard `holds::evaluate_candidate` applies).
+    let seen: Vec<sightings::Seen> = pending.iter().map(|u| {
+        let built = packages.get(&u.name)
+            .filter(|d| d.version.as_deref().map_or(true, |v| v == u.new_version))
+            .map(|d| d.builddate);
+        sightings::Seen {
+            source: u.source.as_str(),
+            name: &u.name,
+            installed: &u.old_version,
+            candidate: &u.new_version,
+            candidate_built: built,
+        }
+    }).collect();
+
+    // The run logs date holds that began before the record existed. Read
+    // only when some package is new to the record — once per run at most.
+    let mut logs: Option<Vec<sightings::LogRow>> = None;
+    let history = |source: &str, name: &str, installed: &str| {
+        let rows = logs.get_or_insert_with(|| {
+            sightings::load_logs(&runlog::expand_home(&cfg.paths.run_logs))
+        });
+        sightings::history_from(rows, source, name, installed)
+    };
+
+    let next = sightings::update(&previous, &seen, checked_sources, history, now_ts);
+    if next != previous {
+        if let Err(e) = sightings::save(&path, &next) {
+            eprintln!("{}nog: warning — could not save the hold record: {}{}", C_SUBTEXT, e, C_RESET);
+            eprintln!("{}     holds are still applied; a new build may restart a countdown this run.{}",
+                C_SUBTEXT, C_RESET);
+        }
+    }
+    next
 }
 
 /// Write the run record and prune expired logs (v1.0.8). Every failure path
@@ -1816,6 +1922,25 @@ mod output_tests {
                 "note does not lead with its countdown: {note:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_long_wait_says_so_and_still_leads_with_its_countdown() {
+        // #27: newer builds no longer restart a hold, and the row shows it.
+        let w = Waited { since: "Jul 29".into(), skipped: 9 };
+        assert_eq!(
+            held_note(20, &HeldReason::Waiting(w.clone())),
+            "20 days remaining · waiting since Jul 29 · 9 newer versions skipped"
+        );
+        assert_eq!(
+            held_note(3, &HeldReason::SafetyWait(Some(w.clone()))),
+            "3 days · newest build too new · waiting since Jul 29 · 9 newer versions skipped"
+        );
+        assert_eq!(held_note(1, &HeldReason::SafetyWait(None)), "1 day · newest build too new");
+        assert_eq!(
+            ready_note(&ReadyReason::AfterWaiting(Waited { since: "Aug 4".into(), skipped: 1 })),
+            "waiting since Aug 4 · 1 newer version skipped"
+        );
     }
 
     // ---- v1.4.3: the run log tells the truth (#19, #20, #21, #22) -----------

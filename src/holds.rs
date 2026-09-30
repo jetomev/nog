@@ -29,6 +29,11 @@ pub enum HoldStatus {
     Expired { days_past_window: u64 },
     /// The hold is still active. Package should NOT be updated yet.
     Holding { days_remaining: u64 },
+    /// v1.6.0 (#27): the window — clocked from the first new version seen —
+    /// is over, but the newest build is younger than the tier's safety wait.
+    /// Held for `days_remaining` more days, unless a newer build replaces it,
+    /// which does not restart the window, only this short wait.
+    SafetyWait { days_remaining: u64 },
     /// No build date could be found for this package (e.g. not in any sync
     /// database we read). Caller decides how to present this to the user.
     Unknown,
@@ -73,12 +78,20 @@ pub fn evaluate(
 ///
 /// Entries with `version: None` (AUR helper dates, defensive desc fallback)
 /// skip the guard and evaluate on build date alone, as before.
+///
+/// v1.6.0 (#27): `first_seen` is when an update for the installed version was
+/// first seen (see `sightings`). The window is clocked from the earlier of that
+/// and the candidate's own build date, so a newer build no longer restarts the
+/// countdown. Once the window is over, the candidate must still be at least the
+/// tier's safety wait old. With `first_seen = None` this is the old rule
+/// exactly, because the safety wait is never longer than a window it follows.
 pub fn evaluate_candidate(
     package: &str,
     tier: Tier,
     candidate_version: &str,
     packages: &HashMap<String, PackageDesc>,
     holds: &HoldsConfig,
+    first_seen: Option<u64>,
     now: SystemTime,
 ) -> HoldStatus {
     let desc = match packages.get(package) {
@@ -92,7 +105,38 @@ pub fn evaluate_candidate(
         }
     }
 
-    evaluate_ts(desc.builddate, tier, holds, now)
+    let anchor = first_seen.map_or(desc.builddate, |f| f.min(desc.builddate));
+    evaluate_since(anchor, desc.builddate, tier, holds, now)
+}
+
+/// The #27 rule: window from `anchor` (the first sighting), then a safety
+/// wait on the candidate's own build date.
+pub fn evaluate_since(
+    anchor: u64,
+    candidate_built: u64,
+    tier: Tier,
+    holds: &HoldsConfig,
+    now: SystemTime,
+) -> HoldStatus {
+    let window = evaluate_ts(anchor, tier.clone(), holds, now);
+    if !matches!(window, HoldStatus::Expired { .. }) {
+        return window;
+    }
+    let now_ts = match now.duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(_) => return HoldStatus::Unknown,
+    };
+    let age = days_ceil(now_ts.saturating_sub(candidate_built));
+    let safety = match tier {
+        Tier::One => holds.tier1_safety_days,
+        Tier::Two => holds.tier2_safety_days,
+        Tier::Three => holds.tier3_safety_days,
+    } as u64;
+    if age >= safety {
+        window
+    } else {
+        HoldStatus::SafetyWait { days_remaining: safety - age }
+    }
 }
 
 /// Couple a `lib32-<X>` multilib package to its base `<X>` at hold-release time
@@ -599,6 +643,9 @@ mod tests {
             tier1_days: 30,
             tier2_days: 15,
             tier3_days: 7,
+            tier1_safety_days: 7,
+            tier2_safety_days: 3,
+            tier3_safety_days: 1,
         }
     }
 
@@ -729,6 +776,7 @@ mod tests {
             "1.2.0-2",
             &pkgs,
             &holds_default(),
+            None,
             at_days_after_epoch(975),
         );
         assert_eq!(got, HoldStatus::Unknown);
@@ -746,6 +794,7 @@ mod tests {
             "1.2.0-2",
             &pkgs,
             &holds_default(),
+            None,
             at_days_after_epoch(21),
         );
         assert_eq!(got, HoldStatus::Holding { days_remaining: 6 });
@@ -763,6 +812,7 @@ mod tests {
             "0.4.3-1",
             &pkgs,
             &holds_default(),
+            None,
             at_days_after_epoch(20),
         );
         assert_eq!(got, HoldStatus::Expired { days_past_window: 13 });
@@ -777,8 +827,71 @@ mod tests {
             "1.0-1",
             &pkgs,
             &holds_default(),
+            None,
             at_days_after_epoch(10),
         );
+        assert_eq!(got, HoldStatus::Unknown);
+    }
+
+    // --- v1.6.0: a new build no longer restarts the hold (issue #27) ---
+
+    #[test]
+    fn the_treadmill_never_released_under_the_old_rule() {
+        // linux-zen, Tier 1 (30 days): a new build every 5 days for 60 days.
+        // Clocked from the newest build, it is always <= 5 days old -> held.
+        for day in (0..60).step_by(5) {
+            let pkgs = pkg_map("linux-zen", day * SECONDS_PER_DAY, Some("v"));
+            let got = evaluate_candidate("linux-zen", Tier::One, "v", &pkgs, &holds_default(), None,
+                at_days_after_epoch(day + 4));
+            assert!(matches!(got, HoldStatus::Holding { .. }), "day {day}: {got:?}");
+        }
+    }
+
+    #[test]
+    fn counted_from_the_first_sighting_it_is_released() {
+        // First seen day 0; today day 61; newest build day 52 (9 days old).
+        // Window 30 over, safety wait 7 passed -> Ready. The #27 worked example.
+        let pkgs = pkg_map("linux-zen", 52 * SECONDS_PER_DAY, Some("7.2.7"));
+        let got = evaluate_candidate("linux-zen", Tier::One, "7.2.7", &pkgs, &holds_default(),
+            Some(0), at_days_after_epoch(61));
+        assert_eq!(got, HoldStatus::Expired { days_past_window: 31 });
+    }
+
+    #[test]
+    fn a_build_from_yesterday_waits_out_the_safety_wait() {
+        // Window over (first seen day 0, today day 40), but the newest build
+        // is from day 38 -> 2 days old, Tier 1 safety 7 -> 5 more days.
+        let pkgs = pkg_map("mesa", 38 * SECONDS_PER_DAY, Some("26.2.3"));
+        let got = evaluate_candidate("mesa", Tier::One, "26.2.3", &pkgs, &holds_default(),
+            Some(0), at_days_after_epoch(40));
+        assert_eq!(got, HoldStatus::SafetyWait { days_remaining: 5 });
+    }
+
+    #[test]
+    fn the_window_still_runs_from_the_first_sighting() {
+        // First seen day 10, today day 25, Tier 1: 15 days left on the window,
+        // whatever the newest build's date.
+        let pkgs = pkg_map("systemd", 24 * SECONDS_PER_DAY, Some("262"));
+        let got = evaluate_candidate("systemd", Tier::One, "262", &pkgs, &holds_default(),
+            Some(10 * SECONDS_PER_DAY), at_days_after_epoch(25));
+        assert_eq!(got, HoldStatus::Holding { days_remaining: 15 });
+    }
+
+    #[test]
+    fn a_later_sighting_never_makes_a_hold_longer_than_before() {
+        // A record newer than the candidate's own build (e.g. first run after
+        // an upgrade of nog) is clamped to the build date: old rule at worst.
+        let pkgs = pkg_map("vim", 0, Some("9.2"));
+        let got = evaluate_candidate("vim", Tier::Three, "9.2", &pkgs, &holds_default(),
+            Some(15 * SECONDS_PER_DAY), at_days_after_epoch(20));
+        assert_eq!(got, HoldStatus::Expired { days_past_window: 13 });
+    }
+
+    #[test]
+    fn the_version_guard_still_wins() {
+        let pkgs = pkg_map("lib32-brotli", 0, Some("1.1.0-1"));
+        let got = evaluate_candidate("lib32-brotli", Tier::Three, "1.2.0-2", &pkgs, &holds_default(),
+            Some(0), at_days_after_epoch(975));
         assert_eq!(got, HoldStatus::Unknown);
     }
 
