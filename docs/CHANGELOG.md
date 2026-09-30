@@ -2,6 +2,17 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.4 — September 30, 2026
+
+**See where everything comes from, and when a source could not be checked** ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)). Asked for by Javier: *"more information, more power."*
+
+- **A SUMMARY table replaces the four "N update(s) reported by …" lines.** One row per official repository in `pacman.conf` order, then AUR, Flatpak and Snap: Ready now, On hold, Total. An **Ask you** column appears only when something has no trustworthy date.
+- **A Source column on every table.** Official packages name their repository (`core`, `extra`, `multilib`, `chaotic-aur`…); the rest say `AUR`, `Flatpak` or `Snap`, each in its own colour (peach, blue, mauve — clear of the three tier colours). AUR rows used to carry no mark at all. The Note column is hold information again.
+- **A failing AUR helper reads `could not check`, never `0`** (#25). Both yay and paru answer "nothing to update" with an empty reply and exit 1, so nog took any empty reply as "nothing". A failed check looks the same, except the helper says why on its error output. nog now reads that: an empty reply with an error is a failure, shown in the summary and quoted in the warning. Tested with a helper made to fail the way paru did on 30 September: v1.5.3 said `0 AUR update(s)`; v1.5.4 says `could not check`.
+- **`nog install` refuses an AUR package when nobody is at the keyboard** (#26). The helper stops to let you review each build recipe; from a script it read end-of-input in its menu and died there, with the reason buried in its output. nog now says so before starting, in plain words. It does not answer the review for you — that review is the one moment of scrutiny the AUR offers.
+
+Tests: 193 → 204. Warnings unchanged at 6.
+
 ### v1.5.3 — September 30, 2026
 
 **pacman's warnings print one per line again** ([#29](https://github.com/jetomev/nog/issues/29), F-1 of v1.5.2). During `nog update`, every `warning: <package>: ignoring package upgrade` line started where the previous one ended, drifting across the screen in a staircase. Found on the first real update after v1.5.2, which was also the first to install through the error relay added in v1.4.3.

@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.3](https://img.shields.io/badge/Version-1.5.3-purple.svg)
+![Version: 1.5.4](https://img.shields.io/badge/Version-1.5.4-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -54,8 +54,9 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
   Flatpak and Snap are optional in both directions. If the program isn't installed, that source sits quietly dormant — never an error. Turn any of them on or off with `nog activate|deactivate <source>`.
 
 **Clear reporting**
+- A **summary table** first *(v1.5.4)* — one row per repository (`core`, `extra`, `multilib`, `chaotic-aur`…), then AUR, Flatpak and Snap, with what is ready now and what is on hold. A source that could not be checked says `could not check`, never `0`
 - Updates grouped into **Ready** / **Held** / **Unknown**, with tier colours
-- Every row shows which source it came from
+- Every row has a **Source** column *(v1.5.4)*: the repository it comes from, or `AUR`, `Flatpak`, `Snap` — each non-official source in its own colour
 - Held packages sorted by how soon they release, so the list reads as a calendar
 - Packages with no usable date are never guessed at — nog asks you, one at a time
 - Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days — one row per package with its source and what actually happened to it, and the reason whenever a step did not complete *(v1.4.3)*
@@ -234,66 +235,64 @@ extra/htop 3.4.1-1 [installed] [Tier 3 — 7d hold]
 
 ### Example: `nog update`
 
-From a real run, with the Held section trimmed:
+A real report on the development machine (30 Sep 2026), with the Held section trimmed. That day everything was on hold, so nog stopped before handing anything off:
 
 ```
 =============
-nog v1.3.0
+nog v1.5.4
 Update!
 =============
 
-Date: 07/29/2026
-Time: 08:52 PM
+Date: 09/30/2026
+Time: 05:52 PM
 User: jetomev
 
 nog: Checking for pending updates ...
+Checking installed programs for 1 library version(s) this update removes...
 
-nog: 75 official repository update(s) reported by pacman.
-nog: 1 AUR update(s) reported by yay.
+SUMMARY:
+========
+
+Source        Ready now   On hold   Total
+-----------------------------------------
+core                  0        13      13
+extra                 0        38      38
+multilib              0         6       6
+chaotic-aur           0         2       2
+AUR                   0         1       1
+Flatpak               0         0       0
+Snap                  0         0       0
+-----------------------------------------
+Total                 0        60      60
 
 READY TO INSTALL:
 =================
 
-Package (3)     Old Version   New Version   Tier  Note
--------------------------------------------------------------------
-libraqm         0.10.5-1      0.11.0-1      3     hold just expired
-plasma-desktop  6.7.2-1       6.7.3-1       2     hold just expired
-python-certifi  2026.06.17-1  2026.07.22-1  3     1 day past window
+(none)
 
 ON HOLD FROM INSTALL:
 =====================
 
-Package (73)       Old Version               New Version              Tier  Note
------------------------------------------------------------------------------------------------------
-archlinux-keyring  20260707.1-1              20260727-1               3     4 days remaining
-glibc              2.43+r37+gfdf10644d6ee-1  2.44+r5+g7cba77790f32-1  1     28 days remaining
-libnm              1.56.1-2                  1.58.0-1                 2     5 days remaining
-linux-zen          7.0.5.zen1-1              7.1.5.zen1-2             1     28 days remaining
-linux-zen-headers  7.0.5.zen1-1              7.1.5.zen1-2             1     28 days remaining
-lib32-libnm        1.56.1-1                  1.58.0-1                 3     5 days · coupled to libnm
-  ⋮                (67 more)
+Package (60)         Source       Old Version               New Version               Tier  Note
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+alsa-card-profiles   extra        1:1.6.8-1                 1:1.6.9-1                 2     1 day remaining
+linux-lts            core         6.18.29-1                 6.18.54-1                 1     1 day · newest build too new · waiting since Jul 29 · 11 newer versions skipped
+mkinitcpio           core         41-4                      42.1-1                    1     3 days · newest build too new · waiting since Aug 13 · 2 newer versions skipped
+fresh-editor-bin     AUR          0.5.1-1                   0.5.2-1                   3     4 days remaining
+systemd              core         261.2-1                   262-1                     1     12 days remaining · waiting since Sep 13 · 1 newer version skipped
+glibc                core         2.44+r24+g16be1518495f-1  2.44+r50+g1848099f063e-1  1     26 days remaining
+  ⋮                  (54 more)
 
 UNKNOWN:
 ========
 
 (none)
 
-nog: Begin the handoff? [Y/n] y
-
-nog: Handing off official packages to pacman ...
-:: Starting full system upgrade...
-   (the pacman transaction runs here)
-
-nog: Handing off 2 AUR package(s) to yay ...
-     (yay shows its own build and transaction below)
-
-nog: Update finished!
-nog: run logged to /home/jetomev/.local/share/nog/logs/20260729 nog-update.csv
-
-Thank you for using nog!
+nog: Nothing to install — every pending update is held.
+nog: run logged to /home/jetomev/.local/share/nog/logs/20260930 nog-update.csv
 ```
 
-The tier digit is colour-coded — red, yellow, green. Two details worth spotting: `linux-zen` and its headers hold together at the same 28 days, and `lib32-libnm` is marked `coupled to libnm`, held because its 64-bit twin is.
+The tier digit is colour-coded — red, yellow, green — and non-official sources get their own colour in the Source column. Details worth spotting: `fresh-editor-bin` is marked `AUR`; `linux-lts` finished its window but its newest build is too new for the safety wait; and `systemd` has been waiting since 13 September — the newer build that arrived since did not restart its countdown.
 
 ---
 
@@ -307,7 +306,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.3"
+version = "1.5.4"
 log_level = "info"
 
 [paths]
@@ -419,7 +418,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 9,500 lines of Rust, with 193 tests that run on every release.
+Around 10,000 lines of Rust, with 204 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -524,6 +523,10 @@ nog search linux-zen-headers
 
 If it shows green Tier 3, you're on an old nog — upgrade before your next update.
 
+### The summary says `AUR  could not check`
+
+Your AUR helper's update check failed this run, and nog is saying so instead of reporting `0`. The helper's own error is quoted in the warning just above the summary. Holds stay safe — an AUR package nog never heard about is never handed off, and the foreign fence keeps every foreign package where it is — but AUR updates go unseen until the check works again. Try the helper directly (`yay -Qua` or `paru -Qua`) to see the full error.
+
 ### A big batch of updates is suddenly Ready after upgrading to v1.5.2
 
 Expected. Packages that had been held for a long time because newer builds kept restarting their countdown — usually the kernels, `mesa` and `mkinitcpio` — are released on the first run, each marked `waiting since <date> · N newer versions skipped`. A kernel can jump several versions at once. Let the update finish, including any driver rebuild, and **restart** when nog advises it.
@@ -603,16 +606,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.3 shipped 2026-09-30** — pacman's warnings print one per line again ([#29](https://github.com/jetomev/nog/issues/29)). **v1.5.2 shipped the same day** — a hold always ends: newer builds no longer restart the countdown ([#27](https://github.com/jetomev/nog/issues/27)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.5.4 shipped 2026-09-30** — a summary table and a Source column ([#28](https://github.com/jetomev/nog/issues/28)), a failing AUR helper reads `could not check` ([#25](https://github.com/jetomev/nog/issues/25)), and AUR installs with nobody at the keyboard are refused up front ([#26](https://github.com/jetomev/nog/issues/26)). **v1.5.3 shipped the same day** — pacman's warnings print one per line again ([#29](https://github.com/jetomev/nog/issues/29)). v1.5.2 before it: a hold always ends ([#27](https://github.com/jetomev/nog/issues/27)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
-### Next — see where every package comes from ([#28](https://github.com/jetomev/nog/issues/28) · `priority-2`)
+### Next — `nog clean`, tier-aware cache cleanup ([#15](https://github.com/jetomev/nog/issues/15) · `priority-3`)
 
-- [ ] A **Source** column on every table: the repository (`core`, `extra`, `multilib`, `chaotic-aur`…), or `AUR`, `Flatpak`, `Snap`. Today only Flatpak and Snap rows get a word in the Note column, and AUR rows are not marked at all.
-
-### Then — two quiet failures of the AUR helper ([#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26) · `priority-3`)
-
-- [ ] When the helper fails before printing anything, nog currently reports `0 AUR update(s)` and discards the error. Holds stay safe; updates go unseen. Found while validating paru.
-- [ ] `nog install <aur-package>` with no terminal attached dies inside the helper's menu with no plain explanation. nog should refuse up front and say why.
+- [ ] Clear out old package downloads, but keep the ones a held package may still need to roll back to.
 
 **Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
 
@@ -642,6 +640,17 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.4 — September 30, 2026
+
+**See where everything comes from, and when a source could not be checked** ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)). Asked for by Javier: *"more information, more power."*
+
+- **A SUMMARY table replaces the four "N update(s) reported by …" lines.** One row per official repository in `pacman.conf` order, then AUR, Flatpak and Snap: Ready now, On hold, Total. An **Ask you** column appears only when something has no trustworthy date.
+- **A Source column on every table.** Official packages name their repository (`core`, `extra`, `multilib`, `chaotic-aur`…); the rest say `AUR`, `Flatpak` or `Snap`, each in its own colour (peach, blue, mauve — clear of the three tier colours). AUR rows used to carry no mark at all. The Note column is hold information again.
+- **A failing AUR helper reads `could not check`, never `0`** (#25). Both yay and paru answer "nothing to update" with an empty reply and exit 1, so nog took any empty reply as "nothing". A failed check looks the same, except the helper says why on its error output. nog now reads that: an empty reply with an error is a failure, shown in the summary and quoted in the warning. Tested with a helper made to fail the way paru did on 30 September: v1.5.3 said `0 AUR update(s)`; v1.5.4 says `could not check`.
+- **`nog install` refuses an AUR package when nobody is at the keyboard** (#26). The helper stops to let you review each build recipe; from a script it read end-of-input in its menu and died there, with the reason buried in its output. nog now says so before starting, in plain words. It does not answer the review for you — that review is the one moment of scrutiny the AUR offers.
+
+Tests: 193 → 204. Warnings unchanged at 6.
+
 ### v1.5.3 — September 30, 2026
 
 **pacman's warnings print one per line again** ([#29](https://github.com/jetomev/nog/issues/29), F-1 of v1.5.2). During `nog update`, every `warning: <package>: ignoring package upgrade` line started where the previous one ended, drifting across the screen in a staircase. Found on the first real update after v1.5.2, which was also the first to install through the error relay added in v1.4.3.
@@ -651,20 +660,6 @@ The cause is an interaction with sudo. Since 1.9.14, sudo runs the command in it
 Display only: nothing was installed or skipped wrongly, and the run log was unaffected.
 
 Tests: 191 → 193. Warnings unchanged at 6.
-
-### v1.5.2 — September 30, 2026
-
-**A hold always ends** ([#27](https://github.com/jetomev/nog/issues/27), `priority-1`). nog counted each hold from the build date of the *newest* version. Arch carries only the newest build, and busy packages get a new one every week or two, so every new build restarted the countdown — and a package whose updates arrive faster than its window was never released. Nothing said so. On the development machine `linux-zen` sat at 7.0.5 from May to the end of September while nine newer versions came and went; its countdown went 28, 20, then back up to 23, 25, 29… and never reached zero. Seven of the fourteen held Tier 1 packages were stuck this way, including both kernels, `mesa` and `mkinitcpio`. Raised by Javier, who suspected exactly this.
-
-- **The window now counts from the first new version seen.** A newer build no longer restarts it.
-- **A safety wait on what actually installs.** When the window is over, the newest version is released once it is itself at least **7 days** old (Tier 1), **3** (Tier 2) or **1** (Tier 3). Settable in `nog.conf` (`tierN_safety_days`).
-- **The tables say so:** `waiting since Jul 29 · 8 newer versions skipped`, and `newest build too new` during the safety wait. The run log records the same note.
-- **A new record, `~/.local/state/nog/holds.tsv`,** remembers the first sightings. Holds that were already running are dated from your run logs, read by each file's own header. A source that did not answer on a run keeps its clocks, so a failed AUR query cannot restart them.
-- **Never stricter than before.** Without a record, the rule is exactly the old one.
-
-On the first run after upgrading, expect a batch of long-held packages to be Ready at once — see [Troubleshooting](#a-big-batch-of-updates-is-suddenly-ready-after-upgrading-to-v152).
-
-Tests: 172 → 191. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

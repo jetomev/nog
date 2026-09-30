@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.5.3" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.5.4" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -65,6 +65,12 @@ are separate pacman operations, and splitting one request could leave half of
 it installed. A mistyped path is reported as a missing file, never searched for
 in the repositories. There is no signature gate beyond pacman's own
 .BR LocalFileSigLevel .
+.IP
+Since v1.5.4, when standard input is not a terminal and a requested name is not
+in any enabled repository (so the helper would build it from the AUR), nog
+refuses before handing off and says why: the helper stops to let you review the
+build recipe, and nothing is at the keyboard to answer. Answering for you would
+skip that review, so nog does not.
 .TP
 .B nog remove \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
@@ -79,7 +85,16 @@ for the official repositories, then the configured AUR helper, then
 .BR flatpak (1)
 and
 .BR snap (8).
-Every pending upgrade is shown before any transaction starts, classified into
+Every pending upgrade is shown before any transaction starts. Since v1.5.4 a
+.B SUMMARY
+table comes first: one row per official repository in
+.I pacman.conf
+order, then AUR, Flatpak and Snap, each with its Ready, Held and total counts
+(plus an \fBAsk you\fR column when anything is Unknown). A source whose query
+failed reads \fBcould not check\fR, never 0; one switched off with
+.B nog deactivate
+reads \fBoff\fR; one that is not installed has no row. Every table row carries
+a \fBSource\fR column with the same word. Updates are classified into
 one of three buckets:
 .RS
 .IP \(bu 2

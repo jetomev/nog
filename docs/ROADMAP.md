@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.4 — Released (summary table + Source column, #28; could not check, #25; no-keyboard AUR install, #26)
+- [x] `PackageDesc.repo`: the repository each sync-DB entry came from, first enabled repo wins
+- [x] SUMMARY table replaces the four "reported by" lines; `could not check` / `off` / no row for an absent source; "Ask you" column only when needed
+- [x] Source column on every table, coloured per non-official source; Note back to hold information only
+- [x] `aur::interpret_qua`: empty stdout + an error on stderr is a failure (yay `->` notices and `warning:` lines are not)
+- [x] `nog install`: AUR names with no terminal on stdin refused before the handoff, with a plain reason
+
 ### v1.5.3 — Released (warnings one per line, F-1 / #29)
 - [x] The stderr relay sends a bare LF as CR LF when writing to a terminal — sudo's `use_pty` leaves it in raw mode
 - [x] v1.5.2 verified in the field: linux-zen 7.0.5 → 7.2.7 and mesa released, NVIDIA DKMS rebuilt

@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.3** (30 Sep 2026) — warnings one per line (F-1, #29), on top of v1.5.2's a-hold-always-ends (#27). 193 tests pass. On GitHub (Latest) and the AUR (`60a2398`). Next: install here (`nog install <file>`), restart into kernel 7.2.7, watch the next update's warnings. On GitHub (Latest, signed) and pushed to the AUR (`8cc2a41`; the AUR's website index still shows 1.5.1 for a while, as on 29 Sep). #27 closed. Next: install here, then the first real update (kernel 7.0 → 7.2) and a restart.
+**Current release: v1.5.4** (30 Sep 2026) — summary table + Source column (#28), `could not check` (#25), no-keyboard AUR install refused (#26). 204 tests pass. Same day: v1.5.3 (warnings one per line, #29) and v1.5.2 (a hold always ends, #27). Release steps in progress.
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
@@ -23,8 +23,8 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 ### 0 · Javier's concerns, raised 30 Sep (the "two-week topic") — in this order
 - [x] **A · #27 · priority-1 · Holds that never end.** *Code done 30 Sep, v1.5.2: 191 tests; dry run on this desktop releases linux-zen + mesa, linux-lts 1 day into its safety wait.* The waiting period is counted from the build date of the *newest* version, so every new build restarts the clock. Proven on this desktop 30 Sep: linux-zen has been held since at least 29 Jul (7.0.5 installed; 9 different new versions came and went, the countdown never reached 0; the newest, 7.2.7, is 9 days old). Tier 1 waiting longer than its own 30 days: linux-zen (+headers), linux-lts (+headers, 12 versions), mesa, lib32-mesa, mkinitcpio. Tier 2 today: none. Tier 3: python-platformdirs (31 days, 7 versions). The logs start 29 Jul, so these are minimums. Needs a ruling on the fix, then an issue. **Ruled 30 Sep: count from the first new version + a safety wait (T1 7 days, T2 3, T3 1, settable)**
 - [x] **F-1 of v1.5.2 · #29** · pacman's warnings printed as a staircase under sudo's `use_pty`; fixed in v1.5.3
-- [ ] **B · #28 · priority-2 · Say where every held/ready package comes from.** *Extended 30 Sep: a SUMMARY table (Source · Ready now · On hold · Total, one row per repository; `could not check` instead of 0; `off` for a deactivated source) replaces the four `reported by` lines. Ships with #25 + #26 as v1.5.4.* Today only Flatpak and Snap rows get a word in the Note column; AUR rows are not marked at all, and official ones don't say which repository. Wanted: a Source column on every table. Flatpak (v1.1.0) and Snap (v1.2.0) updates already work with holds; installing through them is the unbuilt part (#7). Installed here: 2 Flatpaks (Flatseal, Termius), 1 snap (hello)
-- [ ] **C · then #25 and #26** (below)
+- [x] **B · #28 · priority-2 · Say where every held/ready package comes from.** *Extended 30 Sep: a SUMMARY table (Source · Ready now · On hold · Total, one row per repository; `could not check` instead of 0; `off` for a deactivated source) replaces the four `reported by` lines. Ships with #25 + #26 as v1.5.4.* Today only Flatpak and Snap rows get a word in the Note column; AUR rows are not marked at all, and official ones don't say which repository. Wanted: a Source column on every table. Flatpak (v1.1.0) and Snap (v1.2.0) updates already work with holds; installing through them is the unbuilt part (#7). Installed here: 2 Flatpaks (Flatseal, Termius), 1 snap (hello)
+- [x] **C · #25 and #26** — both in v1.5.4 with #28
 
 ### 1 · The next fix release — stop silent breakage
 - [x] **#16 · priority-1** · *code done 29 Sep, `51ac397`; not released yet* · A program can break silently after an update when it uses a shared library it never declared (seen with OBS and a Blu-ray library). nog has to spot these hidden links and hold both sides together.
@@ -42,8 +42,8 @@ One change to the log file fixes all four, so they ship together.
 
 ### 4 · Prove nog works with paru — DONE 29 Sep
 - [x] **#12** · nog works with paru: install, auto-fallback, update plan, dates, and paru's AUR build path all checked; yay removed and restored. Results in `testing/20260929 - Test Results for nog v1-5-1-paru.md`
-- [ ] **#25 (F-2) · priority-3** · a failing AUR helper reads as "no AUR updates", silently. Found during #12
-- [ ] **#26 · priority-3** · with no terminal attached, `nog install <aur-pkg>` dies inside yay's menu with no plain explanation. Refuse up front and say why; do NOT auto-answer (that skips the PKGBUILD review). Found 29 Sep releasing grubForge v1.1.2
+- [x] **#25 (F-2) · priority-3** *(v1.5.4)* · a failing AUR helper reads as "no AUR updates", silently. Found during #12
+- [x] **#26 · priority-3** *(v1.5.4)* · with no terminal attached, `nog install <aur-pkg>` dies inside yay's menu with no plain explanation. Refuse up front and say why; do NOT auto-answer (that skips the PKGBUILD review). Found 29 Sep releasing grubForge v1.1.2
 - [ ] Still unseen: paru's "nothing to update" answer, and an AUR update handed to paru
 
 ### 5 · Cache cleanup
