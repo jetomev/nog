@@ -41,7 +41,7 @@
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
 | 4.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **PASS** | release fetched, sha256 + signature verified, 217 passed in `check()`; pushed to the AUR |
-| 4.2 | Installed through `nog install <file>` | `nog --version` → 1.5.5 | **DEFERRED** | |
+| 4.2 | Installed through `nog install <file>` | `nog --version` → 1.5.5 | **PASS** | 30 Sep ~18:35, by Javier; `/etc/nog/nog.conf` carries the new `[clean]` section |
 | 4.3 | `nog clean`, answered yes, one password | files removed, cache smaller by about the reported size | **DEFERRED** | Javier's run |
 | 4.4 | Afterwards: every installed version still in the cache | `pacman -Q` versions all present | **DEFERRED** | |
 
