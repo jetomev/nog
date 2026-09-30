@@ -42,9 +42,9 @@
 |---|---|---|---|---|
 | 4.1 | `makepkg` smoke build from the AUR recipe | builds, tests pass in `check()` | **PASS** | release fetched, sha256 + signature verified, 217 passed in `check()`; pushed to the AUR |
 | 4.2 | Installed through `nog install <file>` | `nog --version` → 1.5.5 | **PASS** | 30 Sep ~18:35, by Javier; `/etc/nog/nog.conf` carries the new `[clean]` section |
-| 4.3 | `nog clean`, answered yes, one password | files removed, cache smaller by about the reported size | **DEFERRED** | Javier's run |
-| 4.4 | Afterwards: every installed version still in the cache | `pacman -Q` versions all present | **DEFERRED** | |
+| 4.3 | `nog clean`, answered yes, one password | files removed, cache smaller by about the reported size | **PASS** | Javier, ~18:40 ("wow! awesome!"). `du`: 19G → 7.7G; 6,840 entries → 3,041. `paccache -d -u -k0` afterwards: no candidates |
+| 4.4 | Afterwards: every installed version still in the cache | `pacman -Q` versions all present | **PASS** | 1,424 of 1,439 installed versions were cached before, 1,424 after, identical list. linux-zen keeps 3; pipewire (held) keeps 1.6.7 / 1.6.8 / 1.6.9; 7zip keeps only 26.03. 10 `download-…` folders remain, all from today — the one-day rule, as designed |
 
 ## Findings
 
-None yet.
+None. Observation, not a nog finding: pacman left a new `download-…` folder in the cache on most runs today (10 between 15:33 and 18:34). The next `nog clean` a day later removes them.

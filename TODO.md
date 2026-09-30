@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.5** (30 Sep 2026) — `nog clean` (#15). 217 tests pass. Same day: v1.5.4 (summary + Source, #28/#25/#26), v1.5.3 (#29), v1.5.2 (#27). On GitHub (Latest) and the AUR; #15 closed. Next: install here, run `nog clean` for real, restart into kernel 7.2.7.
+**Current release: v1.5.5** (30 Sep 2026) — `nog clean` (#15). 217 tests pass. Same day: v1.5.4 (summary + Source, #28/#25/#26), v1.5.3 (#29), v1.5.2 (#27). On GitHub (Latest) and the AUR; #15 closed; installed here and `nog clean` run for real (18.4 GB → 7.7 GB, every installed version kept). Next: restart into kernel 7.2.7; watch the 1 Oct update (summary, Source, warnings one per line); then C3 (#7).
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
