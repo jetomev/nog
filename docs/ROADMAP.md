@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.2 — Released (a hold always ends, #27)
+- [x] New `sightings` module: the hold record, `~/.local/state/nog/holds.tsv` — first sighting per installed version, every version seen since
+- [x] Hold window clocked from the first sighting; a newer build no longer restarts it
+- [x] Safety wait on the candidate: Tier 1 7 days, Tier 2 3, Tier 3 1 (`tierN_safety_days`)
+- [x] Holds already running dated from the run logs (both CSV layouts); unanswered sources keep their clocks
+- [x] Tables and run log: `waiting since <date> · N newer versions skipped`, `newest build too new`
+
 ### v1.5.1 — Released (clean build log, F-1 / #24)
 - [x] The relay test's fake `error: no space left` goes to a sink, not the real stderr
 - [x] v1.5.0 verified through a fresh yay install from the AUR

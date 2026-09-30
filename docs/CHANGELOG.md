@@ -2,6 +2,20 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.2 — September 30, 2026
+
+**A hold always ends** ([#27](https://github.com/jetomev/nog/issues/27), `priority-1`). nog counted each hold from the build date of the *newest* version. Arch carries only the newest build, and busy packages get a new one every week or two, so every new build restarted the countdown — and a package whose updates arrive faster than its window was never released. Nothing said so. On the development machine `linux-zen` sat at 7.0.5 from May to the end of September while nine newer versions came and went; its countdown went 28, 20, then back up to 23, 25, 29… and never reached zero. Seven of the fourteen held Tier 1 packages were stuck this way, including both kernels, `mesa` and `mkinitcpio`. Raised by Javier, who suspected exactly this.
+
+- **The window now counts from the first new version seen.** A newer build no longer restarts it.
+- **A safety wait on what actually installs.** When the window is over, the newest version is released once it is itself at least **7 days** old (Tier 1), **3** (Tier 2) or **1** (Tier 3). Settable in `nog.conf` (`tierN_safety_days`).
+- **The tables say so:** `waiting since Jul 29 · 8 newer versions skipped`, and `newest build too new` during the safety wait. The run log records the same note.
+- **A new record, `~/.local/state/nog/holds.tsv`,** remembers the first sightings. Holds that were already running are dated from your run logs, read by each file's own header. A source that did not answer on a run keeps its clocks, so a failed AUR query cannot restart them.
+- **Never stricter than before.** Without a record, the rule is exactly the old one.
+
+On the first run after upgrading, expect a batch of long-held packages to be Ready at once — see [Troubleshooting](../README.md#a-big-batch-of-updates-is-suddenly-ready-after-upgrading-to-v152).
+
+Tests: 172 → 191. Warnings unchanged at 6.
+
 ### v1.5.1 — September 29, 2026
 
 **A clean build log.** One of the tests added in v1.4.3 starts a real program that deliberately fails with `error: no space left`, to prove nog captures the reason. It passed — but it let that fake error through to the real screen, so every package build printed an error line that was not one ([#24](https://github.com/jetomev/nog/issues/24), found during the v1.5.0 smoke build). Anyone reading an AUR build log would reasonably have stopped at it. The test now sends that output nowhere. nog itself is unchanged.

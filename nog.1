@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.5.1" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.5.2" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -87,7 +87,8 @@ one of three buckets:
 \(em hold window has expired; safe to upgrade
 .IP \(bu 2
 .B Held
-\(em still within the tier's hold window, or Tier 1 package with
+\(em still within the tier's hold window, the newest build still inside its
+safety wait, or Tier 1 package with
 .B manual_signoff = true
 .IP \(bu 2
 .B Unknown
@@ -417,6 +418,15 @@ controls whether Tier 1 auto-releases (default) or stays wholesale held
 Pacman sync databases. Read-only by nog, for build-date lookup during
 .BR "nog update" .
 .TP
+.I ~/.local/state/nog/holds.tsv
+The hold record (v1.5.2): one line per pending update \(em source, name,
+installed version, first sighting (Unix time) and every new version seen since.
+Written by
+.B nog update
+as the invoking user; path set by \fBhold_record\fR under \fB[paths]\fR. Holds
+that began before the record existed are dated from the run logs. Deleting it is
+safe: holds fall back to the pre-v1.5.2 rule until it is rebuilt.
+.TP
 .I /etc/nog/sources.toml
 Source kill-switch state, managed by
 .B nog activate
@@ -463,6 +473,18 @@ section of
 that must elapse after the package's upstream publish date before the update is
 applied during
 .BR "nog update" .
+.PP
+Since v1.5.2 the window is counted from the \fBfirst\fR new version seen for the
+installed version, not from the newest build: Arch carries only the newest build,
+and a new build every week or two used to restart the countdown indefinitely
+(issue #27). First sightings are kept in the hold record (see
+.BR FILES ).
+When the window is over, the newest version is released once it is itself at
+least the tier's \fBsafety wait\fR old: \fBtier1_safety_days\fR (default 7),
+\fBtier2_safety_days\fR (3) and \fBtier3_safety_days\fR (1) under
+.BR [holds] .
+Rows show \fBwaiting since <date> \(pc N newer versions skipped\fR, and
+\fBnewest build too new\fR during the safety wait.
 .SS Tier 1 \(em 30-day hold, auto-release by default
 The most critical packages: kernel, bootloader, glibc, systemd, mesa. By default
 (\fBmanual_signoff = false\fR), Tier 1 auto-releases after a 30-day hold window
