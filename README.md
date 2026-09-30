@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.2](https://img.shields.io/badge/Version-1.5.2-purple.svg)
+![Version: 1.5.3](https://img.shields.io/badge/Version-1.5.3-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -307,7 +307,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.2"
+version = "1.5.3"
 log_level = "info"
 
 [paths]
@@ -419,7 +419,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 9,500 lines of Rust, with 191 tests that run on every release.
+Around 9,500 lines of Rust, with 193 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -603,7 +603,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.2 shipped 2026-09-30** — a hold always ends: newer builds no longer restart the countdown ([#27](https://github.com/jetomev/nog/issues/27)). **v1.5.1 shipped 2026-09-29** — a clean build log ([#24](https://github.com/jetomev/nog/issues/24)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
+> **v1.5.3 shipped 2026-09-30** — pacman's warnings print one per line again ([#29](https://github.com/jetomev/nog/issues/29)). **v1.5.2 shipped the same day** — a hold always ends: newer builds no longer restart the countdown ([#27](https://github.com/jetomev/nog/issues/27)). The queue is priority-labelled on the [issue tracker](https://github.com/jetomev/nog/issues) — `priority-1` first.
 
 ### Next — see where every package comes from ([#28](https://github.com/jetomev/nog/issues/28) · `priority-2`)
 
@@ -642,6 +642,16 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.3 — September 30, 2026
+
+**pacman's warnings print one per line again** ([#29](https://github.com/jetomev/nog/issues/29), F-1 of v1.5.2). During `nog update`, every `warning: <package>: ignoring package upgrade` line started where the previous one ended, drifting across the screen in a staircase. Found on the first real update after v1.5.2, which was also the first to install through the error relay added in v1.4.3.
+
+The cause is an interaction with sudo. Since 1.9.14, sudo runs the command in its own private terminal and switches yours to "raw" mode while it runs — a security default (`use_pty`). pacman's normal output passes through sudo's terminal and is fixed up on the way. The warning channel, which nog relays itself so it can remember why a step failed, is not — and in raw mode a line break moves the cursor down without returning it to the left edge. nog now adds that return itself whenever it is writing to a terminal; a file or pipe gets the output untouched.
+
+Display only: nothing was installed or skipped wrongly, and the run log was unaffected.
+
+Tests: 191 → 193. Warnings unchanged at 6.
+
 ### v1.5.2 — September 30, 2026
 
 **A hold always ends** ([#27](https://github.com/jetomev/nog/issues/27), `priority-1`). nog counted each hold from the build date of the *newest* version. Arch carries only the newest build, and busy packages get a new one every week or two, so every new build restarted the countdown — and a package whose updates arrive faster than its window was never released. Nothing said so. On the development machine `linux-zen` sat at 7.0.5 from May to the end of September while nine newer versions came and went; its countdown went 28, 20, then back up to 23, 25, 29… and never reached zero. Seven of the fourteen held Tier 1 packages were stuck this way, including both kernels, `mesa` and `mkinitcpio`. Raised by Javier, who suspected exactly this.
@@ -655,14 +665,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 On the first run after upgrading, expect a batch of long-held packages to be Ready at once — see [Troubleshooting](#a-big-batch-of-updates-is-suddenly-ready-after-upgrading-to-v152).
 
 Tests: 172 → 191. Warnings unchanged at 6.
-
-### v1.5.1 — September 29, 2026
-
-**A clean build log.** One of the tests added in v1.4.3 starts a real program that deliberately fails with `error: no space left`, to prove nog captures the reason. It passed — but it let that fake error through to the real screen, so every package build printed an error line that was not one ([#24](https://github.com/jetomev/nog/issues/24), found during the v1.5.0 smoke build). Anyone reading an AUR build log would reasonably have stopped at it. The test now sends that output nowhere. nog itself is unchanged.
-
-Also recorded: v1.5.0 was installed on the development machine twice — first with its own `nog install <file>`, then fresh from the AUR through yay. Both paths work.
-
-Tests: 172 → 172. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

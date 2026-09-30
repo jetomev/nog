@@ -2,6 +2,16 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.3 — September 30, 2026
+
+**pacman's warnings print one per line again** ([#29](https://github.com/jetomev/nog/issues/29), F-1 of v1.5.2). During `nog update`, every `warning: <package>: ignoring package upgrade` line started where the previous one ended, drifting across the screen in a staircase. Found on the first real update after v1.5.2, which was also the first to install through the error relay added in v1.4.3.
+
+The cause is an interaction with sudo. Since 1.9.14, sudo runs the command in its own private terminal and switches yours to "raw" mode while it runs — a security default (`use_pty`). pacman's normal output passes through sudo's terminal and is fixed up on the way. The warning channel, which nog relays itself so it can remember why a step failed, is not — and in raw mode a line break moves the cursor down without returning it to the left edge. nog now adds that return itself whenever it is writing to a terminal; a file or pipe gets the output untouched.
+
+Display only: nothing was installed or skipped wrongly, and the run log was unaffected.
+
+Tests: 191 → 193. Warnings unchanged at 6.
+
 ### v1.5.2 — September 30, 2026
 
 **A hold always ends** ([#27](https://github.com/jetomev/nog/issues/27), `priority-1`). nog counted each hold from the build date of the *newest* version. Arch carries only the newest build, and busy packages get a new one every week or two, so every new build restarted the countdown — and a package whose updates arrive faster than its window was never released. Nothing said so. On the development machine `linux-zen` sat at 7.0.5 from May to the end of September while nine newer versions came and went; its countdown went 28, 20, then back up to 23, 25, 29… and never reached zero. Seven of the fourteen held Tier 1 packages were stuck this way, including both kernels, `mesa` and `mkinitcpio`. Raised by Javier, who suspected exactly this.

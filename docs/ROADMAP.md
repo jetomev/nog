@@ -2,6 +2,10 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.3 — Released (warnings one per line, F-1 / #29)
+- [x] The stderr relay sends a bare LF as CR LF when writing to a terminal — sudo's `use_pty` leaves it in raw mode
+- [x] v1.5.2 verified in the field: linux-zen 7.0.5 → 7.2.7 and mesa released, NVIDIA DKMS rebuilt
+
 ### v1.5.2 — Released (a hold always ends, #27)
 - [x] New `sightings` module: the hold record, `~/.local/state/nog/holds.tsv` — first sighting per installed version, every version seen since
 - [x] Hold window clocked from the first sighting; a newer build no longer restarts it
