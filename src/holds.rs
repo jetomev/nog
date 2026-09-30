@@ -759,6 +759,7 @@ mod tests {
             pkgbase: None,
             version: version.map(|v| v.to_string()),
             provides: Vec::new(),
+            repo: None,
         });
         m
     }

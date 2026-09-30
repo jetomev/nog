@@ -365,6 +365,7 @@ mod tests {
                 pkgbase: Some(base.to_string()),
                 version: None,
                 provides: Vec::new(),
+                repo: None,
             });
         }
         let pins: TierPins = toml::from_str(toml_src).expect("test toml parses");

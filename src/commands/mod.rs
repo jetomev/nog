@@ -18,6 +18,12 @@ use crate::sync_db;
 const C_RED: &str     = "\x1b[38;2;243;139;168m"; // #F38BA8 — Tier 1
 const C_YELLOW: &str  = "\x1b[38;2;249;226;175m"; // #F9E2AF — Tier 2
 const C_GREEN: &str   = "\x1b[38;2;166;227;161m"; // #A6E3A1 — Tier 3
+// v1.5.4 (#28): one colour per non-official source, kept clear of the three
+// tier colours. Official repositories stay plain. The word is always printed,
+// so nothing depends on colour.
+const C_PEACH: &str   = "\x1b[38;2;250;179;135m"; // #FAB387 — AUR
+const C_BLUE: &str    = "\x1b[38;2;137;180;250m"; // #89B4FA — Flatpak
+const C_MAUVE: &str   = "\x1b[38;2;203;166;247m"; // #CBA6F7 — Snap
 const C_SUBTEXT: &str = "\x1b[38;2;166;173;200m"; // #A6ADC8 — muted details
 const C_BOLD: &str    = "\x1b[1m";
 const C_RESET: &str   = "\x1b[0m";
@@ -120,6 +126,26 @@ pub fn install(packages: &[String]) {
         }
     }
 
+    // v1.5.4 (#26): the AUR helper stops to let you review each build recipe.
+    // With nobody at the keyboard it read end-of-input in its menu and died
+    // there, and the reason was buried in its output. Answering for you would
+    // skip the one review the AUR offers, so nog refuses up front instead.
+    if helper.is_some() {
+        use std::io::IsTerminal;
+        if !std::io::stdin().is_terminal() {
+            let official = sync_db::load_packages();
+            let aur = needs_the_keyboard(packages, |p| official.contains_key(p));
+            if !aur.is_empty() {
+                eprintln!("nog: {} not in the official repositories, so it would be built from the AUR.",
+                    aur.join(", "));
+                eprintln!("     The AUR helper stops to let you review each build recipe, and nothing");
+                eprintln!("     is at the keyboard to answer. Run this in a terminal: nog install {}",
+                    packages.join(" "));
+                std::process::exit(1);
+            }
+        }
+    }
+
     // When a helper is configured we always route through it — the helper
     // checks sync repos before AUR, so official packages still install via
     // pacman under the hood. This keeps the code simple and avoids a brittle
@@ -133,6 +159,12 @@ pub fn install(packages: &[String]) {
         eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
         std::process::exit(status.code().unwrap_or(1));
     }
+}
+
+/// v1.5.4 (#26): the names in an install request that would come from the
+/// AUR — every one not found in an enabled sync database. Pure.
+fn needs_the_keyboard<F: Fn(&str) -> bool>(packages: &[String], official: F) -> Vec<String> {
+    packages.iter().filter(|p| !official(p)).cloned().collect()
 }
 
 /// What `nog install` was given (issue #17).
@@ -582,20 +614,32 @@ pub fn update(realign: bool) {
         }
     }
 
-    // Per-source counts.
-    println!();
-    println!("nog: {} official repository update(s) reported by pacman.", official_count);
-    if let Some(h) = helper {
-        println!("nog: {} AUR update(s) reported by {}.", aur_count, h);
-    }
-    if flatpak_present {
-        println!("nog: {} flatpak update(s) reported by flatpak.", flatpak_count);
-    }
-    if snap_present {
-        println!("nog: {} snap update(s) reported by snapd.", snap_count);
-    }
+    // v1.5.4 (#28): the per-source counts are the SUMMARY table now, printed
+    // once the buckets are final. Here we only note how each source took part,
+    // so a failed query reads "could not check", never 0 (#25).
+    let _ = (official_count, aur_count, flatpak_count, snap_count);
+    let switches = sources::load(sources::DEFAULT_PATH);
+    let presence = |active: bool, installed: bool, checked: bool| match (active, installed, checked) {
+        (false, true, _) => Presence::Off,
+        (_, false, _) => Presence::Absent,
+        (true, true, true) => Presence::Checked,
+        (true, true, false) => Presence::Failed,
+    };
+    let source_presence = SourcePresence {
+        aur: match helper {
+            Some(_) => if checked_sources.contains("aur") { Presence::Checked } else { Presence::Failed },
+            None if !switches.aur => Presence::Off,
+            None => Presence::Absent,
+        },
+        flatpak: presence(flatpak_active, flatpak_present || (!flatpak_active && flatpak::is_available()), checked_sources.contains("flatpak")),
+        snap: presence(snap_active, snap_present || (!snap_active && snap::is_available()), checked_sources.contains("snap")),
+        chaotic_off: !switches.chaotic_aur,
+    };
 
     if pending.is_empty() {
+        let rows = summary_rows(&sync_db::repo_order(), &HashMap::new(), &[], &[], &[], &source_presence);
+        println!();
+        print!("{}", format_summary(&rows, true));
         println!();
         println!("nog: System is up to date — nothing to do.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, Vec::new(), "up to date");
@@ -637,6 +681,7 @@ pub fn update(realign: bool) {
                     pkgbase: None,
                     version: None,
                     provides: Vec::new(),
+                    repo: None,
                 });
             }
         }
@@ -650,6 +695,7 @@ pub fn update(realign: bool) {
             pkgbase: None,
             version: None,
             provides: Vec::new(),
+            repo: None,
         });
     }
 
@@ -660,6 +706,7 @@ pub fn update(realign: bool) {
             pkgbase: None,
             version: None,
             provides: Vec::new(),
+            repo: None,
         });
     }
 
@@ -951,7 +998,19 @@ pub fn update(realign: bool) {
     // attention anyway. The CSV snapshot below mirrors this order.
     held.sort_by(|(a, _, ar, _), (b, _, br, _)| ar.cmp(br).then_with(|| a.name.cmp(&b.name)));
 
-    print_buckets(&ready, &held, &unknown, &flatpak_names, &snap_names);
+    let labels: HashMap<String, String> = pending.iter()
+        .map(|u| (sightings::key(u.source.as_str(), &u.name), source_label(u, &packages)))
+        .collect();
+    {
+        let r: Vec<&PendingUpdate> = ready.iter().map(|(u, _, _)| u).collect();
+        let h: Vec<&PendingUpdate> = held.iter().map(|(u, _, _, _)| u).collect();
+        let k: Vec<&PendingUpdate> = unknown.iter().map(|(u, _)| u).collect();
+        let rows = summary_rows(&sync_db::repo_order(), &labels, &r, &h, &k, &source_presence);
+        println!();
+        print!("{}", format_summary(&rows, true));
+    }
+    let _ = (&flatpak_names, &snap_names);
+    print_buckets(&ready, &held, &unknown, &labels);
 
     // v1.4.1 (issue #18) — a tier hold that snapd does not know about is not a
     // hold. snapd auto-refreshes on ITS timer (four times a day by default),
@@ -1461,6 +1520,9 @@ fn tier_color_num(n: u8) -> &'static str {
 /// One row in an update section table.
 struct TableRow {
     pkg: String,
+    /// v1.5.4 (#28): where the package comes from — the repository (`core`,
+    /// `extra`, …) for official packages, else `AUR`, `Flatpak` or `Snap`.
+    source: String,
     old: String,
     new: String,
     tier: u8,
@@ -1468,9 +1530,10 @@ struct TableRow {
 }
 
 impl TableRow {
-    fn from(upd: &PendingUpdate, tier: &Tier, note: String) -> TableRow {
+    fn from(upd: &PendingUpdate, tier: &Tier, source: String, note: String) -> TableRow {
         TableRow {
             pkg: upd.name.clone(),
+            source,
             old: upd.old_version.clone(),
             new: upd.new_version.clone(),
             tier: tier_num(tier),
@@ -1500,6 +1563,10 @@ fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
         .chain(rows.iter().map(|r| r.pkg.len()))
         .max()
         .unwrap();
+    let w_src = std::iter::once("Source".len())
+        .chain(rows.iter().map(|r| r.source.len()))
+        .max()
+        .unwrap();
     let w_old = std::iter::once("Old Version".len())
         .chain(rows.iter().map(|r| r.old.len()))
         .max()
@@ -1518,14 +1585,14 @@ fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
     let g = "  ";
 
     out.push_str(&format!(
-        "{:<wp$}{g}{:<wo$}{g}{:<wn$}{g}{:<wt$}{g}{}\n",
-        pkg_hdr, "Old Version", "New Version", "Tier", "Note",
-        wp = w_pkg, wo = w_old, wn = w_new, wt = w_tier, g = g,
+        "{:<wp$}{g}{:<ws$}{g}{:<wo$}{g}{:<wn$}{g}{:<wt$}{g}{}\n",
+        pkg_hdr, "Source", "Old Version", "New Version", "Tier", "Note",
+        wp = w_pkg, ws = w_src, wo = w_old, wn = w_new, wt = w_tier, g = g,
     ));
     // Rule under the column headers, sized to the table's real width so it
     // never runs short of the Note column or past it.
     let table_width =
-        w_pkg + w_old + w_new + w_tier + w_note + 4 * g.len();
+        w_pkg + w_src + w_old + w_new + w_tier + w_note + 5 * g.len();
     out.push_str(&"-".repeat(table_width));
     out.push('\n');
 
@@ -1538,9 +1605,14 @@ fn format_table(title: &str, rows: &[TableRow], colorize: bool) -> String {
         } else {
             format!("{:<wt$}", r.tier, wt = w_tier)
         };
+        // Padding stays outside the colour codes, like the tier digit.
+        let src_cell = match (colorize, source_color(&r.source)) {
+            (true, Some(c)) => format!("{}{}{}{}", c, r.source, C_RESET, " ".repeat(w_src - r.source.len())),
+            _ => format!("{:<ws$}", r.source, ws = w_src),
+        };
         out.push_str(&format!(
-            "{:<wp$}{g}{:<wo$}{g}{:<wn$}{g}{}{g}{}\n",
-            r.pkg, r.old, r.new, tier_cell, r.note,
+            "{:<wp$}{g}{}{g}{:<wo$}{g}{:<wn$}{g}{}{g}{}\n",
+            r.pkg, src_cell, r.old, r.new, tier_cell, r.note,
             wp = w_pkg, wo = w_old, wn = w_new, g = g,
         ));
     }
@@ -1591,38 +1663,203 @@ fn held_note(remaining: u64, reason: &HeldReason) -> String {
     }
 }
 
+/// v1.5.4 (#28): one row of the SUMMARY table.
+#[derive(Debug, Clone, PartialEq)]
+struct SummaryRow {
+    source: String,
+    state: SummaryState,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SummaryState {
+    Counts { ready: usize, held: usize, unknown: usize },
+    /// The source's own query failed this run (#25). Never shown as 0.
+    CouldNotCheck,
+    /// Switched off with `nog deactivate`.
+    Off,
+}
+
+/// Render the SUMMARY table. Pure + unit-tested. The "Ask you" column (the
+/// Unknown bucket) appears only when some row has something in it.
+fn format_summary(rows: &[SummaryRow], colorize: bool) -> String {
+    let title = "SUMMARY:";
+    let mut out = format!("{}\n{}\n\n", title, "=".repeat(title.len()));
+    let show_unknown = rows.iter().any(|r| matches!(r.state, SummaryState::Counts { unknown, .. } if unknown > 0));
+
+    let (mut t_ready, mut t_held, mut t_unknown) = (0usize, 0usize, 0usize);
+    let mut cells: Vec<(String, Vec<String>)> = Vec::new();
+    for r in rows {
+        let c = match &r.state {
+            SummaryState::Counts { ready, held, unknown } => {
+                t_ready += ready; t_held += held; t_unknown += unknown;
+                let mut v = vec![ready.to_string(), held.to_string()];
+                if show_unknown { v.push(unknown.to_string()); }
+                v.push((ready + held + unknown).to_string());
+                v
+            }
+            SummaryState::CouldNotCheck => vec!["could not check".to_string()],
+            SummaryState::Off => vec!["off".to_string()],
+        };
+        cells.push((r.source.clone(), c));
+    }
+
+    let mut headers = vec!["Ready now", "On hold"];
+    if show_unknown { headers.push("Ask you"); }
+    headers.push("Total");
+    let mut total = vec![t_ready.to_string(), t_held.to_string()];
+    if show_unknown { total.push(t_unknown.to_string()); }
+    total.push((t_ready + t_held + t_unknown).to_string());
+
+    let w_src = rows.iter().map(|r| r.source.len()).chain(["Source".len(), "Total".len()]).max().unwrap();
+    let widths: Vec<usize> = headers.iter().enumerate().map(|(i, h)| {
+        cells.iter().filter(|(_, c)| c.len() == headers.len()).map(|(_, c)| c[i].len())
+            .chain([h.len(), total[i].len()]).max().unwrap()
+    }).collect();
+    let g = "   ";
+    let numbers_width: usize = widths.iter().sum::<usize>() + g.len() * (widths.len() - 1);
+    let table_width = w_src + g.len() + numbers_width;
+
+    let line = |src: &str, vals: &[String], color: Option<&str>| -> String {
+        let src_cell = match color {
+            Some(c) => format!("{}{}{}{}", c, src, C_RESET, " ".repeat(w_src - src.len())),
+            None => format!("{:<w$}", src, w = w_src),
+        };
+        if vals.len() == widths.len() {
+            let nums: Vec<String> = vals.iter().zip(&widths).map(|(v, w)| format!("{:>w$}", v, w = *w)).collect();
+            format!("{}{}{}\n", src_cell, g, nums.join(g))
+        } else {
+            // "could not check" / "off": one note across the number columns.
+            format!("{}{}{}\n", src_cell, g, vals.join(" "))
+        }
+    };
+
+    let hdr: Vec<String> = headers.iter().zip(&widths).map(|(h, w)| format!("{:>w$}", h, w = *w)).collect();
+    out.push_str(&format!("{:<w$}{}{}\n", "Source", g, hdr.join(g), w = w_src));
+    out.push_str(&"-".repeat(table_width));
+    out.push('\n');
+    for (src, c) in &cells {
+        let color = if colorize { source_color(src) } else { None };
+        out.push_str(&line(src, c, color));
+    }
+    out.push_str(&"-".repeat(table_width));
+    out.push('\n');
+    out.push_str(&line("Total", &total, None));
+    out
+}
+
+/// v1.5.4 (#28): the SUMMARY rows, in a fixed order: the official
+/// repositories as pacman.conf lists them, anything else official, then AUR,
+/// Flatpak, Snap. A source that is not installed has no row; one switched off
+/// says `off`; one whose query failed says `could not check`.
+fn summary_rows(
+    repos: &[String],
+    labels: &HashMap<String, String>,
+    ready: &[&PendingUpdate],
+    held: &[&PendingUpdate],
+    unknown: &[&PendingUpdate],
+    states: &SourcePresence,
+) -> Vec<SummaryRow> {
+    let mut counts: Vec<(String, [usize; 3])> = repos.iter().map(|r| (r.clone(), [0; 3])).collect();
+    let mut bump = |label: String, i: usize| {
+        match counts.iter_mut().find(|(l, _)| *l == label) {
+            Some((_, c)) => c[i] += 1,
+            None => { let mut c = [0; 3]; c[i] = 1; counts.push((label, c)); }
+        }
+    };
+    for (i, bucket) in [ready, held, unknown].iter().enumerate() {
+        for u in bucket.iter() {
+            if u.source == Source::Pacman {
+                bump(label_for(labels, u), i);
+            }
+        }
+    }
+    let mut rows: Vec<SummaryRow> = counts.into_iter().map(|(source, c)| SummaryRow {
+        source,
+        state: SummaryState::Counts { ready: c[0], held: c[1], unknown: c[2] },
+    }).collect();
+    if states.chaotic_off && !repos.iter().any(|r| r == "chaotic-aur") {
+        rows.push(SummaryRow { source: "chaotic-aur".into(), state: SummaryState::Off });
+    }
+    for (name, src, presence) in [
+        ("AUR", Source::Aur, &states.aur),
+        ("Flatpak", Source::Flatpak, &states.flatpak),
+        ("Snap", Source::Snap, &states.snap),
+    ] {
+        let state = match presence {
+            Presence::Absent => continue,
+            Presence::Off => SummaryState::Off,
+            Presence::Failed => SummaryState::CouldNotCheck,
+            Presence::Checked => {
+                let n = |b: &[&PendingUpdate]| b.iter().filter(|u| u.source == src).count();
+                SummaryState::Counts { ready: n(ready), held: n(held), unknown: n(unknown) }
+            }
+        };
+        rows.push(SummaryRow { source: name.to_string(), state });
+    }
+    rows
+}
+
+/// How each non-pacman source took part in this run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Presence { Absent, Off, Failed, Checked }
+
+#[derive(Debug, Clone, Copy)]
+struct SourcePresence {
+    aur: Presence,
+    flatpak: Presence,
+    snap: Presence,
+    chaotic_off: bool,
+}
+
+/// v1.5.4 (#28): the Source word for a pending update. Official packages name
+/// the repository they come from, read from the same fresh sync databases the
+/// hold dates come from; one not found there says `official`.
+fn source_label(upd: &PendingUpdate, packages: &HashMap<String, sync_db::PackageDesc>) -> String {
+    match upd.source {
+        Source::Pacman => packages
+            .get(&upd.name)
+            .and_then(|d| d.repo.clone())
+            .unwrap_or_else(|| "official".to_string()),
+        Source::Aur => "AUR".to_string(),
+        Source::Flatpak => "Flatpak".to_string(),
+        Source::Snap => "Snap".to_string(),
+    }
+}
+
+fn label_for(labels: &HashMap<String, String>, upd: &PendingUpdate) -> String {
+    labels
+        .get(&sightings::key(upd.source.as_str(), &upd.name))
+        .cloned()
+        .unwrap_or_else(|| upd.source.as_str().to_string())
+}
+
+fn source_color(source: &str) -> Option<&'static str> {
+    match source {
+        "AUR" => Some(C_PEACH),
+        "Flatpak" => Some(C_BLUE),
+        "Snap" => Some(C_MAUVE),
+        _ => None,
+    }
+}
+
 fn print_buckets(
     ready: &[(PendingUpdate, Tier, ReadyReason)],
     held: &[(PendingUpdate, Tier, u64, HeldReason)],
     unknown: &[(PendingUpdate, Tier)],
-    flatpak_names: &[String],
-    snap_names: &[String],
+    labels: &HashMap<String, String>,
 ) {
     // Ruling #2 of the v2 arc: the user always sees WHERE a package comes
-    // from. Flatpak and snap rows carry their source in the Note column.
-    // v1.4.3 (#20): read from the update itself. Looking the name up in the
-    // snap list tagged the Arch `snapd` package "snap" as well.
-    let _ = (flatpak_names, snap_names);
-    let tag = |upd: &PendingUpdate, note: String| -> String {
-        let src = match upd.source {
-            Source::Flatpak => Some("flatpak"),
-            Source::Snap => Some("snap"),
-            Source::Pacman | Source::Aur => None,
-        };
-        match src {
-            None => note,
-            Some(s) if note.is_empty() => s.to_string(),
-            Some(s) => format!("{} · {}", note, s),
-        }
-    };
+    // from. v1.5.4 (#28): in its own Source column, so the Note column is hold
+    // information only. AUR rows used to carry no mark at all.
+    let src = |upd: &PendingUpdate| label_for(labels, upd);
     let ready_rows: Vec<TableRow> = ready.iter()
-        .map(|(upd, tier, reason)| TableRow::from(upd, tier, tag(upd, ready_note(reason))))
+        .map(|(upd, tier, reason)| TableRow::from(upd, tier, src(upd), ready_note(reason)))
         .collect();
     let held_rows: Vec<TableRow> = held.iter()
-        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, tag(upd, held_note(*remaining, reason))))
+        .map(|(upd, tier, remaining, reason)| TableRow::from(upd, tier, src(upd), held_note(*remaining, reason)))
         .collect();
     let unknown_rows: Vec<TableRow> = unknown.iter()
-        .map(|(upd, tier)| TableRow::from(upd, tier, tag(upd, "no build date in sync DB".to_string())))
+        .map(|(upd, tier)| TableRow::from(upd, tier, src(upd), "no build date in sync DB".to_string()))
         .collect();
 
     println!();
@@ -1842,8 +2079,8 @@ mod output_tests {
     #[test]
     fn table_aligns_and_counts() {
         let rows = vec![
-            TableRow { pkg: "libnm".into(), old: "1.56.1-1".into(), new: "1.56.1-2".into(), tier: 2, note: "9 days past window".into() },
-            TableRow { pkg: "wine-staging".into(), old: "11.12-1".into(), new: "11.13-1".into(), tier: 3, note: "hold just expired".into() },
+            TableRow { pkg: "libnm".into(), source: "extra".into(), old: "1.56.1-1".into(), new: "1.56.1-2".into(), tier: 2, note: "9 days past window".into() },
+            TableRow { pkg: "wine-staging".into(), source: "multilib".into(), old: "11.12-1".into(), new: "11.13-1".into(), tier: 3, note: "hold just expired".into() },
         ];
         let t = format_table("READY TO INSTALL", &rows, false);
         let lines: Vec<&str> = t.lines().collect();
@@ -1852,7 +2089,7 @@ mod output_tests {
         assert_eq!(lines[2], "");
         let hdr = lines[3];
         assert!(hdr.starts_with("Package (2)"));
-        for label in ["Old Version", "New Version", "Tier", "Note"] {
+        for label in ["Source", "Old Version", "New Version", "Tier", "Note"] {
             assert!(hdr.contains(label), "header missing {label}");
         }
         // The rule under the headers spans the whole table: never shorter than
@@ -1867,6 +2104,7 @@ mod output_tests {
         assert!(r0.starts_with("libnm"));
         assert!(r1.starts_with("wine-staging"));
         for (label, v0, v1) in [
+            ("Source", "extra", "multilib"),
             ("Old Version", "1.56.1-1", "11.12-1"),
             ("New Version", "1.56.1-2", "11.13-1"),
             ("Tier", "2", "3"),
@@ -1883,7 +2121,7 @@ mod output_tests {
     #[test]
     fn rule_measures_notes_in_characters_not_bytes() {
         let rows = vec![
-            TableRow { pkg: "elfutils".into(), old: "0.195-1".into(), new: "0.196-1".into(),
+            TableRow { pkg: "elfutils".into(), source: "core".into(), old: "0.195-1".into(), new: "0.196-1".into(),
                        tier: 3, note: "3 days · coupled to lib32-libelf".into() },
         ];
         let t = format_table("ON HOLD FROM INSTALL", &rows, false);
@@ -1894,6 +2132,102 @@ mod output_tests {
             row.chars().count(),
             "rule and its widest row disagree:\n{rule}\n{row}"
         );
+    }
+
+
+    // ---- v1.5.4: the SUMMARY table and the Source column (#28, #25) ---------
+
+    fn upd(name: &str, source: Source) -> PendingUpdate {
+        PendingUpdate { name: name.into(), old_version: "1".into(), new_version: "2".into(), source }
+    }
+
+    fn all_checked() -> SourcePresence {
+        SourcePresence { aur: Presence::Checked, flatpak: Presence::Checked, snap: Presence::Absent, chaotic_off: false }
+    }
+
+    #[test]
+    fn the_summary_counts_by_repository_in_pacman_conf_order() {
+        let repos: Vec<String> = ["core", "extra", "multilib"].iter().map(|s| s.to_string()).collect();
+        let (a, b, c, d) = (upd("linux-zen", Source::Pacman), upd("vim", Source::Pacman),
+                            upd("fresh-editor-bin", Source::Aur), upd("git", Source::Pacman));
+        let labels: HashMap<String, String> = [
+            ("pacman:linux-zen", "extra"), ("pacman:vim", "extra"), ("pacman:git", "core"),
+            ("aur:fresh-editor-bin", "AUR"),
+        ].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let rows = summary_rows(&repos, &labels, &[&a], &[&b, &c, &d], &[], &all_checked());
+        let names: Vec<&str> = rows.iter().map(|r| r.source.as_str()).collect();
+        assert_eq!(names, vec!["core", "extra", "multilib", "AUR", "Flatpak"], "Snap is not installed: no row");
+        assert_eq!(rows[1].state, SummaryState::Counts { ready: 1, held: 1, unknown: 0 });
+        assert_eq!(rows[3].state, SummaryState::Counts { ready: 0, held: 1, unknown: 0 });
+    }
+
+    #[test]
+    fn a_failed_source_says_so_and_is_never_zero() {
+        // #25: the whole point. A failed AUR query used to read "0 AUR updates".
+        let mut p = all_checked();
+        p.aur = Presence::Failed;
+        p.flatpak = Presence::Off;
+        let rows = summary_rows(&[], &HashMap::new(), &[], &[], &[], &p);
+        assert_eq!(rows[0], SummaryRow { source: "AUR".into(), state: SummaryState::CouldNotCheck });
+        assert_eq!(rows[1], SummaryRow { source: "Flatpak".into(), state: SummaryState::Off });
+        let t = format_summary(&rows, false);
+        assert!(t.contains("AUR       could not check") || t.lines().any(|l| l.starts_with("AUR") && l.ends_with("could not check")), "{t}");
+        assert!(!t.lines().any(|l| l.starts_with("AUR") && l.contains(" 0")), "{t}");
+    }
+
+    #[test]
+    fn the_summary_aligns_and_totals() {
+        let rows = vec![
+            SummaryRow { source: "core".into(), state: SummaryState::Counts { ready: 1, held: 6, unknown: 0 } },
+            SummaryRow { source: "chaotic-aur".into(), state: SummaryState::Counts { ready: 10, held: 45, unknown: 0 } },
+            SummaryRow { source: "Snap".into(), state: SummaryState::Off },
+        ];
+        let t = format_summary(&rows, false);
+        let l: Vec<&str> = t.lines().collect();
+        assert_eq!(l[0], "SUMMARY:");
+        assert!(!l[3].contains("Ask you"), "no Unknown anywhere: no column");
+        let hdr = l[3];
+        let end = |label: &str| hdr.find(label).unwrap() + label.len();
+        // Numbers are right-aligned under their headers.
+        assert_eq!(l[5].find('1').unwrap() + 1, end("Ready now"));
+        assert_eq!(&l[6][end("On hold") - 2..end("On hold")], "45");
+        assert!(l[7].starts_with("Snap") && l[7].ends_with("off"));
+        let total = l.last().unwrap();
+        assert!(total.starts_with("Total"));
+        assert_eq!(&total[end("Total") - 2..end("Total")], "62");
+        assert_eq!(l[4].len(), l[8].len(), "both rules the same width");
+    }
+
+    #[test]
+    fn the_ask_you_column_appears_only_when_needed() {
+        let rows = vec![SummaryRow { source: "extra".into(), state: SummaryState::Counts { ready: 0, held: 1, unknown: 2 } }];
+        let t = format_summary(&rows, false);
+        assert!(t.contains("Ask you"));
+        assert!(t.lines().last().unwrap().trim_end().ends_with('3'));
+    }
+
+    #[test]
+    fn every_source_has_a_word_and_aur_is_never_blank() {
+        let mut pk: HashMap<String, sync_db::PackageDesc> = HashMap::new();
+        pk.insert("snapd".into(), sync_db::PackageDesc {
+            builddate: 0, pkgbase: None, version: None, provides: Vec::new(), repo: Some("extra".into()),
+        });
+        assert_eq!(source_label(&upd("snapd", Source::Pacman), &pk), "extra");
+        assert_eq!(source_label(&upd("snapd", Source::Snap), &pk), "Snap", "the #20 trap: same name, other source");
+        assert_eq!(source_label(&upd("walker-bin", Source::Aur), &pk), "AUR");
+        assert_eq!(source_label(&upd("org.x", Source::Flatpak), &pk), "Flatpak");
+        assert_eq!(source_label(&upd("ghost", Source::Pacman), &pk), "official");
+    }
+
+    #[test]
+    fn colour_never_moves_a_column() {
+        let rows = vec![
+            TableRow { pkg: "a".into(), source: "AUR".into(), old: "1".into(), new: "2".into(), tier: 3, note: "x".into() },
+            TableRow { pkg: "b".into(), source: "extra".into(), old: "1".into(), new: "2".into(), tier: 3, note: "y".into() },
+        ];
+        let strip = |t: String| { let mut o = String::new(); let mut esc = false;
+            for c in t.chars() { if c == '\x1b' { esc = true; continue; } if esc { if c == 'm' { esc = false; } continue; } o.push(c); } o };
+        assert_eq!(strip(format_table("READY TO INSTALL", &rows, true)), format_table("READY TO INSTALL", &rows, false));
     }
 
     #[test]
@@ -1922,6 +2256,17 @@ mod output_tests {
                 "note does not lead with its countdown: {note:?}"
             );
         }
+    }
+
+    #[test]
+    fn only_aur_names_need_the_keyboard() {
+        // #26: official packages install fine without a terminal; AUR ones
+        // stop in the helper's review menu.
+        let official = |p: &str| p == "vim" || p == "git";
+        let req: Vec<String> = ["vim", "grubforge", "git", "walker-bin"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(needs_the_keyboard(&req, official), vec!["grubforge", "walker-bin"]);
+        let only_official: Vec<String> = vec!["vim".into()];
+        assert!(needs_the_keyboard(&only_official, official).is_empty());
     }
 
     #[test]

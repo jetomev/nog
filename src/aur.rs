@@ -105,22 +105,53 @@ pub fn pending_updates(helper: Helper) -> Result<Vec<PendingUpdate>, String> {
         .arg("-Qua")
         .output()
         .map_err(|e| format!("failed to launch {}: {}", helper.binary(), e))?;
+    interpret_qua(
+        helper.binary(),
+        output.status.success(),
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+/// Read a helper's `-Qua` answer. Pure, so every case is a unit test.
+///
+/// Both helpers exit 1 with empty stdout when there is nothing to update, so
+/// the exit code alone cannot tell "nothing" from "failed". v1.5.4 (#25): the
+/// error output can. Checked on the development desktop, 30 Sep 2026:
+///   * `yay -Qua` with nothing pending: exit 1, stdout empty, stderr empty.
+///   * `paru -Qua` failing (`--ignore` probe): exit 1, stdout empty, stderr
+///     `error: failed to run: pacman --query …`.
+/// Until now both read as "0 AUR updates", and the error was thrown away.
+/// Now empty stdout is "nothing to update" only when stderr says nothing
+/// either — yay's `->` notices (e.g. `-> Missing AUR Packages`) and
+/// `warning:` lines are information, not failure.
+fn interpret_qua(
+    binary: &str,
+    success: bool,
+    code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+) -> Result<Vec<PendingUpdate>, String> {
+    let complaint: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter(|l| !l.starts_with("->") && !l.to_ascii_lowercase().starts_with("warning:"))
+        .collect();
 
-    // Helpers return non-zero with empty stdout when there's nothing to update.
-    // Treat "empty stdout" as "no updates" regardless of exit code so we don't
-    // have to second-guess helper-specific conventions.
     if stdout.trim().is_empty() {
-        return Ok(Vec::new());
+        if complaint.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(complaint.join(" / "));
     }
 
-    if !output.status.success() {
-        let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if msg.is_empty() {
-            format!("{} -Qua exited with status {}", helper.binary(), output.status)
+    if !success {
+        return Err(if complaint.is_empty() {
+            format!("{} -Qua exited with status {}", binary, code.unwrap_or(-1))
         } else {
-            msg
+            complaint.join(" / ")
         });
     }
 
@@ -281,6 +312,38 @@ fn parse_date_to_unix(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- v1.5.4: a failing helper is not "nothing to update" (#25) ----------
+
+    #[test]
+    fn an_empty_quiet_answer_is_nothing_to_update() {
+        // yay, 30 Sep 2026: exit 1, empty stdout, empty stderr.
+        assert!(interpret_qua("yay", false, Some(1), "", "").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_answer_with_an_error_is_a_failure() {
+        // paru, 30 Sep 2026 — this read as "0 AUR updates" before v1.5.4.
+        let e = interpret_qua("paru", false, Some(1), "",
+            "error: failed to run: pacman --query --ignore=fresh-editor-bin -q -- a b\n").unwrap_err();
+        assert!(e.starts_with("error: failed to run: pacman --query"), "{e}");
+    }
+
+    #[test]
+    fn yay_notices_are_not_failures() {
+        let got = interpret_qua("yay", false, Some(1), "", " -> Missing AUR Packages:  cpuminer\nwarning: something mild\n");
+        assert!(got.unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_real_answer_is_parsed_with_or_without_yays_age_suffix() {
+        let got = interpret_qua("yay", true, Some(0), "fresh-editor-bin 0.5.1-1 -> 0.5.2-1 [2d9h]\n", "").unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].name.as_str(), got[0].old_version.as_str(), got[0].new_version.as_str()),
+                   ("fresh-editor-bin", "0.5.1-1", "0.5.2-1"));
+        let got = interpret_qua("paru", true, Some(0), "fresh-editor-bin 0.5.1-1 -> 0.5.2-1\n", "").unwrap();
+        assert_eq!(got[0].new_version, "0.5.2-1");
+    }
 
     fn owned(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()

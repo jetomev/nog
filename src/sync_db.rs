@@ -67,6 +67,11 @@ pub struct PackageDesc {
     /// against what the pending version will provide. Empty when the field is
     /// absent, which is the common case: most packages provide nothing.
     pub provides: Vec<String>,
+    /// v1.5.4 (#28): the repository this entry was read from (`core`,
+    /// `extra`, `chaotic-aur`, …). The first enabled repository that carries
+    /// a name wins, the same order pacman resolves in. `None` for entries
+    /// that did not come from a sync database (AUR, Flatpak, Snap dates).
+    pub repo: Option<String>,
 }
 
 /// Load the full package map (name → PackageDesc) from every enabled sync
@@ -166,7 +171,8 @@ fn walk_repos_in(sync_dir: &Path) -> HashMap<String, PackageDesc> {
 
         match read_repo(&db_path) {
             Ok(repo_pkgs) => {
-                for (name, desc) in repo_pkgs {
+                for (name, mut desc) in repo_pkgs {
+                    desc.repo = Some(repo.clone());
                     pkgs.entry(name).or_insert(desc);
                 }
             }
@@ -180,6 +186,12 @@ fn walk_repos_in(sync_dir: &Path) -> HashMap<String, PackageDesc> {
     }
 
     pkgs
+}
+
+/// v1.5.4 (#28): the enabled repositories, in pacman.conf order, for the
+/// summary table. Empty if pacman.conf cannot be read.
+pub fn repo_order() -> Vec<String> {
+    enabled_repos().unwrap_or_default()
 }
 
 /// Read the list of enabled repositories from pacman.conf, preserving order.
@@ -372,7 +384,7 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
 
     match (name, date) {
         (Some(n), Some(d)) => {
-            Some((n, PackageDesc { builddate: d, pkgbase, version, provides }))
+            Some((n, PackageDesc { builddate: d, pkgbase, version, provides, repo: None }))
         }
         _ => None,
     }
