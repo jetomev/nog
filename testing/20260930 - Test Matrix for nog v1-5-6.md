@@ -14,6 +14,7 @@
 | 1.4 | `strings target/release/nog \| grep -i CARGO_MANIFEST_DIR` | empty | **PASS** | |
 | 1.5 | `man --warnings -l nog.1` | no warnings | **PASS** | |
 | 1.6 | Version sync | 1.5.6 | **PASS** | |
+| 1.8 | Release + AUR | signed assets; AUR smoke build green; ready-built package attached for the VM | **PASS** | GitHub v1.5.6 Latest, source sha256 verified after download; AUR `0aed844`, 219 passed in `check()`; `nog-1.5.6-1-x86_64.pkg.tar.zst` + `.sig` attached, downloaded copy identical |
 | 1.7 | On this desktop (lists 5 h old, no keyring pending) | neither new path triggers; `nog update` report unchanged | **PASS** | report: 60 held, 0 ready, no key-store message |
 
 ## Starting point

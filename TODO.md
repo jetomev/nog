@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.5.6** (30 Sep 2026) — fresh package lists before an install (#30), keys never held (#31). 219 tests. VM checks pending. Same day: v1.5.5 (#15), v1.5.4, v1.5.3, v1.5.2.
+**Current release: v1.5.6** (30 Sep 2026) — fresh package lists before an install (#30), keys never held (#31). 219 tests. On GitHub (Latest, with the ready-built package attached for the VM) and the AUR (`0aed844`). VM checks pending. Same day: v1.5.5 (#15), v1.5.4, v1.5.3, v1.5.2.
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
