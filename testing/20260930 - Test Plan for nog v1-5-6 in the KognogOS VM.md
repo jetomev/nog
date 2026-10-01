@@ -7,6 +7,8 @@
 ## Starting point
 Best: revert `kognog-hypeforge` to the snapshot `clean-install-2` (a fresh install: the disc's own package lists, never refreshed). Ask the hypeForge session first; that revert discards whatever the VM holds now.
 
+## §1 · #30 — package lists before an install
+
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
 | 1.1 | Reproduce with the installed (old) nog: `nog install cowsay` | fails: files not found on the mirrors | **DEFERRED** | the failing direction first |
@@ -14,5 +16,10 @@ Best: revert `kognog-hypeforge` to the snapshot `clean-install-2` (a fresh insta
 | 1.3 | Same, with everything held | lists refreshed with `pacman -Sy`, then the install | **DEFERRED** | may not occur naturally |
 | 1.4 | Answer **n** at "Begin the handoff?" | install stops: "the update did not complete … not installing cowsay" | **DEFERRED** | |
 | 1.5 | Run again right away | lists fresh: installs at once, no update | **DEFERRED** | |
+
+## §2 · #31 — keys first
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
 | 2.1 | A pending `archlinux-keyring` | Ready, `keys · never held, installed first`; its own pacman step before the main one | **DEFERRED** | a fresh install from an older disc usually has one pending |
 | 2.2 | Key store missing (`/etc/pacman.d/gnupg` moved aside) | nog explains, runs `pacman-key --init` + `--populate`, carries on | **DEFERRED** | restore the original afterwards |
