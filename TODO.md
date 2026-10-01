@@ -59,6 +59,7 @@ One change to the log file fixes all four, so they ship together.
 - [ ] **#7 · priority-3** · nog manages Flatpak and Snap as well as pacman, gains a JSON output mode, and gets its own app (nogForge).
 
 ### 7 · Later
+- [ ] **#32 · found 2026-10-01 (forgeKit session):** `nog install` has no way to answer the AUR helper's "Proceed?" for **repository** packages when run from a script (a piped `y` was needed for python-pyte). Proposal: `nog install --yes`, passed through to the helper; AUR builds keep refusing without a person (that refusal worked correctly the same day)
 - [ ] **#5 · priority-4** · A rare mismatch: a newer app built against a newer system library than the one nog is still holding back.
 
 ---
