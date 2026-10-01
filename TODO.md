@@ -20,6 +20,11 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 
 ## Next up — in this order
 
+### 00 · Found in the KognogOS VM, 30 Sep — code done, NOT released
+- [ ] **#30 · priority-1** · `nog install` on a fresh install used the disc's old package lists and failed; now refreshes the safe way first (lists older than a day → tier-aware update → install). *Code done, 219 tests; untested in the VM*
+- [ ] **#31 · priority-1** · keys first: archlinux-keyring / chaotic-keyring never held, installed in their own step first; a missing key store is set up. *Code done; untested in the VM*
+- [ ] **VM test** — `testing/20260930 - Test Plan for nog v1-5-6 in the KognogOS VM.md`, once the hypeForge session is done with `kognog-hypeforge` (Javier's ruling: wait; no release before it passes). Then release v1.5.6
+
 ### 0 · Javier's concerns, raised 30 Sep (the "two-week topic") — in this order
 - [x] **A · #27 · priority-1 · Holds that never end.** *Code done 30 Sep, v1.5.2: 191 tests; dry run on this desktop releases linux-zen + mesa, linux-lts 1 day into its safety wait.* The waiting period is counted from the build date of the *newest* version, so every new build restarts the clock. Proven on this desktop 30 Sep: linux-zen has been held since at least 29 Jul (7.0.5 installed; 9 different new versions came and went, the countdown never reached 0; the newest, 7.2.7, is 9 days old). Tier 1 waiting longer than its own 30 days: linux-zen (+headers), linux-lts (+headers, 12 versions), mesa, lib32-mesa, mkinitcpio. Tier 2 today: none. Tier 3: python-platformdirs (31 days, 7 versions). The logs start 29 Jul, so these are minimums. Needs a ruling on the fix, then an issue. **Ruled 30 Sep: count from the first new version + a safety wait (T1 7 days, T2 3, T3 1, settable)**
 - [x] **F-1 of v1.5.2 · #29** · pacman's warnings printed as a staircase under sudo's `use_pty`; fixed in v1.5.3
