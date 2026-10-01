@@ -176,6 +176,43 @@ pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
     crate::handoff::run(&mut cmd, "sudo pacman")
 }
 
+/// v1.5.6 (#30): refresh the package lists only (`sudo pacman -Sy`). Used
+/// solely before `nog install`, right after a tier-aware update found nothing
+/// it may install: the system is then exactly where `nog update` leaves it —
+/// every pending update held — but with current lists.
+pub fn sync_lists() -> crate::handoff::Handoff {
+    let mut cmd = Command::new("sudo");
+    cmd.args(["pacman", "-Sy"]);
+    crate::handoff::run(&mut cmd, "sudo pacman")
+}
+
+/// v1.5.6 (#31): install the keyring packages on their own, before anything
+/// else — Arch's own advice when keys fall behind (`pacman -Sy
+/// archlinux-keyring`, then the upgrade).
+pub fn install_keyrings(names: &[String]) -> crate::handoff::Handoff {
+    let mut cmd = Command::new("sudo");
+    cmd.args(["pacman", "-Sy", "--needed", "--noconfirm"]).args(names);
+    crate::handoff::run(&mut cmd, "sudo pacman")
+}
+
+const KEYSTORE: &str = "/etc/pacman.d/gnupg";
+
+/// v1.5.6 (#31): has pacman's key store been set up? A fresh system, or a
+/// copy of a live disc whose store was a temporary in-memory one, has none,
+/// and every signature check then fails.
+pub fn keystore_ready() -> bool {
+    let dir = std::path::Path::new(KEYSTORE);
+    dir.join("pubring.gpg").exists() || dir.join("pubring.kbx").exists()
+}
+
+/// v1.5.6 (#31): set the key store up — `pacman-key --init`, then
+/// `--populate` with every keyring package installed.
+pub fn init_keystore() -> bool {
+    let ok = |args: &[&str]| Command::new("sudo").arg("pacman-key").args(args).status()
+        .map(|s| s.success()).unwrap_or(false);
+    ok(&["--init"]) && ok(&["--populate"])
+}
+
 /// List installed foreign packages (`pacman -Qmq`) — everything that did not
 /// come from a sync repo, i.e. AUR builds and local installs. Feeds the
 /// v1.0.9 foreign fence: the update handoff may only touch foreign packages

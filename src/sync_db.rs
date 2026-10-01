@@ -188,6 +188,28 @@ fn walk_repos_in(sync_dir: &Path) -> HashMap<String, PackageDesc> {
     pkgs
 }
 
+/// v1.5.6 (#30): how long ago the package lists were last refreshed on THIS
+/// machine, in seconds — the oldest of the enabled repositories' lists, read
+/// from each file's change time (ctime). Not its modification time: pacman
+/// stamps a downloaded list with the server's time, which can be hours older
+/// than the refresh. `None` when a list is missing (a fresh copy of a disc, or
+/// a repository never synced), which always means "refresh".
+pub fn lists_age_secs() -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let repos = enabled_repos().ok()?;
+    if repos.is_empty() {
+        return None;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let mut oldest = 0u64;
+    for r in repos {
+        let meta = fs::metadata(Path::new(SYNC_DB_DIR).join(format!("{}.db", r))).ok()?;
+        oldest = oldest.max(now.saturating_sub(meta.ctime()).max(0) as u64);
+    }
+    Some(oldest)
+}
+
 /// v1.5.4 (#28): the enabled repositories, in pacman.conf order, for the
 /// summary table. Empty if pacman.conf cannot be read.
 pub fn repo_order() -> Vec<String> {

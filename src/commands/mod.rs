@@ -96,6 +96,29 @@ pub fn install(packages: &[String]) {
 
     let tm = load_tiers();
 
+    // v1.5.6 (#30): stale package lists ask the mirrors for files they have
+    // already replaced, and the install fails — the first thing a freshly
+    // installed KognogOS met. Refreshing only the lists and then installing one
+    // package is a partial upgrade, which Arch does not support, so the safe
+    // way runs the tier-aware update first: refresh, install what is Ready,
+    // keep the holds. Then the install.
+    let age = sync_db::lists_age_secs();
+    if lists_need_refresh(age, LISTS_MAX_AGE_SECS) {
+        println!("nog: {}", match age {
+            None => "the package lists are missing — refreshing them, the safe way, before installing.".to_string(),
+            Some(a) => format!("the package lists are {} old — refreshing them, the safe way, before installing.", age_words(a)),
+        });
+        println!("     That runs a normal tier-aware update first (ready updates install, holds stay).");
+        if run_update(false, true) != UpdateEnd::Done {
+            eprintln!();
+            eprintln!("nog: the update did not complete, so the package lists may still be old —");
+            eprintln!("     not installing {}. Run `nog update`, then try again.", packages.join(" "));
+            std::process::exit(1);
+        }
+        println!();
+        println!("{}nog: Package lists are current — now installing {}.{}", C_BOLD, packages.join(" "), C_RESET);
+    }
+
     // Issue #17: a locally built package file goes to `pacman -U`. Every Forge
     // release installs one for its dogfood, and until now that step had to
     // leave nog for raw pacman.
@@ -166,6 +189,25 @@ pub fn install(packages: &[String]) {
 /// AUR — every one not found in an enabled sync database. Pure.
 fn needs_the_keyboard<F: Fn(&str) -> bool>(packages: &[String], official: F) -> Vec<String> {
     packages.iter().filter(|p| !official(p)).cloned().collect()
+}
+
+/// v1.5.6 (#30): package lists older than this are refreshed before an install.
+const LISTS_MAX_AGE_SECS: u64 = 24 * 3600;
+
+/// Pure: missing lists, or lists older than `max`, need a refresh.
+fn lists_need_refresh(age: Option<u64>, max: u64) -> bool {
+    age.map_or(true, |a| a > max)
+}
+
+/// "3 days", "1 day", "5 hours" — how old the lists are, in plain words.
+fn age_words(secs: u64) -> String {
+    let (d, h) = (secs / 86_400, secs / 3600);
+    match (d, h) {
+        (0, 1) => "1 hour".into(),
+        (0, h) => format!("{} hours", h),
+        (1, _) => "1 day".into(),
+        (d, _) => format!("{} days", d),
+    }
 }
 
 /// What `nog install` was given (issue #17).
@@ -641,6 +683,8 @@ fn timestamp_for_backup() -> String {
 enum ReadyReason {
     Expired { days_past_window: u64 },
     Realigned,
+    /// v1.5.6 (#31): a keyring package — never held.
+    Keys,
     /// v1.6.0 (#27): released after newer builds kept arriving during the
     /// hold. Before v1.6.0 this package would still be waiting.
     AfterWaiting(Waited),
@@ -683,13 +727,64 @@ enum HeldReason {
     CoupledTo(String),
 }
 
+/// v1.5.6 (#31): the keyring packages. Holding them back is itself the
+/// breakage — every later signature check fails until the new keys land — so
+/// they are never held and are installed before the rest.
+const KEYRINGS: [&str; 2] = ["archlinux-keyring", "chaotic-keyring"];
+
+/// v1.5.6 (#30): before `nog install`, a run that handed nothing to pacman
+/// still has to leave current package lists behind.
+fn refresh_lists_if(before_install: bool) -> UpdateEnd {
+    if !before_install {
+        return UpdateEnd::Done;
+    }
+    println!();
+    println!("{}nog: Refreshing the package lists ...{}", C_BOLD, C_RESET);
+    if pacman::sync_lists().status.success() { UpdateEnd::Done } else { UpdateEnd::Stopped }
+}
+
+/// v1.5.6 (#30): how a run of the update ended, for `nog install`, which runs
+/// one first when the package lists are out of date.
+#[derive(Debug, PartialEq)]
+enum UpdateEnd {
+    /// The package lists are current: pacman ran, or nothing was pending.
+    Done,
+    /// Cancelled or not completed — the lists may still be old.
+    Stopped,
+}
+
 pub fn update(realign: bool) {
+    run_update(realign, false);
+}
+
+/// v1.5.6 (#31): set pacman's key store up when it has never been set up.
+fn ensure_keystore() {
+    if pacman::keystore_ready() {
+        return;
+    }
+    println!();
+    println!("{}nog: pacman's key store has not been set up on this computer yet.{}", C_BOLD, C_RESET);
+    println!("     Without it no package's signature can be checked. Setting it up now");
+    println!("     (pacman-key --init, then --populate) — this asks for your password.");
+    if !pacman::init_keystore() {
+        eprintln!("nog: setting up the key store did not complete — stopping. Run:");
+        eprintln!("       sudo pacman-key --init && sudo pacman-key --populate");
+        std::process::exit(1);
+    }
+    println!("nog: key store ready.");
+}
+
+/// The update itself. `before_install` is set when `nog install` runs it to
+/// bring stale package lists up to date first (#30): then the lists are
+/// refreshed even when nothing may be installed.
+fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     let cfg = load_config();
     let helper = resolve_helper(&cfg);
     guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
     let (run_date, run_time, run_user) = print_update_header();
+    ensure_keystore();
     println!("nog: Checking for pending updates ...");
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
@@ -813,7 +908,7 @@ pub fn update(realign: bool) {
         println!();
         println!("nog: System is up to date — nothing to do.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, Vec::new(), "up to date");
-        return;
+        return refresh_lists_if(before_install);
     }
 
     // v1.0.5: evaluate holds against the SAME database snapshot that produced
@@ -908,6 +1003,12 @@ pub fn update(realign: bool) {
             since: sightings::short_date(r.first_seen),
             skipped: r.skipped(),
         });
+
+        // v1.5.6 (#31): keys are never held — not by date, not by sign-off.
+        if upd.source == Source::Pacman && KEYRINGS.contains(&upd.name.as_str()) {
+            ready.push((upd.clone(), tier, ReadyReason::Keys));
+            continue;
+        }
 
         // Expert-mode override: `manual_signoff = true` on Tier 1 forces every
         // Tier 1 package into the held bucket regardless of date. Escape hatch
@@ -1162,6 +1263,14 @@ pub fn update(realign: bool) {
         }
     }
 
+    // v1.5.6 (#31): no coupling rule may hold the keys back either.
+    let (keys_held, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut held).into_iter()
+        .partition(|(u, _, _, _)| u.source == Source::Pacman && KEYRINGS.contains(&u.name.as_str()));
+    held = rest;
+    for (u, t, _, _) in keys_held {
+        ready.push((u, t, ReadyReason::Keys));
+    }
+
     // v1.0.9 (A4, issue #6): Held reads soonest-to-release first. Ties break
     // alphabetically so the order is stable run-to-run. ManualSignoff rows
     // carry the placeholder 0 and surface at the top — they need the user's
@@ -1264,7 +1373,7 @@ pub fn update(realign: bool) {
         println!("nog: Nothing to install — every pending update is held.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::AllHeld), "");
-        return;
+        return refresh_lists_if(before_install);
     }
 
     // v1.0.9 (Ironhold): the foreign fence — every foreign package is ignored
@@ -1313,7 +1422,7 @@ pub fn update(realign: bool) {
         println!("nog: Cancelled — nothing was installed.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Cancelled), "");
-        return;
+        return UpdateEnd::Stopped;
     }
 
     // v1.3.0 (issue #10): one package manager per source, in nog's own order —
@@ -1335,6 +1444,27 @@ pub fn update(realign: bool) {
     // v1.4.3 (issue #19): what each source's step actually did, so every row
     // of the run log can say what became of its own package.
     let mut steps: HashMap<Source, StepState> = HashMap::new();
+
+    // Step 0 — v1.5.6 (#31): new keys before anything they will be needed for.
+    let keyrings: Vec<String> = ready.iter()
+        .filter(|(u, _, _)| u.source == Source::Pacman && KEYRINGS.contains(&u.name.as_str()))
+        .map(|(u, _, _)| u.name.clone())
+        .collect();
+    if !keyrings.is_empty() {
+        println!();
+        println!("{}nog: Installing the new keys first ({}) ...{}", C_BOLD, keyrings.join(", "), C_RESET);
+        let k = pacman::install_keyrings(&keyrings);
+        if !k.status.success() {
+            eprintln!();
+            eprintln!("{}nog: the keys did not install (status {}) — stopping.{}",
+                C_BOLD, k.status.code().unwrap_or(-1), C_RESET);
+            if let Some(r) = &k.reason {
+                eprintln!("     {}", r);
+            }
+            eprintln!("     Every later package's signature would be checked against old keys.");
+            std::process::exit(k.status.code().unwrap_or(1));
+        }
+    }
 
     // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
@@ -1373,7 +1503,7 @@ pub fn update(realign: bool) {
                 if !prompt_continue_after_failure(&h.to_string(), code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return;
+                    return UpdateEnd::Done;
                 }
             }
         }
@@ -1397,7 +1527,7 @@ pub fn update(realign: bool) {
                 if !prompt_continue_after_failure("flatpak", code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return;
+                    return UpdateEnd::Done;
                 }
             }
         }
@@ -1420,7 +1550,7 @@ pub fn update(realign: bool) {
                 if !prompt_continue_after_failure("snap", code) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return;
+                    return UpdateEnd::Done;
                 }
             }
         }
@@ -1472,6 +1602,7 @@ pub fn update(realign: bool) {
 
     println!();
     println!("Thank you for using nog!");
+    UpdateEnd::Done
 }
 
 /// Issue #9: say something when the running machine no longer matches what is
@@ -1796,6 +1927,7 @@ fn ready_note(reason: &ReadyReason) -> String {
         ReadyReason::Expired { days_past_window: 1 } => "1 day past window".to_string(),
         ReadyReason::Expired { days_past_window } => format!("{} days past window", days_past_window),
         ReadyReason::Realigned => "realigned to match installed headers".to_string(),
+        ReadyReason::Keys => "keys · never held, installed first".to_string(),
         ReadyReason::AfterWaiting(w) => w.describe(),
     }
 }
@@ -2467,6 +2599,24 @@ mod output_tests {
         assert_eq!(needs_the_keyboard(&req, official), vec!["grubforge", "walker-bin"]);
         let only_official: Vec<String> = vec!["vim".into()];
         assert!(needs_the_keyboard(&only_official, official).is_empty());
+    }
+
+    #[test]
+    fn stale_or_missing_lists_need_a_refresh() {
+        // #30: the copied disc's lists were weeks old; a missing list is a refresh.
+        assert!(lists_need_refresh(None, LISTS_MAX_AGE_SECS));
+        assert!(lists_need_refresh(Some(20 * 86_400), LISTS_MAX_AGE_SECS));
+        assert!(!lists_need_refresh(Some(3600), LISTS_MAX_AGE_SECS));
+        assert!(!lists_need_refresh(Some(LISTS_MAX_AGE_SECS), LISTS_MAX_AGE_SECS));
+        assert_eq!(age_words(20 * 86_400 + 5), "20 days");
+        assert_eq!(age_words(86_400), "1 day");
+        assert_eq!(age_words(3 * 3600 + 9), "3 hours");
+    }
+
+    #[test]
+    fn keyrings_say_why_they_were_not_held() {
+        assert!(KEYRINGS.contains(&"archlinux-keyring") && KEYRINGS.contains(&"chaotic-keyring"));
+        assert_eq!(ready_note(&ReadyReason::Keys), "keys · never held, installed first");
     }
 
     #[test]
