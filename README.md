@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.5](https://img.shields.io/badge/Version-1.5.5-purple.svg)
+![Version: 1.5.6](https://img.shields.io/badge/Version-1.5.6-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -40,6 +40,8 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 
 **The tier system**
 - Every package is Tier 1, Tier 2, or Tier 3, with 30 / 15 / 7-day holds
+- **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
+- **Never installs from stale package lists** *(v1.5.6)* — if the lists are missing or more than a day old (a fresh install copied from a disc, say), `nog install` runs the safe tier-aware update first, then installs
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
 - Need a held package now? `nog unlock <pkg> --promote`
@@ -338,7 +340,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.5"
+version = "1.5.6"
 log_level = "info"
 
 [paths]
@@ -458,7 +460,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 10,700 lines of Rust, with 217 tests that run on every release.
+Around 10,700 lines of Rust, with 219 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -647,7 +649,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.5 shipped 2026-09-30** — `nog clean`: tier-aware cleanup of pacman's download cache ([#15](https://github.com/jetomev/nog/issues/15)). **v1.5.4 shipped the same day** — a summary table and a Source column ([#28](https://github.com/jetomev/nog/issues/28)), `could not check` ([#25](https://github.com/jetomev/nog/issues/25)), no-keyboard AUR installs refused ([#26](https://github.com/jetomev/nog/issues/26)). Earlier that day: v1.5.3 ([#29](https://github.com/jetomev/nog/issues/29)) and v1.5.2 ([#27](https://github.com/jetomev/nog/issues/27)).
+> **v1.5.6 shipped 2026-09-30** — never installs from stale package lists ([#30](https://github.com/jetomev/nog/issues/30)), and keys are never held ([#31](https://github.com/jetomev/nog/issues/31)). **v1.5.5 shipped the same day** — `nog clean` ([#15](https://github.com/jetomev/nog/issues/15)). Earlier that day: v1.5.4 ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)), v1.5.3 ([#29](https://github.com/jetomev/nog/issues/29)), v1.5.2 ([#27](https://github.com/jetomev/nog/issues/27)).
 
 ### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.6.0)
 
@@ -657,7 +659,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ### Later
 
-- [ ] **A zero-day lane for `archlinux-keyring`** — holding the keyring back *is itself* the breakage, because signature checks then fail on every later update until it lands. It needs a special class that always releases immediately.
 - [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. What remains is the versioned `=` dependency case, where the declaration is exact rather than a soname.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog status` — a dashboard of what's held, ready, and overdue
@@ -681,6 +682,18 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.6 — September 30, 2026
+
+**Never install from stale package lists, and never hold the keys** ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)). Found on the first freshly installed KognogOS: `nog install` failed until `pacman -Syu` was run by hand.
+
+- **Why it failed.** The installer copies the live disc as it is, including pacman's package lists — as old as the disc. `nog install` never refreshed them, so it asked the mirrors for versions they had already replaced. (`nog update` always refreshed; only `install` trusted the lists on disk.)
+- **The fix, the safe way.** Refreshing only the lists and installing one package is a partial upgrade, which Arch does not support. So when the lists are missing or more than a day old, `nog install` says so, runs the normal tier-aware update first — ready updates install, holds stay — and then installs. "How old" is measured from when the lists were refreshed on this computer, not from the date the server stamps on them.
+- **Keys are never held.** `archlinux-keyring` and `chaotic-keyring` used to wait like any other package (the Arch keyring was Tier 3, seven days). But holding the keys back *is* the breakage: every later signature check fails until they land. They now skip the hold — no tier, no sign-off, no coupling rule — and install in their own step before everything else. A key store that was never set up is set up first, with an explanation.
+
+Released at Javier's request so he can test it in the KognogOS VM through the AUR; the VM checks are recorded as pending in [testing/](testing/).
+
+Tests: 217 → 219. Warnings unchanged at 6.
+
 ### v1.5.5 — September 30, 2026
 
 **`nog clean` — tier-aware cleanup of pacman's download cache** ([#15](https://github.com/jetomev/nog/issues/15)). pacman keeps every package it ever downloads and never removes one by itself; on the development machine the cache had grown to 28 GB by August and was back to 18.4 GB by the end of September. Tools like `paccache` keep the last N of everything. nog already knows how much each package matters, so it keeps more of what hurts to lose:
@@ -696,17 +709,6 @@ On the development machine: 10.8 GB of 18.4 GB could go — 1,845 old versions a
 Also in this release: the test-tally script now reads only a matrix's Result column. It had counted a check *titled* "Failure reason…" as a FAIL, so the published v1.5.0 test record said 4 FAIL where the truth was 3; that record now carries a dated correction.
 
 Tests: 204 → 217. Warnings unchanged at 6.
-
-### v1.5.4 — September 30, 2026
-
-**See where everything comes from, and when a source could not be checked** ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)). Asked for by Javier: *"more information, more power."*
-
-- **A SUMMARY table replaces the four "N update(s) reported by …" lines.** One row per official repository in `pacman.conf` order, then AUR, Flatpak and Snap: Ready now, On hold, Total. An **Ask you** column appears only when something has no trustworthy date.
-- **A Source column on every table.** Official packages name their repository (`core`, `extra`, `multilib`, `chaotic-aur`…); the rest say `AUR`, `Flatpak` or `Snap`, each in its own colour (peach, blue, mauve — clear of the three tier colours). AUR rows used to carry no mark at all. The Note column is hold information again.
-- **A failing AUR helper reads `could not check`, never `0`** (#25). Both yay and paru answer "nothing to update" with an empty reply and exit 1, so nog took any empty reply as "nothing". A failed check looks the same, except the helper says why on its error output. nog now reads that: an empty reply with an error is a failure, shown in the summary and quoted in the warning. Tested with a helper made to fail the way paru did on 30 September: v1.5.3 said `0 AUR update(s)`; v1.5.4 says `could not check`.
-- **`nog install` refuses an AUR package when nobody is at the keyboard** (#26). The helper stops to let you review each build recipe; from a script it read end-of-input in its menu and died there, with the reason buried in its output. nog now says so before starting, in plain words. It does not answer the review for you — that review is the one moment of scrutiny the AUR offers.
-
-Tests: 193 → 204. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

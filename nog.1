@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.5.5" "User Commands"
+.TH NOG 1 "September 2026" "nog v1.5.6" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -65,6 +65,14 @@ are separate pacman operations, and splitting one request could leave half of
 it installed. A mistyped path is reported as a missing file, never searched for
 in the repositories. There is no signature gate beyond pacman's own
 .BR LocalFileSigLevel .
+.IP
+Since v1.5.6, \fBnog install\fR first checks how long ago the package lists were
+refreshed on this machine. When a list is missing or more than a day old, it runs
+the tier-aware update first (ready updates install, holds stay; when nothing may
+be installed, the lists are refreshed with \fBpacman -Sy\fR), then the install.
+Refreshing only the lists and installing one package would be a partial upgrade,
+which Arch does not support. If that update is cancelled or fails, the install
+stops and says why.
 .IP
 Since v1.5.4, when standard input is not a terminal and a requested name is not
 in any enabled repository (so the helper would build it from the AUR), nog
@@ -503,6 +511,12 @@ section of
 that must elapse after the package's upstream publish date before the update is
 applied during
 .BR "nog update" .
+.PP
+The keyring packages \fBarchlinux-keyring\fR and \fBchaotic-keyring\fR are
+never held (since v1.5.6): holding them back would make every later signature
+check fail. They are installed in their own step before the rest of the update.
+If pacman's key store was never set up, nog runs \fBpacman-key --init\fR and
+\fB--populate\fR first.
 .PP
 Since v1.5.2 the window is counted from the \fBfirst\fR new version seen for the
 installed version, not from the newest build: Arch carries only the newest build,

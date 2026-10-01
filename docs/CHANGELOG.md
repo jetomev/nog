@@ -2,6 +2,18 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.6 — September 30, 2026
+
+**Never install from stale package lists, and never hold the keys** ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)). Found on the first freshly installed KognogOS: `nog install` failed until `pacman -Syu` was run by hand.
+
+- **Why it failed.** The installer copies the live disc as it is, including pacman's package lists — as old as the disc. `nog install` never refreshed them, so it asked the mirrors for versions they had already replaced. (`nog update` always refreshed; only `install` trusted the lists on disk.)
+- **The fix, the safe way.** Refreshing only the lists and installing one package is a partial upgrade, which Arch does not support. So when the lists are missing or more than a day old, `nog install` says so, runs the normal tier-aware update first — ready updates install, holds stay — and then installs. "How old" is measured from when the lists were refreshed on this computer, not from the date the server stamps on them.
+- **Keys are never held.** `archlinux-keyring` and `chaotic-keyring` used to wait like any other package (the Arch keyring was Tier 3, seven days). But holding the keys back *is* the breakage: every later signature check fails until they land. They now skip the hold — no tier, no sign-off, no coupling rule — and install in their own step before everything else. A key store that was never set up is set up first, with an explanation.
+
+Released at Javier's request so he can test it in the KognogOS VM through the AUR; the VM checks are recorded as pending in [testing/](../testing/).
+
+Tests: 217 → 219. Warnings unchanged at 6.
+
 ### v1.5.5 — September 30, 2026
 
 **`nog clean` — tier-aware cleanup of pacman's download cache** ([#15](https://github.com/jetomev/nog/issues/15)). pacman keeps every package it ever downloads and never removes one by itself; on the development machine the cache had grown to 28 GB by August and was back to 18.4 GB by the end of September. Tools like `paccache` keep the last N of everything. nog already knows how much each package matters, so it keeps more of what hurts to lose:

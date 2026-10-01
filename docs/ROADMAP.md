@@ -2,6 +2,12 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.6 — Released (stale lists before an install, #30; keys first, #31)
+- [x] `nog install`: lists missing or older than a day (local ctime) → tier-aware update first, `pacman -Sy` when nothing may install, then the install; a stopped update stops the install
+- [x] `archlinux-keyring` / `chaotic-keyring` never held (date, sign-off, coupling) and installed in their own step first — the README's "zero-day lane for the keyring" item
+- [x] Key store set up (`pacman-key --init`, `--populate`) when it never was
+- [ ] Proven in the KognogOS VM — pending (test plan in testing/)
+
 ### v1.5.5 — Released (nog clean, #15 — the first piece of C5, shipped early)
 - [x] `cache` module: pacman's `alpm_pkg_vercmp` ported; checked against `vercmp` over every pair in a real cache
 - [x] Retention per tier: 3 / 2 / 1 versions (`[clean]` in nog.conf); installed never removed; newer downloads kept; uninstalled cleared; `.sig` with its package
