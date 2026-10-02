@@ -54,6 +54,20 @@ pub fn run(cmd: &mut Command, what: &str) -> Handoff {
     run_into(cmd, what, std::io::stderr(), crlf)
 }
 
+/// v1.5.8 (F-8): run with stderr left on the terminal, for the steps where
+/// pacman asks a question. Relaying stderr through nog (v1.4.3, #21) let it
+/// race pacman's stdout, which reaches the terminal through sudo's
+/// pseudo-terminal: the question could land above the package table it asks
+/// about and scroll out of sight. With both streams on the terminal they
+/// arrive in pacman's own order. The cost: no failure reason is kept for
+/// these steps — the status is, and the reason stays on screen.
+pub fn run_on_screen(cmd: &mut Command, what: &str) -> Handoff {
+    let status = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", what, e));
+    Handoff { status, reason: None }
+}
+
 /// `run`, relaying to any sink. The terminal in real use; in tests, a sink
 /// that records *when* bytes arrive, which is the property that matters.
 fn run_into<W: Write + Send + 'static>(cmd: &mut Command, what: &str, mut out: W, crlf: bool) -> Handoff {

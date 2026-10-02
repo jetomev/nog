@@ -114,7 +114,9 @@ pub fn checkupdates_capture() -> Result<Vec<PendingUpdate>, CheckUpdatesError> {
 
 pub fn install(packages: &[String]) -> ExitStatus {
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
-    let mut args = vec!["-S", "--noconfirm"];
+    // v1.5.8 (F-6, #38): no --noconfirm. Since v0.6.0 pacman answered its
+    // own "Proceed?"; an install is something the person agrees to.
+    let mut args = vec!["-S"];
     args.extend_from_slice(&pkgs);
     run(&args)
 }
@@ -123,7 +125,7 @@ pub fn install(packages: &[String]) -> ExitStatus {
 /// passed after `--` so a file whose name begins with a dash is never read
 /// as an option.
 pub fn install_files(paths: &[String]) -> ExitStatus {
-    let mut args = vec!["-U", "--noconfirm", "--"];
+    let mut args = vec!["-U", "--"];
     args.extend(paths.iter().map(|s| s.as_str()));
     run(&args)
 }
@@ -167,13 +169,29 @@ pub fn update() -> ExitStatus {
     run(&["-Syu"])
 }
 
-pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
+/// v1.5.8: `targets` is set when `nog install` updates first (F-5, #37):
+/// pacman is then given exactly the Ready packages (`-Sy --needed <ready>`)
+/// instead of `-Syu --ignore <held>`, so it prints no line per held package.
+/// `--ignore` still rides along, so a dependency that reaches for a held
+/// package is still asked about. Both forms leave pacman's stderr on the
+/// terminal (F-8) so its question cannot overtake its table.
+pub fn update_excluding(excluded: &[String], targets: Option<&[String]>) -> crate::handoff::Handoff {
     let mut cmd = Command::new("sudo");
-    cmd.args(["pacman", "-Syu"]);
-    if !excluded.is_empty() {
+    match targets {
+        None => {
+            cmd.args(["pacman", "-Syu"]);
+        }
+        Some(t) if t.is_empty() => {
+            cmd.args(["pacman", "-Sy"]);
+        }
+        Some(t) => {
+            cmd.args(["pacman", "-Sy", "--needed"]).args(t);
+        }
+    }
+    if !excluded.is_empty() && targets.map_or(true, |t| !t.is_empty()) {
         cmd.args(["--ignore", &excluded.join(",")]);
     }
-    crate::handoff::run(&mut cmd, "sudo pacman")
+    crate::handoff::run_on_screen(&mut cmd, "sudo pacman")
 }
 
 /// v1.5.6 (#30): refresh the package lists only (`sudo pacman -Sy`). Used
@@ -182,7 +200,10 @@ pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
 /// every pending update held — but with current lists.
 pub fn sync_lists() -> crate::handoff::Handoff {
     let mut cmd = Command::new("sudo");
-    cmd.args(["pacman", "-Sy"]);
+    // v1.5.8 (F-7, #39): no progress bars. pacman ends a bar with a cursor
+    // move, not a line ending; at the bottom of a full terminal that move does
+    // nothing, and the notice after it lost its blank line.
+    cmd.args(["pacman", "-Sy", "--noprogressbar"]);
     crate::handoff::run(&mut cmd, "sudo pacman")
 }
 

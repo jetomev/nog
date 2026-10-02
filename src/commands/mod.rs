@@ -108,16 +108,24 @@ pub fn install(packages: &[String]) {
     let reason = refresh_reason(
         sync_db::lists_age_secs(), sync_db::update_stamp_age_secs(), LISTS_MAX_AGE_SECS);
     if let Some(r) = reason {
-        println!("nog: {} — updating first, the safe way, before installing.", r.words());
-        println!("     That runs a normal tier-aware update first (ready updates install, holds stay).");
+        // v1.5.8 (F-7, #39): a designed notice, not one more `nog:` line.
+        let mut why = r.words();
+        if let Some(c) = why.get(0..1) {
+            why = c.to_uppercase() + &why[1..];
+        }
+        notice(C_BLUE, "nog updates the system first, the safe way", &[
+            format!("{}.", why),
+            "Installing on top of that could mix old and new packages, so the".to_string(),
+            "updates that are ready install first. Held packages stay as they are.".to_string(),
+        ]);
+        INSTALL_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
         if run_update(false, true) != UpdateEnd::Done {
-            eprintln!();
-            eprintln!("nog: the update did not complete, so the package lists may still be old —");
-            eprintln!("     not installing {}. Run `nog update`, then try again.", packages.join(" "));
+            enotice(C_PEACH, &format!("Not installing {}", packages.join(" ")), &[
+                "The update did not complete, so the package lists may still be old.".to_string(),
+                "Run `nog update`, then try again.".to_string(),
+            ]);
             std::process::exit(1);
         }
-        println!();
-        println!("{}nog: Package lists are current — now installing {}.{}", C_BOLD, packages.join(" "), C_RESET);
     }
 
     // Issue #17: a locally built package file goes to `pacman -U`. Every Forge
@@ -136,20 +144,17 @@ pub fn install(packages: &[String]) {
         return;
     }
 
-    for pkg in packages {
+    // v1.5.8 (F-7, #39): one notice for the install itself; pacman asks
+    // next (F-6, #38), showing exactly what, dependencies included.
+    let tier_lines: Vec<String> = packages.iter().map(|pkg| {
         let tier = tm.classify(pkg);
         match tier {
-            Tier::One => println!(
-                "nog: '{}' is {} — critical system package, will be protected by 30-day hold on future updates.",
-                pkg, tier
-            ),
-            Tier::Two => println!(
-                "nog: '{}' is {} — 15-day hold applies to future updates.",
-                pkg, tier
-            ),
-            Tier::Three => println!("nog: '{}' is {} — proceeding.", pkg, tier),
+            Tier::One => format!("{} is {} — a critical system package; its updates wait 30 days.", pkg, tier),
+            Tier::Two => format!("{} is {} — its updates wait 15 days.", pkg, tier),
+            Tier::Three => format!("{} is {} — its updates wait 7 days.", pkg, tier),
         }
-    }
+    }).collect();
+    notice(C_GREEN, &format!("Installing {}", packages.join(" ")), &tier_lines);
 
     // v1.5.4 (#26): the AUR helper stops to let you review each build recipe.
     // With nobody at the keyboard it read end-of-input in its menu and died
@@ -181,9 +186,19 @@ pub fn install(packages: &[String]) {
         None    => pacman::install(packages),
     };
     if !status.success() {
-        eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
-        std::process::exit(status.code().unwrap_or(1));
+        stopped_installing(packages, status.code());
     }
+}
+
+/// v1.5.8 (F-6 #38, F-7 #39): the install was declined or failed. pacman's
+/// exit status cannot tell the two apart, so say both.
+fn stopped_installing(what: &[String], code: Option<i32>) -> ! {
+    enotice(C_PEACH, &format!("Not installed: {}", what.join(" ")), &[
+        format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
+            code.unwrap_or(-1)),
+        "Nothing was changed by this install.".to_string(),
+    ]);
+    std::process::exit(code.unwrap_or(1));
 }
 
 /// v1.5.4 (#26): the names in an install request that would come from the
@@ -294,25 +309,26 @@ fn split_install_args(args: &[String], exists: impl Fn(&str) -> bool) -> Result<
 /// command, and like every `nog install` it does what was asked. pacman's
 /// own `LocalFileSigLevel` still applies exactly as it would without nog.
 fn install_files(files: &[String], tm: &TierManager) {
+    // v1.5.8 (F-7, #39): one notice for the whole request, like a named install.
+    let mut lines = Vec::new();
+    let mut names = Vec::new();
     for f in files {
         match pacman::file_identity(f) {
             Some((name, version)) => {
                 let tier = tm.classify(&name);
-                println!(
-                    "nog: '{}' {} (local file) is {} — installing from {}.",
-                    name, version, tier, f
-                );
+                lines.push(format!("{} {} is {} — from the file {}", name, version, tier, f));
+                names.push(name);
             }
             None => {
-                eprintln!("nog: pacman cannot read {} as a package file.", f);
+                enotice(C_PEACH, "Not installing", &[format!("pacman cannot read {} as a package file.", f)]);
                 std::process::exit(1);
             }
         }
     }
+    notice(C_GREEN, &format!("Installing {}", names.join(" ")), &lines);
     let status = pacman::install_files(files);
     if !status.success() {
-        eprintln!("nog: install exited with status {}", status.code().unwrap_or(-1));
-        std::process::exit(status.code().unwrap_or(1));
+        stopped_installing(&names, status.code());
     }
 }
 
@@ -772,8 +788,7 @@ fn refresh_lists_if(before_install: bool) -> UpdateEnd {
     if !before_install {
         return UpdateEnd::Done;
     }
-    println!();
-    println!("{}nog: Refreshing the package lists ...{}", C_BOLD, C_RESET);
+    println!("{}nog: refreshing the package lists ...{}", C_SUBTEXT, C_RESET);
     if pacman::sync_lists().status.success() {
         sync_db::mark_update_done();
         UpdateEnd::Done
@@ -800,6 +815,80 @@ pub fn update(realign: bool) {
     if let UpdateEnd::Failed(code) = run_update(realign, false) {
         std::process::exit(code);
     }
+}
+
+/// v1.5.8 (F-5, #37): set while `nog install` runs its update first, so the
+/// bookkeeping line about the run log stays out of a one-package install. The
+/// log is still written.
+static INSTALL_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// v1.5.8 (F-7, #39): the one shape for a message meant for a person.
+/// Javier's rule (2 Oct 2026): exactly one blank line before and one after,
+/// a heading that stands out in a fast-moving screen, the explanation
+/// indented under it. Every message goes through here so the form cannot
+/// drift one message at a time. Callers print nothing blank around it.
+fn notice(colour: &str, heading: &str, lines: &[String]) {
+    println!("{}", format_notice(colour, heading, lines));
+}
+
+/// `notice`, on stderr — for a stop or a failure.
+fn enotice(colour: &str, heading: &str, lines: &[String]) {
+    eprintln!("{}", format_notice(colour, heading, lines));
+}
+
+/// Pure: the text of a notice, leading blank line included; the trailing
+/// blank line comes from the caller's println.
+fn format_notice(colour: &str, heading: &str, lines: &[String]) -> String {
+    let mut out = format!("\n{}{}==> {}{}\n", C_BOLD, colour, heading, C_RESET);
+    for l in lines {
+        out.push_str(&format!("    {}\n", l));
+    }
+    out
+}
+
+/// v1.5.8 (F-5, #37): names as lines of at most `width` characters.
+fn wrap_names(names: &[&str], width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for n in names {
+        if !cur.is_empty() && cur.len() + 2 + n.len() > width {
+            lines.push(std::mem::take(&mut cur) + ",");
+        }
+        if !cur.is_empty() {
+            cur.push_str(", ");
+        }
+        cur.push_str(n);
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// v1.5.8 (F-5, #37): what `nog install` shows when it updates first —
+/// what will change, by name, and the holds as one line. A one-package
+/// install never shows the hold list (Javier: "Hard no from this point").
+fn print_install_preview(ready: &[&str], held: usize, unknown: usize) {
+    let mut lines = Vec::new();
+    if ready.is_empty() {
+        lines.push("No updates are ready, so nothing else is installed.".to_string());
+    } else {
+        lines.extend(wrap_names(ready, 68));
+    }
+    if held > 0 {
+        let more = if ready.is_empty() { "" } else { " more" };
+        lines.push(format!("{}{}{} stay on hold — `nog update` shows them.{}",
+            C_SUBTEXT, held, more, C_RESET));
+    }
+    if unknown > 0 {
+        lines.push(format!("{} have no build date; nog asks about each below.", unknown));
+    }
+    let heading = match ready.len() {
+        0 => "Nothing to update first".to_string(),
+        1 => "1 update is ready and installs first".to_string(),
+        n => format!("{} updates are ready and install first", n),
+    };
+    notice(C_BLUE, &heading, &lines);
 }
 
 /// v1.5.7 (F-2, #34): checkupdates needs fakeroot, which pacman-contrib only
@@ -840,11 +929,15 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
-    let (run_date, run_time, run_user) = print_update_header();
+    let (run_date, run_time, run_user) = print_update_header(!before_install);
     if !ensure_keystore() {
         return UpdateEnd::Failed(1);
     }
-    println!("nog: Checking for pending updates ...");
+    if before_install {
+        println!("{}nog: checking what is waiting ...{}", C_SUBTEXT, C_RESET);
+    } else {
+        println!("nog: Checking for pending updates ...");
+    }
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
         Err(CheckUpdatesError::Missing) => {
@@ -968,7 +1061,11 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         println!();
         print!("{}", format_summary(&rows, true));
         println!();
-        println!("nog: System is up to date — nothing to do.");
+        if before_install {
+            print_install_preview(&[], 0, 0);
+        } else {
+            println!("nog: System is up to date — nothing to do.");
+        }
         write_run_log(&cfg, &run_date, &run_time, &run_user, Vec::new(), "up to date");
         return refresh_lists_if(before_install);
     }
@@ -1246,7 +1343,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
                 .chain(held.iter().map(|(u, _, _, _)| u.name.as_str()))
                 .collect();
             let dropped = holds::dropped_sonames(&data, &pending);
-            if !dropped.is_empty() {
+            if !dropped.is_empty() && !before_install {
                 println!(
                     "{}Checking installed programs for {} library version(s) this update removes...{}",
                     C_SUBTEXT,
@@ -1342,16 +1439,19 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     let labels: HashMap<String, String> = pending.iter()
         .map(|u| (sightings::key(u.source.as_str(), &u.name), source_label(u, &packages)))
         .collect();
-    {
+    if before_install {
+        let names: Vec<&str> = ready.iter().map(|(u, _, _)| u.name.as_str()).collect();
+        print_install_preview(&names, held.len(), unknown.len());
+    } else {
         let r: Vec<&PendingUpdate> = ready.iter().map(|(u, _, _)| u).collect();
         let h: Vec<&PendingUpdate> = held.iter().map(|(u, _, _, _)| u).collect();
         let k: Vec<&PendingUpdate> = unknown.iter().map(|(u, _)| u).collect();
         let rows = summary_rows(&sync_db::repo_order(), &labels, &r, &h, &k, &source_presence);
         println!();
         print!("{}", format_summary(&rows, true));
+        print_buckets(&ready, &held, &unknown, &labels);
     }
     let _ = (&flatpak_names, &snap_names);
-    print_buckets(&ready, &held, &unknown, &labels);
 
     // v1.4.1 (issue #18) — a tier hold that snapd does not know about is not a
     // hold. snapd auto-refreshes on ITS timer (four times a day by default),
@@ -1431,8 +1531,10 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     ignore.extend(extra_ignore);
 
     if ready.is_empty() && ignore.len() == pending.len() {
-        println!();
-        println!("nog: Nothing to install — every pending update is held.");
+        if !before_install {
+            println!();
+            println!("nog: Nothing to install — every pending update is held.");
+        }
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::AllHeld), "");
         return refresh_lists_if(before_install);
@@ -1479,7 +1581,9 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     // asks again — deliberate layers, so an expert can still catch and cancel
     // at the point where the detail is in front of them. One prompt per tool
     // that actually runs; sources with nothing to do stay silent.
-    println!();
+    if !before_install {
+        println!();
+    }
     if !prompt_proceed() {
         println!("nog: Cancelled — nothing was installed.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
@@ -1531,7 +1635,13 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
     println!("{}nog: Handing off official packages to pacman ...{}", C_BOLD, C_RESET);
-    let pac = pacman::update_excluding(&ignore);
+    // v1.5.8 (F-5, #37): before an install, exactly the official packages
+    // cleared this run, named — no `-Syu`, so no line per held package.
+    let targets: Vec<String> = pending.iter()
+        .filter(|u| u.source == Source::Pacman && !ignore.contains(&u.name))
+        .map(|u| u.name.clone())
+        .collect();
+    let pac = pacman::update_excluding(&ignore, if before_install { Some(&targets) } else { None });
     steps.insert(Source::Pacman, StepState::from(&pac));
     if !pac.status.success() {
         let code = pac.status.code().unwrap_or(-1);
@@ -1664,8 +1774,10 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         }
     }
 
-    println!();
-    println!("Thank you for using nog!");
+    if !before_install {
+        println!();
+        println!("Thank you for using nog!");
+    }
     UpdateEnd::Done
 }
 
@@ -1770,11 +1882,15 @@ fn prompt_unknown(pkg: &str, tier: &Tier, old: &str, new: &str) -> PromptOutcome
 /// subprocesses, and this keeps the dependency tree free of a datetime crate.
 /// Returns `(date, time, user)` so the run log (v1.0.8) records the exact
 /// context the banner showed.
-fn print_update_header() -> (String, String, String) {
+fn print_update_header(show: bool) -> (String, String, String) {
     let (date, time) = now_date_time();
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
+    // v1.5.8 (F-5, #37): `nog install` updating first shows no banner.
+    if !show {
+        return (date, time, user);
+    }
     println!();
     println!("=============");
     println!("{}nog v{}{}", C_BOLD, env!("CARGO_PKG_VERSION"), C_RESET);
@@ -2423,7 +2539,9 @@ fn write_run_log(
     };
     match runlog::append_run(&cfg.paths.run_logs, &today, &record) {
         Ok(path) => {
-            println!("{}nog: run logged to {}{}", C_SUBTEXT, path.display(), C_RESET);
+            if !INSTALL_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                println!("{}nog: run logged to {}{}", C_SUBTEXT, path.display(), C_RESET);
+            }
             match runlog::prune_old(&cfg.paths.run_logs, &cutoff) {
                 Ok(pruned) if !pruned.is_empty() => println!(
                     "{}nog: pruned {} run log(s) older than {} days.{}",
@@ -2685,6 +2803,29 @@ mod output_tests {
         assert_eq!(RefreshReason::RecordOld(2 * 86_400).words(), "the last completed update was 2 days ago");
         assert_eq!(age_words(86_400), "1 day");
         assert_eq!(age_words(3 * 3600 + 9), "3 hours");
+    }
+
+    #[test]
+    fn a_notice_has_one_blank_line_before_and_one_after() {
+        // F-7 (#39), Javier's rule: exactly one blank line around a message.
+        // format_notice carries the leading one; notice()'s println ends the
+        // last line and adds the trailing one — never two, never none.
+        let t = format_notice("", "Heading", &["first".to_string(), "second".to_string()]);
+        let printed = format!("{}\n", t);
+        assert!(printed.starts_with("\n") && !printed.starts_with("\n\n"));
+        assert!(printed.ends_with("second\n\n") && !printed.ends_with("\n\n\n"));
+        assert!(t.contains("==> Heading"));
+        assert!(t.contains("\n    first\n    second\n"));
+    }
+
+    #[test]
+    fn names_wrap_at_the_width_and_keep_their_commas() {
+        let names = ["networkmanager", "libnm", "ppp", "harfbuzz", "harfbuzz-icu", "noto-fonts"];
+        let lines = wrap_names(&names, 30);
+        assert!(lines.iter().all(|l| l.len() <= 31));
+        assert_eq!(lines.join(" "), "networkmanager, libnm, ppp, harfbuzz, harfbuzz-icu, noto-fonts");
+        assert_eq!(wrap_names(&["one"], 30), vec!["one".to_string()]);
+        assert!(wrap_names(&[], 30).is_empty());
     }
 
     #[test]
