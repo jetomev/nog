@@ -49,3 +49,17 @@ Driven through the qemu guest agent with `scripts/vm-exec.py`, as root. Answers 
 | F-2 (#34, KognogOS#9) | A fresh KognogOS has no `fakeroot`. `checkupdates` needs it, so `nog update` — and the #30 path — stop at "checkupdates failed: Cannot find the fakeroot binary". The desktop never saw this because it has base-devel. Worked around with `pacman -Sy fakeroot`, then the lists deleted again | high |
 | F-3 (#35) | Declining pacman's own "Proceed?" leaves the lists **fresh** but the Ready updates **not installed**. A `nog install` within the next day then skips the update — the partial upgrade #30 exists to prevent. Seen: cowsay installed without the update | medium |
 | F-4 (#36) | When the update fails early (e.g. F-2), nog exits from inside the update, so "not installing cowsay" never prints | low |
+
+## The fixes, tried in the VM before release · 2026-10-02
+
+`target/release/nog` at `3dc89cb` copied over `/usr/bin/nog` (`scripts/vm-put.py`), VM from `clean-install-3`.
+
+| # | Check | Result | Notes |
+|---|---|---|---|
+| A | No lists, no fakeroot: `nog install cowsay` | **PASS** (F-2, F-4) | names fakeroot and `sudo pacman -Syu fakeroot`, then "not installing cowsay" |
+| B | Decline pacman's own "Proceed?", then install again | **PASS** (F-3, F-4) | first run: "not installing cowsay"; second run: "there is no record of a completed update … updating first" instead of installing |
+| C1 | Full run answered yes | **PASS** | update, stamp written, cowsay installed |
+| C2 | `nog install sl` right after | **PASS** | installs at once |
+| C3 | `pacman -Sy` outside nog, then `nog install cmatrix` | **PASS** (F-3) | "the package lists changed after the last completed update — updating first" |
+
+F-1 (#33) is not code: it needs the key published (Javier) and KognogOS#9.
