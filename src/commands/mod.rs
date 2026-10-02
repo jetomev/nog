@@ -59,7 +59,7 @@ fn resolve_helper(cfg: &NogConfig) -> Option<Helper> {
         Ok(opt) => opt,
         Err(e) => {
             eprintln!("nog: {}", e);
-            std::process::exit(1);
+            end(1);
         }
     }
 }
@@ -83,7 +83,7 @@ fn guard_not_sudo_with_helper(helper: Option<Helper>) {
     );
     eprintln!("     AUR helpers refuse to run as root; they sudo internally when they need it.");
     eprintln!("     Re-run without sudo: `nog <command>` (nog will prompt for sudo itself).");
-    std::process::exit(1);
+    end(1);
 }
 
 pub fn install(packages: &[String]) {
@@ -118,13 +118,12 @@ pub fn install(packages: &[String]) {
             "Installing on top of that could mix old and new packages, so the".to_string(),
             "updates that are ready install first. Held packages stay as they are.".to_string(),
         ]);
-        INSTALL_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
         if run_update(false, true) != UpdateEnd::Done {
             enotice(C_PEACH, &format!("Not installing {}", packages.join(" ")), &[
                 "The update did not complete, so the package lists may still be old.".to_string(),
                 "Run `nog update`, then try again.".to_string(),
             ]);
-            std::process::exit(1);
+            end(1);
         }
     }
 
@@ -136,7 +135,7 @@ pub fn install(packages: &[String]) {
         Ok(InstallArgs::Files) => Some(packages),
         Err(msg) => {
             eprintln!("nog: {}", msg);
-            std::process::exit(1);
+            end(1);
         }
     };
     if let Some(files) = files {
@@ -171,7 +170,7 @@ pub fn install(packages: &[String]) {
                 eprintln!("     The AUR helper stops to let you review each build recipe, and nothing");
                 eprintln!("     is at the keyboard to answer. Run this in a terminal: nog install {}",
                     packages.join(" "));
-                std::process::exit(1);
+                end(1);
             }
         }
     }
@@ -198,7 +197,7 @@ fn stopped_installing(what: &[String], code: Option<i32>) -> ! {
             code.unwrap_or(-1)),
         "Nothing was changed by this install.".to_string(),
     ]);
-    std::process::exit(code.unwrap_or(1));
+    end(code.unwrap_or(1));
 }
 
 /// v1.5.4 (#26): the names in an install request that would come from the
@@ -321,7 +320,7 @@ fn install_files(files: &[String], tm: &TierManager) {
             }
             None => {
                 enotice(C_PEACH, "Not installing", &[format!("pacman cannot read {} as a package file.", f)]);
-                std::process::exit(1);
+                end(1);
             }
         }
     }
@@ -333,10 +332,17 @@ fn install_files(files: &[String], tm: &TierManager) {
 }
 
 pub fn remove(packages: &[String]) {
+    notice(C_GREEN, &format!("Removing {}", packages.join(" ")), &[
+        "With what only it needed; pacman shows the list and asks first.".to_string(),
+    ]);
     let status = pacman::remove(packages);
     if !status.success() {
-        eprintln!("nog: pacman exited with status {}", status.code().unwrap_or(-1));
-        std::process::exit(status.code().unwrap_or(1));
+        enotice(C_PEACH, &format!("Not removed: {}", packages.join(" ")), &[
+            format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
+                status.code().unwrap_or(-1)),
+            "Nothing was changed by this removal.".to_string(),
+        ]);
+        end(status.code().unwrap_or(1));
     }
 }
 
@@ -355,7 +361,7 @@ pub fn clean() {
     let Some(installed) = pacman::all_installed_versions() else {
         eprintln!("nog: could not ask pacman what is installed — stopping, nothing removed.");
         eprintln!("     (Without that list every cached file would look unused.)");
-        std::process::exit(1);
+        end(1);
     };
     let keep = |t: u8| -> usize {
         (match t { 1 => cfg.clean.tier1_keep, 2 => cfg.clean.tier2_keep, _ => cfg.clean.tier3_keep }) as usize
@@ -420,7 +426,7 @@ pub fn clean() {
     if cache::pacman_is_running() {
         eprintln!();
         eprintln!("nog: pacman is running (its lock file exists) — stopping, nothing removed.");
-        std::process::exit(1);
+        end(1);
     }
 
     println!();
@@ -454,7 +460,7 @@ pub fn clean() {
     println!("nog: Cache is now {} (was {}): {} freed.",
         human_size(after), human_size(total_bytes), human_size(total_bytes.saturating_sub(after)));
     if failed {
-        std::process::exit(1);
+        end(1);
     }
 }
 
@@ -530,7 +536,7 @@ fn set_source(source: &str, enable: bool) {
         "snap" => set_snap(enable),
         other => {
             eprintln!("nog: unknown source '{}'. Valid sources: aur, chaotic-aur, flatpak, snap", other);
-            std::process::exit(1);
+            end(1);
         }
     }
 }
@@ -548,7 +554,7 @@ fn set_aur(enable: bool) {
 
     if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
         eprintln!("nog: could not save source state: {}", e);
-        std::process::exit(1);
+        end(1);
     }
 
     if enable {
@@ -582,7 +588,7 @@ fn set_flatpak(enable: bool) {
 
     if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
         eprintln!("nog: could not save source state: {}", e);
-        std::process::exit(1);
+        end(1);
     }
 
     if enable {
@@ -614,7 +620,7 @@ fn set_snap(enable: bool) {
 
     if let Err(e) = sources::save(sources::DEFAULT_PATH, &state) {
         eprintln!("nog: could not save source state: {}", e);
-        std::process::exit(1);
+        end(1);
     }
 
     if enable {
@@ -643,7 +649,7 @@ fn set_chaotic(enable: bool) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("nog: could not read {}: {}", conf_path, e);
-            std::process::exit(1);
+            end(1);
         }
     };
 
@@ -653,7 +659,7 @@ fn set_chaotic(enable: bool) {
             if enable {
                 eprintln!("     Nothing to restore — if you want chaotic-aur, add the repo per its docs first.");
             }
-            std::process::exit(1);
+            end(1);
         }
         sources::RepoToggle::AlreadyInState => {
             println!(
@@ -672,7 +678,7 @@ fn set_chaotic(enable: bool) {
                 Ok(s) if s.success() => {}
                 _ => {
                     eprintln!("nog: could not back up {} — aborting without changes.", conf_path);
-                    std::process::exit(1);
+                    end(1);
                 }
             }
 
@@ -680,7 +686,7 @@ fn set_chaotic(enable: bool) {
             if let Err(e) = crate::tiers::write_as_root(conf_path, &new_text) {
                 eprintln!("nog: could not write {}: {}", conf_path, e);
                 eprintln!("     your original is safe at {}", backup);
-                std::process::exit(1);
+                end(1);
             }
 
             // 3. Mirror the state in sources.toml (informational — pacman.conf
@@ -813,14 +819,105 @@ enum UpdateEnd {
 
 pub fn update(realign: bool) {
     if let UpdateEnd::Failed(code) = run_update(realign, false) {
-        std::process::exit(code);
+        end(code);
     }
 }
 
-/// v1.5.8 (F-5, #37): set while `nog install` runs its update first, so the
-/// bookkeeping line about the run log stays out of a one-package install. The
-/// log is still written.
-static INSTALL_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// v1.5.8: the run being framed — what was asked, when, by whom, and the
+/// log files it wrote. Javier's rule (2 Oct 2026): every nog run starts with
+/// nog's version and the run requested, and ends with where it was logged
+/// and a thank-you — whatever the command. `begin` prints the start; every
+/// way out of a command goes through `end`, so no command can skip the end.
+struct RunFrame {
+    label: String,
+    date: String,
+    time: String,
+    user: String,
+    logs: Vec<std::path::PathBuf>,
+}
+
+static RUN: std::sync::Mutex<Option<RunFrame>> = std::sync::Mutex::new(None);
+
+/// Print the start of a run and remember it for `end`.
+pub fn begin(label: &str) {
+    let (date, time) = now_date_time();
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "unknown".to_string());
+    notice(C_MAUVE, &format!("nog v{} · {}", env!("CARGO_PKG_VERSION"), label),
+        &[format!("{} {} · {}", date, time, user)]);
+    if let Ok(mut r) = RUN.lock() {
+        *r = Some(RunFrame { label: label.to_string(), date, time, user, logs: Vec::new() });
+    }
+}
+
+/// A log file this run wrote, for the end of the run to name.
+fn record_log(path: std::path::PathBuf) {
+    if let Ok(mut r) = RUN.lock() {
+        if let Some(f) = r.as_mut() {
+            if !f.logs.contains(&path) {
+                f.logs.push(path);
+            }
+        }
+    }
+}
+
+/// The end of every run: one line in the day's runs log, then the closing
+/// notice (what was logged where, and thanks), then exit with `code`.
+pub fn end(code: i32) -> ! {
+    use std::io::Write;
+    static ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ENDING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::process::exit(code);
+    }
+    let frame = RUN.lock().ok().and_then(|mut r| r.take());
+    let Some(mut f) = frame else {
+        std::process::exit(code);
+    };
+    let outcome = if code == 0 { "done" } else { "stopped" };
+    let dir = NogConfig::load_default().paths.run_logs;
+    let mut problem = None;
+    match runlog::today_and_cutoff() {
+        Some((today, _)) => {
+            let status = code.to_string();
+            match runlog::append_runs_row(&dir, &today,
+                &[&f.date, &f.time, &f.user, &f.label, &status, outcome]) {
+                Ok(path) => {
+                    if !f.logs.contains(&path) {
+                        f.logs.insert(0, path);
+                    }
+                }
+                Err(e) => problem = Some(format!("This run could not be logged: {}", e)),
+            }
+        }
+        None => problem = Some("This run could not be logged: `date` is unavailable.".to_string()),
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(p) = problem {
+        lines.push(p);
+    }
+    if !f.logs.is_empty() {
+        lines.push("Logged in:".to_string());
+        for l in &f.logs {
+            let shown = l.display().to_string();
+            let shown = match shown.strip_prefix(&home) {
+                Some(rest) if !home.is_empty() => format!("~{}", rest),
+                _ => shown,
+            };
+            lines.push(format!("  {}", shown));
+        }
+    }
+    lines.push("Thank you for using nog!".to_string());
+    let heading = if code == 0 {
+        format!("Done · {}", f.label)
+    } else {
+        format!("Stopped · {} (status {})", f.label, code)
+    };
+    notice(if code == 0 { C_GREEN } else { C_PEACH }, &heading, &lines);
+    let _ = std::io::stdout().flush();
+    std::process::exit(code);
+}
 
 /// v1.5.8 (F-7, #39): the one shape for a message meant for a person.
 /// Javier's rule (2 Oct 2026): exactly one blank line before and one after,
@@ -929,7 +1026,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     guard_not_sudo_with_helper(helper);
     let tm = load_tiers();
 
-    let (run_date, run_time, run_user) = print_update_header(!before_install);
+    let (run_date, run_time, run_user) = print_update_header(false);
     if !ensure_keystore() {
         return UpdateEnd::Failed(1);
     }
@@ -1766,18 +1863,15 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     // the run log is safely on disk, so a probe problem cannot touch it.
     if !advice.is_empty() {
         if let Some((today, _)) = runlog::today_and_cutoff() {
-            if let Err(e) = runlog::append_reboot(
+            match runlog::append_reboot(
                 &cfg.paths.run_logs, &today, &run_date, &run_time, &run_user, &advice,
             ) {
-                eprintln!("{}nog: warning — reboot advice not logged: {}{}", C_SUBTEXT, e, C_RESET);
+                Ok(path) => record_log(path),
+                Err(e) => eprintln!("{}nog: warning — reboot advice not logged: {}{}", C_SUBTEXT, e, C_RESET),
             }
         }
     }
 
-    if !before_install {
-        println!();
-        println!("Thank you for using nog!");
-    }
     UpdateEnd::Done
 }
 
@@ -1887,7 +1981,8 @@ fn print_update_header(show: bool) -> (String, String, String) {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
-    // v1.5.8 (F-5, #37): `nog install` updating first shows no banner.
+    // v1.5.8: the start of every run is `begin`'s notice; the old banner
+    // is gone, and `nog install` updating first shows none either.
     if !show {
         return (date, time, user);
     }
@@ -2539,9 +2634,8 @@ fn write_run_log(
     };
     match runlog::append_run(&cfg.paths.run_logs, &today, &record) {
         Ok(path) => {
-            if !INSTALL_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                println!("{}nog: run logged to {}{}", C_SUBTEXT, path.display(), C_RESET);
-            }
+            // v1.5.8: named once, in the closing notice of the run.
+            record_log(path.clone());
             match runlog::prune_old(&cfg.paths.run_logs, &cutoff) {
                 Ok(pruned) if !pruned.is_empty() => println!(
                     "{}nog: pruned {} run log(s) older than {} days.{}",
@@ -3076,7 +3170,7 @@ pub fn pin(package: &str, tier: u8) {
         ),
         Err(e) => {
             eprintln!("nog: failed to pin '{}': {}", package, e);
-            std::process::exit(1);
+            end(1);
         }
     }
 }
@@ -3129,7 +3223,7 @@ pub fn unlock(package: &str, promote: bool) {
     };
     if !status.success() {
         eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
-        std::process::exit(status.code().unwrap_or(1));
+        end(status.code().unwrap_or(1));
     }
 }
 
@@ -3144,7 +3238,7 @@ fn load_tiers() -> TierManager {
         // can diagnose it themselves.
         eprintln!("nog: could not load tier-pins: {}", e);
         eprintln!("     (tried: {})", cfg.paths.tier_pins);
-        std::process::exit(1);
+        end(1);
     });
 
     // v1.0.4: attach the pkgbase coupling index so classify() can resolve

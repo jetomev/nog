@@ -133,6 +133,14 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+    // v1.5.8: every user-facing run starts with nog's version and the run
+    // requested, and ends with where it was logged and a thank-you (Javier,
+    // 2 Oct 2026). The hidden _debug commands are internal and stay bare.
+    let internal = matches!(cli.command, Commands::DebugDates { .. } | Commands::DebugHold { .. });
+    if !internal {
+        let label: Vec<String> = std::env::args().skip(1).collect();
+        commands::begin(&label.join(" "));
+    }
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
@@ -145,6 +153,9 @@ fn main() {
         Commands::Clean => commands::clean(),
         Commands::DebugDates { package } => debug_dates(&package),
         Commands::DebugHold { package } => debug_hold(&package),
+    }
+    if !internal {
+        commands::end(0);
     }
 }
 

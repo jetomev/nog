@@ -160,7 +160,8 @@ fn parse_identity(text: &str) -> Option<(String, String)> {
 
 pub fn remove(packages: &[String]) -> ExitStatus {
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
-    let mut args = vec!["-Rs", "--noconfirm"];
+    // v1.5.8 (F-6, #38): pacman asks, as it does for an install.
+    let mut args = vec!["-Rs"];
     args.extend_from_slice(&pkgs);
     run(&args)
 }

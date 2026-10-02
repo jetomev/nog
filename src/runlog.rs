@@ -114,6 +114,22 @@ pub fn filename_for(yyyymmdd: &str) -> String {
     format!("{} nog-update.csv", yyyymmdd)
 }
 
+/// v1.5.8: the per-day log of every nog run, whatever the command — one
+/// line each. Javier's rule (2 Oct 2026): every run ends by saying where it
+/// was logged, so every run has to be logged somewhere.
+pub fn runs_filename_for(yyyymmdd: &str) -> String {
+    format!("{} nog-runs.csv", yyyymmdd)
+}
+
+/// Header of the runs file.
+pub const RUNS_HEADER: &str = "date,time,user,command,status,outcome";
+
+/// Append one line to the day's runs file.
+pub fn append_runs_row(dir: &str, yyyymmdd: &str, row: &[&str]) -> Result<PathBuf, String> {
+    let line: Vec<String> = row.iter().map(|f| csv_field(f)).collect();
+    append_block(dir, &runs_filename_for(yyyymmdd), RUNS_HEADER, &format!("{}\n", line.join(",")))
+}
+
 /// The per-day reboot-advice filename (v1.4.3, issue #22).
 pub fn reboot_filename_for(yyyymmdd: &str) -> String {
     format!("{} nog-reboot.csv", yyyymmdd)
@@ -131,7 +147,8 @@ pub const REBOOT_HEADER: &str = "date,time,user,level,advice";
 fn log_date(name: &str) -> Option<&str> {
     let stamp = name
         .strip_suffix(" nog-update.csv")
-        .or_else(|| name.strip_suffix(" nog-reboot.csv"))?;
+        .or_else(|| name.strip_suffix(" nog-reboot.csv"))
+        .or_else(|| name.strip_suffix(" nog-runs.csv"))?;
     if stamp.len() == 8 && stamp.bytes().all(|b| b.is_ascii_digit()) {
         Some(stamp)
     } else {
@@ -285,6 +302,14 @@ pub fn prune_old(dir: &str, cutoff_yyyymmdd: &str) -> Result<Vec<String>, String
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_runs_log_is_named_by_day_and_pruned_like_the_others() {
+        assert_eq!(runs_filename_for("20261002"), "20261002 nog-runs.csv");
+        assert_eq!(log_date("20261002 nog-runs.csv"), Some("20261002"));
+        assert_eq!(log_date("notes nog-runs.csv"), None);
+    }
+
     use super::*;
 
     fn record(rows: Vec<RunRow>, marker: &str) -> RunRecord {
