@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.7](https://img.shields.io/badge/Version-1.5.7-purple.svg)
+![Version: 1.5.8](https://img.shields.io/badge/Version-1.5.8-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -41,6 +41,8 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 **The tier system**
 - Every package is Tier 1, Tier 2, or Tier 3, with 30 / 15 / 7-day holds
 - **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
+- **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer. A one-package install that has to update first shows only what installs, in a table, and the holds as one line
+- **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
 - **Never installs from stale package lists** *(v1.5.6, v1.5.7)* — if the lists are missing, or nog has no record of a completed update in the last day (a fresh install copied from a disc, an update declined at pacman's prompt, `pacman -Sy` run by hand), `nog install` runs the safe tier-aware update first, then installs
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
@@ -177,7 +179,7 @@ sudo install -Dm644 nog.1 /usr/share/man/man1/nog.1
 > Run `nog` as your normal user — never with `sudo`. It escalates only where root is genuinely needed, and you'll see the password prompt at that moment. See [Privilege model](#privilege-model).
 
 ```bash
-# Install a package (respects tier rules, routes to your AUR helper if needed)
+# Install a package (shows what will install and asks; routes to your AUR helper if needed)
 nog install <package>
 
 # Install a package file you built yourself, e.g. with makepkg
@@ -195,7 +197,7 @@ nog pin <package> --tier=<1|2|3>
 # Install a held Tier 1 package right now
 nog unlock <package> --promote
 
-# Remove a package
+# Remove a package (asks first)
 nog remove <package>
 
 # Clear old downloads from pacman's cache (asks first)
@@ -252,7 +254,7 @@ Every installed version stays, so a bad update can always be rolled back from th
 6. Asks you about each **Unknown** package individually.
 7. Runs the upgrade, telling pacman and your helper to skip everything held.
 8. If everything is held, exits cleanly without running anything at all.
-9. Writes the run to a dated CSV log — each package with its source and its own outcome — and prunes logs older than 90 days. If logging fails it warns you — it never blocks an update. Any reboot advice goes to a companion `nog-reboot.csv` beside it.
+9. Writes the run to a dated CSV log — each package with its source and its own outcome — and prunes logs older than 90 days. Every nog command, not only updates, also adds one line to the day's `nog-runs.csv` *(v1.5.8)*, and its closing notice names the logs it wrote. If logging fails it warns you — it never blocks an update. Any reboot advice goes to a companion `nog-reboot.csv` beside it.
 
 Everything is classified **before** anything is touched, so you always see the plan first.
 
@@ -340,7 +342,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.7"
+version = "1.5.8"
 log_level = "info"
 
 [paths]
@@ -460,7 +462,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 11,100 lines of Rust, with 221 tests that run on every release.
+Around 11,100 lines of Rust, with 224 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -514,7 +516,7 @@ Three system files, each with one well-defined writer:
 - `/etc/nog/sources.toml` — during `nog activate` / `nog deactivate`
 - `/etc/pacman.conf` — **only** by `activate|deactivate chaotic-aur`, which comments the `[chaotic-aur]` section in or out using a `#nog#` marker, after a timestamped backup. Restoring is byte-exact, and your own comments inside that section survive. No other command touches this file.
 
-In your home folder, as you: the run logs (`~/.local/share/nog/logs/`) and the hold record (`~/.local/state/nog/holds.tsv`, v1.5.2), both written by `nog update`.
+In your home folder, as you: the run logs (`~/.local/share/nog/logs/`: the update log by `nog update`, the runs log by every command since v1.5.8), the hold record (`~/.local/state/nog/holds.tsv`, v1.5.2) and the record of the last completed update (`~/.local/share/nog/last-update`, v1.5.7).
 
 ### What nog never touches
 
@@ -659,7 +661,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.7 shipped 2026-10-02** — what the KognogOS VM test found: `fakeroot` required ([#34](https://github.com/jetomev/nog/issues/34)), no partial upgrade after a declined prompt ([#35](https://github.com/jetomev/nog/issues/35)), a failed update always says the install is off ([#36](https://github.com/jetomev/nog/issues/36)). **v1.5.6 shipped 2026-09-30** — never installs from stale package lists ([#30](https://github.com/jetomev/nog/issues/30)), and keys are never held ([#31](https://github.com/jetomev/nog/issues/31)). Earlier that day: v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)), v1.5.4, v1.5.3, v1.5.2.
+> **v1.5.8 shipped 2026-10-02** — installs and removals ask ([#38](https://github.com/jetomev/nog/issues/38)), a short install screen ([#37](https://github.com/jetomev/nog/issues/37)), designed messages ([#39](https://github.com/jetomev/nog/issues/39)), pacman's question under its table ([#40](https://github.com/jetomev/nog/issues/40)), and the same start and end on every run. **v1.5.7 the same day** — what the KognogOS VM test found ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). Before: v1.5.6 ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)) and v1.5.5 … v1.5.2 on 30 September.
 
 ### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.6.0)
 
@@ -692,6 +694,20 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.8 — October 2, 2026
+
+**Installs that ask, a short install screen, and the same start and end on every run** ([#37](https://github.com/jetomev/nog/issues/37), [#38](https://github.com/jetomev/nog/issues/38), [#39](https://github.com/jetomev/nog/issues/39), [#40](https://github.com/jetomev/nog/issues/40)). From Javier's own test of v1.5.7 in the KognogOS VM, and his rulings the same day.
+
+- **`nog install` and `nog remove` ask before they change anything** (F-6, #38). Since the very first version they told pacman to answer its own "Proceed?" (`--noconfirm`). A machine with an AUR helper never showed it, because installs went through the helper, which asks; a fresh KognogOS has no helper. pacman now shows exactly what will be installed or removed, dependencies included, and waits for your answer.
+- **A one-package install no longer shows the hold list** (F-5, #37). When `nog install` has to update first, it used to print the entire `nog update` report: summary, every held package, every unknown, and pacman's warning line for each held package. Now it shows why it updates first, the updates that will install in a full table (source, versions, tier), and the holds as one line. pacman is given exactly the Ready packages, so it has no hold list to warn about. `nog update` itself keeps its full report.
+- **Messages have a designed form** (F-7, #39). Javier's rule: exactly one blank line before and after, a coloured `==>` heading that stands out, the explanation indented under it. One helper prints them all, so the form can't drift.
+- **pacman's question stays under its table** (F-8, #40). nog passed pacman's messages through itself to keep failure reasons (v1.4.3), while the table came through sudo. The two raced, and the question could land above the table and scroll out of sight. This is the likely cause of the missing prompt Javier saw on 1 October. The steps that ask now go straight to the terminal; their failure reason stays on screen rather than in the log.
+- **Every run starts and ends the same way, whatever the command.** It starts with a banner: nog's version and the command, the run as typed, the date, time and user. It ends with "Done" or "Stopped", the logs this run wrote, and a thank-you, including every early stop. A new daily log, `YYYYMMDD nog-runs.csv`, records one line per run so the ending can always name one.
+
+Tried by Claude in the VM with recorded screens, then by Javier: *"all looks much better, always room for improvement, but one step-at-a-time."* ([testing/](testing/)).
+
+Tests: 221 → 224. Warnings unchanged at 6.
+
 ### v1.5.7 — October 2, 2026
 
 **What the KognogOS VM test of v1.5.6 found** ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). The test ran on a freshly installed KognogOS (build 3). Both v1.5.6 fixes work there. It also turned up four findings, and three of them are fixed here.
@@ -705,18 +721,6 @@ Still open: **F-1** ([#33](https://github.com/jetomev/nog/issues/33)) — nog's 
 Proven in the VM before release (tests A–C in [testing/](testing/)); Javier's own run follows.
 
 Tests: 219 → 221. Warnings unchanged at 6.
-
-### v1.5.6 — September 30, 2026
-
-**Never install from stale package lists, and never hold the keys** ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)). Found on the first freshly installed KognogOS: `nog install` failed until `pacman -Syu` was run by hand.
-
-- **Why it failed.** The installer copies the live disc as it is, including pacman's package lists — as old as the disc. `nog install` never refreshed them, so it asked the mirrors for versions they had already replaced. (`nog update` always refreshed; only `install` trusted the lists on disk.)
-- **The fix, the safe way.** Refreshing only the lists and installing one package is a partial upgrade, which Arch does not support. So when the lists are missing or more than a day old, `nog install` says so, runs the normal tier-aware update first — ready updates install, holds stay — and then installs. "How old" is measured from when the lists were refreshed on this computer, not from the date the server stamps on them.
-- **Keys are never held.** `archlinux-keyring` and `chaotic-keyring` used to wait like any other package (the Arch keyring was Tier 3, seven days). But holding the keys back *is* the breakage: every later signature check fails until they land. They now skip the hold — no tier, no sign-off, no coupling rule — and install in their own step before everything else. A key store that was never set up is set up first, with an explanation.
-
-Released at Javier's request so he can test it in the KognogOS VM through the AUR; the VM checks are recorded as pending in [testing/](testing/).
-
-Tests: 217 → 219. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

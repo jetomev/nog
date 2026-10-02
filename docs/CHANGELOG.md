@@ -2,6 +2,20 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.8 — October 2, 2026
+
+**Installs that ask, a short install screen, and the same start and end on every run** ([#37](https://github.com/jetomev/nog/issues/37), [#38](https://github.com/jetomev/nog/issues/38), [#39](https://github.com/jetomev/nog/issues/39), [#40](https://github.com/jetomev/nog/issues/40)). From Javier's own test of v1.5.7 in the KognogOS VM, and his rulings the same day.
+
+- **`nog install` and `nog remove` ask before they change anything** (F-6, #38). Since the very first version they told pacman to answer its own "Proceed?" (`--noconfirm`). A machine with an AUR helper never showed it, because installs went through the helper, which asks; a fresh KognogOS has no helper. pacman now shows exactly what will be installed or removed, dependencies included, and waits for your answer.
+- **A one-package install no longer shows the hold list** (F-5, #37). When `nog install` has to update first, it used to print the entire `nog update` report: summary, every held package, every unknown, and pacman's warning line for each held package. Now it shows why it updates first, the updates that will install in a full table (source, versions, tier), and the holds as one line. pacman is given exactly the Ready packages, so it has no hold list to warn about. `nog update` itself keeps its full report.
+- **Messages have a designed form** (F-7, #39). Javier's rule: exactly one blank line before and after, a coloured `==>` heading that stands out, the explanation indented under it. One helper prints them all, so the form can't drift.
+- **pacman's question stays under its table** (F-8, #40). nog passed pacman's messages through itself to keep failure reasons (v1.4.3), while the table came through sudo. The two raced, and the question could land above the table and scroll out of sight. This is the likely cause of the missing prompt Javier saw on 1 October. The steps that ask now go straight to the terminal; their failure reason stays on screen rather than in the log.
+- **Every run starts and ends the same way, whatever the command.** It starts with a banner: nog's version and the command, the run as typed, the date, time and user. It ends with "Done" or "Stopped", the logs this run wrote, and a thank-you, including every early stop. A new daily log, `YYYYMMDD nog-runs.csv`, records one line per run so the ending can always name one.
+
+Tried by Claude in the VM with recorded screens, then by Javier: *"all looks much better, always room for improvement, but one step-at-a-time."* ([testing/](../testing/)).
+
+Tests: 221 → 224. Warnings unchanged at 6.
+
 ### v1.5.7 — October 2, 2026
 
 **What the KognogOS VM test of v1.5.6 found** ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). The test ran on a freshly installed KognogOS (build 3). Both v1.5.6 fixes work there. It also turned up four findings, and three of them are fixed here.

@@ -2,12 +2,21 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.8 — Released (from Javier's v1.5.7 run: F-5 #37, F-6 #38, F-7 #39, F-8 #40, the run frame)
+- [x] `nog install` updating first: a notice, the READY TO INSTALL table, the holds as one line; pacman given `-Sy --needed <ready> --ignore <held>`
+- [x] `pacman -S`, `-U` and `-Rs` without `--noconfirm`
+- [x] `notice()` / `enotice()`: one blank line around, `==>` heading
+- [x] Steps that ask leave stderr on the terminal (`handoff::run_on_screen`)
+- [x] `begin()` banner and `end()` closing on every user command; `YYYYMMDD nog-runs.csv`
+- [x] Claude in the VM (§2), Javier in the VM (§3)
+- [ ] Follow-up: the AUR helper / Flatpak / Snap steps still relay stderr (#40)
+
 ### v1.5.7 — Released (what the VM test found: F-2 #34, F-3 #35, F-4 #36)
 - [x] `fakeroot` in `depends=`; a checkupdates failure for want of it names the fix
 - [x] Record of the last completed update (`~/.local/share/nog/last-update`); `nog install` updates first when it is missing, over a day old, or older than the lists
 - [x] Failures inside the update return to the caller, so `nog install` always says it is not installing
 - [x] Tried in the VM before release (tests A–C)
-- [ ] Javier's own VM run
+- [x] Javier's own VM run (§3: 3.1, 3.3, 3.4, 3.5 PASS; raised F-5 to F-7)
 - [x] F-1 (#33): the key is fetched from GitHub (`github.com/jetomev.gpg`) in every instruction, no key server — Javier's ruling 2026-10-02
 - [ ] KognogOS ships the key in its pacman keyring (KognogOS#9)
 

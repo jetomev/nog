@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.5.7" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.5.8" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -53,6 +53,12 @@ user intent. If an AUR helper is configured (see
 the install routes through the helper, so AUR-only packages work transparently
 without any pre-check. Tier protection applies to future updates, not to installs.
 .IP
+Since v1.5.8 pacman asks before installing (no \fB--noconfirm\fR), showing
+exactly what will be installed, dependencies included. When the install has to
+update first, nog shows only what will install, as a table, and the holds as
+one line; pacman is given exactly those packages
+(\fBpacman -Sy --needed\fR \fIready\fR... \fB--ignore\fR \fIheld\fR).
+.IP
 Since v1.5.0 a locally built package file \(em any argument containing
 .B .pkg.tar
 \(em is installed with
@@ -104,8 +110,10 @@ removed. It refuses while pacman's lock file exists.
 .TP
 .B nog remove \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
-.BR pacman (8).
-Works uniformly for packages originally installed from official repos or AUR.
+.BR pacman (8),
+with what only they needed (\fB-Rs\fR). Works uniformly for packages originally
+installed from official repos or AUR. Since v1.5.8 pacman shows the list and asks
+before removing anything.
 .TP
 .B nog update
 Compute a tier-aware system upgrade plan and hand each source to the tool
@@ -492,7 +500,10 @@ backup (\fIpacman.conf.nog-bak-<stamp>\fR).
 .I ~/.local/share/nog/logs/
 Per-run CSV update logs (\fBYYYYMMDD nog-update.csv\fR), one row per pending
 package per run with its source, its own outcome and, when a step did not
-complete, the reason; plus reboot advice (\fBYYYYMMDD nog-reboot.csv\fR).
+complete, the reason; plus reboot advice (\fBYYYYMMDD nog-reboot.csv\fR); and,
+since v1.5.8, one line per nog run of any command
+(\fBYYYYMMDD nog-runs.csv\fR: date, time, user, command, status, outcome).
+Every run ends by naming the logs it wrote.
 Columns since v1.4.3:
 .nf
 .B "  date,time,user,source,bucket,package,"
