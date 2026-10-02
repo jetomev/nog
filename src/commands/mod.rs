@@ -844,11 +844,33 @@ pub fn begin(label: &str) {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
-    notice(C_MAUVE, &format!("nog v{} · {}", env!("CARGO_PKG_VERSION"), label),
-        &[format!("{} {} · {}", date, time, user)]);
+    println!("{}", format_banner(label, &date, &time, &user));
     if let Ok(mut r) = RUN.lock() {
         *r = Some(RunFrame { label: label.to_string(), date, time, user, logs: Vec::new() });
     }
+}
+
+/// v1.5.8: the start of every run, after the `nog update` banner it grew
+/// out of: nog's version and what the run is, framed, then the run as typed
+/// and when and by whom. Ends with the line break before the blank line the
+/// caller's println adds. Plain `=` rules: they draw on a text console too.
+fn format_banner(label: &str, date: &str, time: &str, user: &str) -> String {
+    let what = label.split_whitespace().next().unwrap_or("");
+    let mut title = what.to_string();
+    if let Some(c) = title.get(0..1) {
+        title = c.to_uppercase() + &title[1..];
+    }
+    let heading = if title.is_empty() {
+        format!("nog v{}", env!("CARGO_PKG_VERSION"))
+    } else {
+        format!("nog v{}  ·  {}", env!("CARGO_PKG_VERSION"), title)
+    };
+    let run = format!("Run:   nog {}", label);
+    let width = [41, heading.chars().count() + 4, run.chars().count() + 4]
+        .into_iter().max().unwrap_or(41);
+    let rule = format!("{}{}{}{}", C_BOLD, C_MAUVE, "=".repeat(width), C_RESET);
+    format!("\n{rule}\n{b}  {heading}{r}\n{rule}\n  {run}\n  Date:  {date}   {time}\n  User:  {user}\n",
+        rule = rule, b = C_BOLD, r = C_RESET, heading = heading, run = run, date = date, time = time, user = user)
 }
 
 /// A log file this run wrote, for the end of the run to name.
@@ -943,34 +965,15 @@ fn format_notice(colour: &str, heading: &str, lines: &[String]) -> String {
     out
 }
 
-/// v1.5.8 (F-5, #37): names as lines of at most `width` characters.
-fn wrap_names(names: &[&str], width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut cur = String::new();
-    for n in names {
-        if !cur.is_empty() && cur.len() + 2 + n.len() > width {
-            lines.push(std::mem::take(&mut cur) + ",");
-        }
-        if !cur.is_empty() {
-            cur.push_str(", ");
-        }
-        cur.push_str(n);
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
-    lines
-}
-
 /// v1.5.8 (F-5, #37): what `nog install` shows when it updates first —
 /// what will change, by name, and the holds as one line. A one-package
 /// install never shows the hold list (Javier: "Hard no from this point").
-fn print_install_preview(ready: &[&str], held: usize, unknown: usize) {
+fn print_install_preview(ready: &[TableRow], held: usize, unknown: usize) {
     let mut lines = Vec::new();
     if ready.is_empty() {
         lines.push("No updates are ready, so nothing else is installed.".to_string());
     } else {
-        lines.extend(wrap_names(ready, 68));
+        lines.push("Listed below with their versions; you approve them next.".to_string());
     }
     if held > 0 {
         let more = if ready.is_empty() { "" } else { " more" };
@@ -986,6 +989,11 @@ fn print_install_preview(ready: &[&str], held: usize, unknown: usize) {
         n => format!("{} updates are ready and install first", n),
     };
     notice(C_BLUE, &heading, &lines);
+    // Javier (2 Oct 2026): what installs is shown in full — package, source,
+    // versions, tier — like `nog update` shows it. The holds stay one line.
+    if !ready.is_empty() {
+        println!("{}", format_table("READY TO INSTALL", ready, true));
+    }
 }
 
 /// v1.5.7 (F-2, #34): checkupdates needs fakeroot, which pacman-contrib only
@@ -1537,8 +1545,10 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         .map(|u| (sightings::key(u.source.as_str(), &u.name), source_label(u, &packages)))
         .collect();
     if before_install {
-        let names: Vec<&str> = ready.iter().map(|(u, _, _)| u.name.as_str()).collect();
-        print_install_preview(&names, held.len(), unknown.len());
+        let rows: Vec<TableRow> = ready.iter()
+            .map(|(upd, tier, reason)| TableRow::from(upd, tier, label_for(&labels, upd), ready_note(reason)))
+            .collect();
+        print_install_preview(&rows, held.len(), unknown.len());
     } else {
         let r: Vec<&PendingUpdate> = ready.iter().map(|(u, _, _)| u).collect();
         let h: Vec<&PendingUpdate> = held.iter().map(|(u, _, _, _)| u).collect();
@@ -2900,6 +2910,17 @@ mod output_tests {
     }
 
     #[test]
+    fn the_banner_names_the_run_and_keeps_the_blank_line_rule() {
+        let b = format_banner("install cowsay", "10/02/2026", "11:30 AM", "javier");
+        let printed = format!("{}\n", b);
+        assert!(printed.starts_with("\n") && !printed.starts_with("\n\n"));
+        assert!(printed.ends_with("javier\n\n") && !printed.ends_with("\n\n\n"));
+        assert!(b.contains("  ·  Install"));
+        assert!(b.contains("Run:   nog install cowsay"));
+        assert!(b.contains("Date:  10/02/2026   11:30 AM"));
+    }
+
+    #[test]
     fn a_notice_has_one_blank_line_before_and_one_after() {
         // F-7 (#39), Javier's rule: exactly one blank line around a message.
         // format_notice carries the leading one; notice()'s println ends the
@@ -2910,16 +2931,6 @@ mod output_tests {
         assert!(printed.ends_with("second\n\n") && !printed.ends_with("\n\n\n"));
         assert!(t.contains("==> Heading"));
         assert!(t.contains("\n    first\n    second\n"));
-    }
-
-    #[test]
-    fn names_wrap_at_the_width_and_keep_their_commas() {
-        let names = ["networkmanager", "libnm", "ppp", "harfbuzz", "harfbuzz-icu", "noto-fonts"];
-        let lines = wrap_names(&names, 30);
-        assert!(lines.iter().all(|l| l.len() <= 31));
-        assert_eq!(lines.join(" "), "networkmanager, libnm, ppp, harfbuzz, harfbuzz-icu, noto-fonts");
-        assert_eq!(wrap_names(&["one"], 30), vec!["one".to_string()]);
-        assert!(wrap_names(&[], 30).is_empty());
     }
 
     #[test]
