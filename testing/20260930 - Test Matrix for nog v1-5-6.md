@@ -24,15 +24,28 @@ Best: revert `kognog-hypeforge` to the snapshot `clean-install-2` (a fresh insta
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 2.1 | Reproduce with the installed (old) nog: `nog install cowsay` | fails: files not found on the mirrors | **DEFERRED** | the failing direction first |
-| 2.2 | New nog (1.5.6 from the AUR): `nog install cowsay` | "the package lists are N days old — refreshing them, the safe way", a tier-aware update, then cowsay installs | **DEFERRED** | |
-| 2.3 | Same, with everything held | lists refreshed with `pacman -Sy`, then the install | **DEFERRED** | may not occur naturally |
-| 2.4 | Answer **n** at "Begin the handoff?" | install stops: "the update did not complete … not installing cowsay" | **DEFERRED** | |
-| 2.5 | Run again right away | lists fresh: installs at once, no update | **DEFERRED** | |
+| 2.1 | Reproduce with the installed (old) nog: `nog install cowsay` | fails: files not found on the mirrors | **PASS** | nog 1.5.5 fails: `target not found: cowsay`. Build 3 ships **no** package lists at all (`/var/lib/pacman/sync` missing), so the failure is "not found" rather than "file gone from the mirror" — same bug, harder form |
+| 2.2 | New nog (1.5.6 from the AUR): `nog install cowsay` | "the package lists are N days old — refreshing them, the safe way", a tier-aware update, then cowsay installs | **PASS** | "the package lists are missing — refreshing them, the safe way"; update: 3 Ready installed (networkmanager, libnm, ppp), 25 held; "Package lists are current — now installing cowsay"; cowsay 3.8.4-1 installed. Needed F-1 + F-2 workarounds first. nog 1.5.6 came from the release's ready-built package, not the AUR |
+| 2.3 | Same, with everything held | lists refreshed with `pacman -Sy`, then the install | **DEFERRED** | did not occur: 3 updates were Ready |
+| 2.4 | Answer **n** at "Begin the handoff?" | install stops: "the update did not complete … not installing cowsay" | **PASS** | "Cancelled — nothing was installed" then the expected message; exit 1. See F-3 for a cancel at pacman's own prompt, and F-4 for an early failure |
+| 2.5 | Run again right away | lists fresh: installs at once, no update | **PASS** | `nog install sl`: straight to pacman, no update |
 
 ## §3 · #31 — keys first
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 3.1 | A pending `archlinux-keyring` | Ready, `keys · never held, installed first`; its own pacman step before the main one | **DEFERRED** | a fresh install from an older disc usually has one pending |
-| 3.2 | Key store missing (`/etc/pacman.d/gnupg` moved aside) | nog explains, runs `pacman-key --init` + `--populate`, carries on | **DEFERRED** | restore the original afterwards |
+| 3.1 | A pending `archlinux-keyring` | Ready, `keys · never held, installed first`; its own pacman step before the main one | **PASS** | set up by installing 20260902-1 from the Arch archive; Ready with the note, "Installing the new keys first (archlinux-keyring)", own pacman step, then the main step. **Limit:** 20260909 was 23 days old, past its window anyway — the "never held" rule itself rests on the unit tests |
+| 3.2 | Key store missing (`/etc/pacman.d/gnupg` moved aside) | nog explains, runs `pacman-key --init` + `--populate`, carries on | **PASS** | plain-words message, init + populate (188 keys), "key store ready", then the update check. Original restored (189 keys) |
+
+## Claude's run · 2026-10-02 · VM `kognog-hypeforge` from `clean-install-3`
+
+Driven through the qemu guest agent with `scripts/vm-exec.py`, as root. Answers go through `script` with pauses: typed all at once, nog's own prompt takes every line and pacman's "Proceed?" gets nothing (a harness limit, not a nog bug). Prompts were visible every time — the desktop's missing-prompt bug did not reproduce here either. Logs: `logs/vm-*.log`.
+
+**Result: 6 PASS, 1 DEFERRED (2.3), 4 findings.**
+
+| # | Finding | Severity |
+|---|---|---|
+| F-1 (#33) | nog's signing key cannot be fetched by pacman: keyserver.ubuntu.com has no copy (404); keys.openpgp.org serves it **without a user ID** (email never verified), which gpg skips. A downloaded nog package cannot be installed on a fresh KognogOS. Worked around by copying the key in from the desktop | high |
+| F-2 (#34, KognogOS#9) | A fresh KognogOS has no `fakeroot`. `checkupdates` needs it, so `nog update` — and the #30 path — stop at "checkupdates failed: Cannot find the fakeroot binary". The desktop never saw this because it has base-devel. Worked around with `pacman -Sy fakeroot`, then the lists deleted again | high |
+| F-3 (#35) | Declining pacman's own "Proceed?" leaves the lists **fresh** but the Ready updates **not installed**. A `nog install` within the next day then skips the update — the partial upgrade #30 exists to prevent. Seen: cowsay installed without the update | medium |
+| F-4 (#36) | When the update fails early (e.g. F-2), nog exits from inside the update, so "not installing cowsay" never prints | low |
