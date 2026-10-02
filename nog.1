@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "September 2026" "nog v1.5.6" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.5.7" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -73,6 +73,13 @@ be installed, the lists are refreshed with \fBpacman -Sy\fR), then the install.
 Refreshing only the lists and installing one package would be a partial upgrade,
 which Arch does not support. If that update is cancelled or fails, the install
 stops and says why.
+.IP
+Since v1.5.7 the decision also reads nog's record of its last completed update,
+\fI~/.local/share/nog/last-update\fR, written only when the lists were refreshed and
+the repository step finished. The update runs first when that record is missing,
+more than a day old, or older than the lists: pacman refreshes the lists before it
+asks to proceed, so a declined prompt, or \fBpacman -Sy\fR run by hand, leaves
+fresh lists and nothing installed.
 .IP
 Since v1.5.4, when standard input is not a terminal and a requested name is not
 in any enabled repository (so the helper would build it from the AUR), nog
@@ -706,6 +713,16 @@ every install, remove, and upgrade is subject to pacman's signature
 verification and conflict resolution, which nog cannot bypass.
 .
 .SH TROUBLESHOOTING
+.SS \fBcheckupdates failed: Cannot find the fakeroot binary\fR
+The update check comes from \fBpacman-contrib\fR and needs \fBfakeroot\fR, which
+pacman-contrib lists only as optional. nog depends on it since v1.5.7; on an older
+install, or if it was removed, install it together with a full update:
+.PP
+.RS
+.B sudo pacman -Syu fakeroot
+.RE
+.PP
+Not \fBpacman -S fakeroot\fR alone: on old package lists that is a partial upgrade.
 .SS DKMS rebuild fails after \fBnog update\fR
 If a DKMS hook (typically
 .BR nvidia-open-dkms ,

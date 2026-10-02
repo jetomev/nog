@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.5.6](https://img.shields.io/badge/Version-1.5.6-purple.svg)
+![Version: 1.5.7](https://img.shields.io/badge/Version-1.5.7-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -41,7 +41,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 **The tier system**
 - Every package is Tier 1, Tier 2, or Tier 3, with 30 / 15 / 7-day holds
 - **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
-- **Never installs from stale package lists** *(v1.5.6)* — if the lists are missing or more than a day old (a fresh install copied from a disc, say), `nog install` runs the safe tier-aware update first, then installs
+- **Never installs from stale package lists** *(v1.5.6, v1.5.7)* — if the lists are missing, or nog has no record of a completed update in the last day (a fresh install copied from a disc, an update declined at pacman's prompt, `pacman -Sy` run by hand), `nog install` runs the safe tier-aware update first, then installs
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
 - Need a held package now? `nog unlock <pkg> --promote`
@@ -133,7 +133,7 @@ The driver modules themselves don't need grouping. Once the kernel and headers a
 ## Requirements
 
 - Arch Linux, or an Arch-based distribution
-- `pacman` and `pacman-contrib`
+- `pacman`, `pacman-contrib` and `fakeroot` (pacman-contrib's update check needs it)
 - `yay` or `paru` — optional, adds AUR support. nog works fine without one; you just get official repos only.
 - A Rust toolchain, only if building from source
 
@@ -340,7 +340,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.5.6"
+version = "1.5.7"
 log_level = "info"
 
 [paths]
@@ -460,7 +460,7 @@ nog/
 |-- Cargo.toml / Cargo.lock
 ```
 
-Around 10,700 lines of Rust, with 219 tests that run on every release.
+Around 11,100 lines of Rust, with 221 tests that run on every release.
 
 Packaging lives in the AUR repository, not here. A second `PKGBUILD` in this tree diverged from it silently through two releases while both files reported the same version, so it was removed in v1.4.0 rather than kept in step by hand.
 
@@ -529,6 +529,16 @@ nog never runs `sudo yay` or `sudo paru`. That's a deliberate refusal, for the s
 ---
 
 ## Troubleshooting
+
+### `checkupdates failed: Cannot find the fakeroot binary`
+
+nog's update check comes from `pacman-contrib`, and it needs `fakeroot`, which pacman-contrib lists only as optional. A freshly installed system may not have it. nog depends on it since v1.5.7; if you see this anyway, install it together with a full update:
+
+```sh
+sudo pacman -Syu fakeroot
+```
+
+Not `pacman -S fakeroot` on its own: with old package lists that is a partial upgrade.
 
 ### `ERROR: Missing <KVER> kernel modules tree for module <name>/<version>`
 
@@ -649,7 +659,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.5.6 shipped 2026-09-30** — never installs from stale package lists ([#30](https://github.com/jetomev/nog/issues/30)), and keys are never held ([#31](https://github.com/jetomev/nog/issues/31)). **v1.5.5 shipped the same day** — `nog clean` ([#15](https://github.com/jetomev/nog/issues/15)). Earlier that day: v1.5.4 ([#28](https://github.com/jetomev/nog/issues/28), [#25](https://github.com/jetomev/nog/issues/25), [#26](https://github.com/jetomev/nog/issues/26)), v1.5.3 ([#29](https://github.com/jetomev/nog/issues/29)), v1.5.2 ([#27](https://github.com/jetomev/nog/issues/27)).
+> **v1.5.7 shipped 2026-10-02** — what the KognogOS VM test found: `fakeroot` required ([#34](https://github.com/jetomev/nog/issues/34)), no partial upgrade after a declined prompt ([#35](https://github.com/jetomev/nog/issues/35)), a failed update always says the install is off ([#36](https://github.com/jetomev/nog/issues/36)). **v1.5.6 shipped 2026-09-30** — never installs from stale package lists ([#30](https://github.com/jetomev/nog/issues/30)), and keys are never held ([#31](https://github.com/jetomev/nog/issues/31)). Earlier that day: v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)), v1.5.4, v1.5.3, v1.5.2.
 
 ### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.6.0)
 
@@ -682,6 +692,20 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v1.5.7 — October 2, 2026
+
+**What the KognogOS VM test of v1.5.6 found** ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). The test ran on a freshly installed KognogOS (build 3). Both v1.5.6 fixes work there. It also turned up four findings, and three of them are fixed here.
+
+- **`fakeroot` is now required** (F-2, #34). nog's update check (`checkupdates`) needs it, but pacman-contrib lists it only as optional, and a fresh KognogOS did not have it: `nog update`, and the v1.5.6 refresh before an install, stopped with `Cannot find the fakeroot binary`. Machines with the developer tools installed never saw it. The package now depends on `fakeroot`, and if the check still fails for that reason nog names it and gives the command (`sudo pacman -Syu fakeroot`).
+- **A declined pacman prompt no longer opens the door to a partial upgrade** (F-3, #35). pacman refreshes the package lists *before* it asks "Proceed?". Answering no left fresh lists and nothing installed, and for the next day `nog install` trusted those lists and installed without updating. nog now keeps a record of its last *completed* update (`~/.local/share/nog/last-update`, written only when the lists were refreshed and the repository step finished). `nog install` updates first when there is no record, the record is more than a day old, or the lists changed after it (a declined prompt, or `pacman -Sy` run outside nog). The first install after upgrading to this version updates once, because there is no record yet.
+- **A failed update always says the install is off** (F-4, #36). Several failures inside the update (the key store, the update check, the key step, pacman's own step) ended nog on the spot, so `nog install` never got to say *"not installing …"*. They now report back; `nog update` still exits with the same status.
+
+Still open: **F-1** ([#33](https://github.com/jetomev/nog/issues/33)) — nog's signing key cannot yet be fetched from a key server, so a downloaded nog package will not install on a fresh system without adding the key by hand. That is fixed by publishing the key (and by KognogOS shipping it, [KognogOS#9](https://github.com/jetomev/KognogOS/issues/9)), not by code.
+
+Proven in the VM before release (tests A–C in [testing/](testing/)); Javier's own run follows.
+
+Tests: 219 → 221. Warnings unchanged at 6.
+
 ### v1.5.6 — September 30, 2026
 
 **Never install from stale package lists, and never hold the keys** ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)). Found on the first freshly installed KognogOS: `nog install` failed until `pacman -Syu` was run by hand.
@@ -693,22 +717,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 Released at Javier's request so he can test it in the KognogOS VM through the AUR; the VM checks are recorded as pending in [testing/](testing/).
 
 Tests: 217 → 219. Warnings unchanged at 6.
-
-### v1.5.5 — September 30, 2026
-
-**`nog clean` — tier-aware cleanup of pacman's download cache** ([#15](https://github.com/jetomev/nog/issues/15)). pacman keeps every package it ever downloads and never removes one by itself; on the development machine the cache had grown to 28 GB by August and was back to 18.4 GB by the end of September. Tools like `paccache` keep the last N of everything. nog already knows how much each package matters, so it keeps more of what hurts to lose:
-
-- **Tier 1 keeps 3 versions, Tier 2 keeps 2, Tier 3 keeps 1** — set under `[clean]` in `nog.conf`. Tier 1 is the rollback path: the August black-screen night needed a known-good package in the cache.
-- **The installed version is never removed**, so a held package always has what it runs. A newer version already downloaded stays too.
-- **Packages you no longer have are cleared**, and so are day-old leftover `download-…` folders from interrupted downloads.
-- **Report first, then a `[y/N]` question.** With no answer, nothing is removed. It refuses while pacman is running.
-- **Versions are ordered exactly as pacman orders them** — pacman's own comparison, ported and checked against `vercmp` over every version pair in a real cache.
-
-On the development machine: 10.8 GB of 18.4 GB could go — 1,845 old versions and 123 leftover folders — while every installed version and three of each kernel stay. The "no longer installed" count matches `paccache` exactly (346 versions, 1.9 GB).
-
-Also in this release: the test-tally script now reads only a matrix's Result column. It had counted a check *titled* "Failure reason…" as a FAIL, so the published v1.5.0 test record said 4 FAIL where the truth was 3; that record now carries a dated correction.
-
-Tests: 204 → 217. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

@@ -2,6 +2,20 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.5.7 — October 2, 2026
+
+**What the KognogOS VM test of v1.5.6 found** ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). The test ran on a freshly installed KognogOS (build 3). Both v1.5.6 fixes work there. It also turned up four findings, and three of them are fixed here.
+
+- **`fakeroot` is now required** (F-2, #34). nog's update check (`checkupdates`) needs it, but pacman-contrib lists it only as optional, and a fresh KognogOS did not have it: `nog update`, and the v1.5.6 refresh before an install, stopped with `Cannot find the fakeroot binary`. Machines with the developer tools installed never saw it. The package now depends on `fakeroot`, and if the check still fails for that reason nog names it and gives the command (`sudo pacman -Syu fakeroot`).
+- **A declined pacman prompt no longer opens the door to a partial upgrade** (F-3, #35). pacman refreshes the package lists *before* it asks "Proceed?". Answering no left fresh lists and nothing installed, and for the next day `nog install` trusted those lists and installed without updating. nog now keeps a record of its last *completed* update (`~/.local/share/nog/last-update`, written only when the lists were refreshed and the repository step finished). `nog install` updates first when there is no record, the record is more than a day old, or the lists changed after it (a declined prompt, or `pacman -Sy` run outside nog). The first install after upgrading to this version updates once, because there is no record yet.
+- **A failed update always says the install is off** (F-4, #36). Several failures inside the update (the key store, the update check, the key step, pacman's own step) ended nog on the spot, so `nog install` never got to say *"not installing …"*. They now report back; `nog update` still exits with the same status.
+
+Still open: **F-1** ([#33](https://github.com/jetomev/nog/issues/33)) — nog's signing key cannot yet be fetched from a key server, so a downloaded nog package will not install on a fresh system without adding the key by hand. That is fixed by publishing the key (and by KognogOS shipping it, [KognogOS#9](https://github.com/jetomev/KognogOS/issues/9)), not by code.
+
+Proven in the VM before release (tests A–C in [testing/](../testing/)); Javier's own run follows.
+
+Tests: 219 → 221. Warnings unchanged at 6.
+
 ### v1.5.6 — September 30, 2026
 
 **Never install from stale package lists, and never hold the keys** ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)). Found on the first freshly installed KognogOS: `nog install` failed until `pacman -Syu` was run by hand.

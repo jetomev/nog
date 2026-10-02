@@ -2,11 +2,19 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.5.7 — Released (what the VM test found: F-2 #34, F-3 #35, F-4 #36)
+- [x] `fakeroot` in `depends=`; a checkupdates failure for want of it names the fix
+- [x] Record of the last completed update (`~/.local/share/nog/last-update`); `nog install` updates first when it is missing, over a day old, or older than the lists
+- [x] Failures inside the update return to the caller, so `nog install` always says it is not installing
+- [x] Tried in the VM before release (tests A–C)
+- [ ] Javier's own VM run
+- [ ] F-1 (#33): nog's key published to keyserver.ubuntu.com and verified on keys.openpgp.org; KognogOS ships it (KognogOS#9)
+
 ### v1.5.6 — Released (stale lists before an install, #30; keys first, #31)
 - [x] `nog install`: lists missing or older than a day (local ctime) → tier-aware update first, `pacman -Sy` when nothing may install, then the install; a stopped update stops the install
 - [x] `archlinux-keyring` / `chaotic-keyring` never held (date, sign-off, coupling) and installed in their own step first — the README's "zero-day lane for the keyring" item
 - [x] Key store set up (`pacman-key --init`, `--populate`) when it never was
-- [ ] Proven in the KognogOS VM — pending (test plan in testing/)
+- [x] Proven in the KognogOS VM — Claude's run 2026-10-02: 6 PASS, 2.3 did not occur; found F-1 to F-4 (#33–#36)
 
 ### v1.5.5 — Released (nog clean, #15 — the first piece of C5, shipped early)
 - [x] `cache` module: pacman's `alpm_pkg_vercmp` ported; checked against `vercmp` over every pair in a real cache
