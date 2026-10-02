@@ -30,7 +30,7 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [x] **F-1 · #33** — Javier's ruling 2026-10-02: no outside key service. Every instruction now fetches the key from GitHub (`curl -s https://github.com/jetomev.gpg | gpg --import`): 5 AUR recipes, v1.5.7 notes, KognogOS `where-we-stand.md` (`ee253e3`). Tested in an empty key store. Shipping the key inside KognogOS stays with KognogOS#9
 
 - [ ] **Follow-up of #40** — the AUR helper / Flatpak / Snap steps still relay stderr through nog; the helper asks questions, so its question could race its table the same way. Check on this desktop (yay)
-- [ ] **Desktop: confirm the 1 Oct missing prompt is gone** with v1.5.8 (`nog update` on a day something is Ready)
+- [ ] **Desktop: confirm the 1 Oct missing prompt is gone** with v1.5.8 (`nog update` on a day something is Ready) — *nog 1.5.8 installed on the desktop 2026-10-02 12:44 (by nog 1.5.6 `install <file>`, which first updated 15 Ready packages)*
 - [ ] The "update completed" record is per user (`~/.local/share/nog/last-update`); root and javier each keep their own. Safe direction (extra update only); decide whether it should be system-wide
 
 ### 0 · Javier's concerns, raised 30 Sep (the "two-week topic") — in this order
