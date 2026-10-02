@@ -108,7 +108,7 @@ pub fn install(packages: &[String]) {
     let reason = refresh_reason(
         sync_db::lists_age_secs(), sync_db::update_stamp_age_secs(), LISTS_MAX_AGE_SECS);
     if let Some(r) = reason {
-        println!("nog: {} — refreshing them, the safe way, before installing.", r.words());
+        println!("nog: {} — updating first, the safe way, before installing.", r.words());
         println!("     That runs a normal tier-aware update first (ready updates install, holds stay).");
         if run_update(false, true) != UpdateEnd::Done {
             eprintln!();
@@ -208,9 +208,9 @@ impl RefreshReason {
     fn words(&self) -> String {
         match self {
             RefreshReason::ListsMissing => "the package lists are missing".to_string(),
-            RefreshReason::NoRecord => "nog has no record of a completed update on this computer yet".to_string(),
+            RefreshReason::NoRecord => "there is no record of a completed update on this computer yet".to_string(),
             RefreshReason::RecordOld(a) => format!("the last completed update was {} ago", age_words(*a)),
-            RefreshReason::ListsChangedOutside => "the package lists changed after nog's last completed update".to_string(),
+            RefreshReason::ListsChangedOutside => "the package lists changed after the last completed update".to_string(),
         }
     }
 }
