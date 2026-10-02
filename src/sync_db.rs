@@ -189,8 +189,10 @@ fn walk_repos_in(sync_dir: &Path) -> HashMap<String, PackageDesc> {
 }
 
 /// v1.5.6 (#30): how long ago the package lists were last refreshed on THIS
-/// machine, in seconds — the oldest of the enabled repositories' lists, read
-/// from each file's change time (ctime). Not its modification time: pacman
+/// machine, in seconds — read from each file's change time (ctime). Since
+/// v1.5.7 (F-3, #35) the NEWEST of the enabled repositories' lists: pacman
+/// leaves a list it found unchanged untouched, so the newest one is the time
+/// of the last refresh. Not its modification time: pacman
 /// stamps a downloaded list with the server's time, which can be hours older
 /// than the refresh. `None` when a list is missing (a fresh copy of a disc, or
 /// a repository never synced), which always means "refresh".
@@ -202,12 +204,42 @@ pub fn lists_age_secs() -> Option<u64> {
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
-    let mut oldest = 0u64;
+    let mut newest = u64::MAX;
     for r in repos {
         let meta = fs::metadata(Path::new(SYNC_DB_DIR).join(format!("{}.db", r))).ok()?;
-        oldest = oldest.max(now.saturating_sub(meta.ctime()).max(0) as u64);
+        newest = newest.min(now.saturating_sub(meta.ctime()).max(0) as u64);
     }
-    Some(oldest)
+    Some(newest)
+}
+
+/// v1.5.7 (F-3, #35): where nog records that it last refreshed the package
+/// lists AND completed the repository step with them. List age alone cannot
+/// tell a finished update from one declined at pacman's own prompt: pacman
+/// refreshes the lists before it asks.
+fn update_stamp_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(Path::new(&home).join(".local/share/nog/last-update"))
+}
+
+/// Write the stamp. Best effort: a missing stamp only costs one extra safe
+/// update before the next install.
+pub fn mark_update_done() {
+    if let Some(p) = update_stamp_path() {
+        if let Some(dir) = p.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(&p, "written by nog after a completed repository update\n");
+    }
+}
+
+/// Seconds since the stamp was written (change time, like the lists), or
+/// `None` when nog has no record of a completed update.
+pub fn update_stamp_age_secs() -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::metadata(update_stamp_path()?).ok()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    Some(now.saturating_sub(meta.ctime()).max(0) as u64)
 }
 
 /// v1.5.4 (#28): the enabled repositories, in pacman.conf order, for the

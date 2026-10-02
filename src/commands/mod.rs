@@ -102,12 +102,13 @@ pub fn install(packages: &[String]) {
     // package is a partial upgrade, which Arch does not support, so the safe
     // way runs the tier-aware update first: refresh, install what is Ready,
     // keep the holds. Then the install.
-    let age = sync_db::lists_age_secs();
-    if lists_need_refresh(age, LISTS_MAX_AGE_SECS) {
-        println!("nog: {}", match age {
-            None => "the package lists are missing — refreshing them, the safe way, before installing.".to_string(),
-            Some(a) => format!("the package lists are {} old — refreshing them, the safe way, before installing.", age_words(a)),
-        });
+    // v1.5.7 (F-3, #35): judged against nog's record of its last completed
+    // update, not the lists' age alone — a prompt declined inside pacman
+    // leaves fresh lists behind and nothing installed.
+    let reason = refresh_reason(
+        sync_db::lists_age_secs(), sync_db::update_stamp_age_secs(), LISTS_MAX_AGE_SECS);
+    if let Some(r) = reason {
+        println!("nog: {} — refreshing them, the safe way, before installing.", r.words());
         println!("     That runs a normal tier-aware update first (ready updates install, holds stay).");
         if run_update(false, true) != UpdateEnd::Done {
             eprintln!();
@@ -194,9 +195,42 @@ fn needs_the_keyboard<F: Fn(&str) -> bool>(packages: &[String], official: F) -> 
 /// v1.5.6 (#30): package lists older than this are refreshed before an install.
 const LISTS_MAX_AGE_SECS: u64 = 24 * 3600;
 
-/// Pure: missing lists, or lists older than `max`, need a refresh.
-fn lists_need_refresh(age: Option<u64>, max: u64) -> bool {
-    age.map_or(true, |a| a > max)
+/// v1.5.7 (F-3, #35): why `nog install` has to update first, if it does.
+#[derive(Debug, PartialEq)]
+enum RefreshReason {
+    ListsMissing,
+    NoRecord,
+    RecordOld(u64),
+    ListsChangedOutside,
+}
+
+impl RefreshReason {
+    fn words(&self) -> String {
+        match self {
+            RefreshReason::ListsMissing => "the package lists are missing".to_string(),
+            RefreshReason::NoRecord => "nog has no record of a completed update on this computer yet".to_string(),
+            RefreshReason::RecordOld(a) => format!("the last completed update was {} ago", age_words(*a)),
+            RefreshReason::ListsChangedOutside => "the package lists changed after nog's last completed update".to_string(),
+        }
+    }
+}
+
+/// Pure. The stamp is written only when the lists were refreshed AND the
+/// repository step completed with them, so a fresh stamp vouches for the
+/// lists of that moment. Lists newer than the stamp were refreshed by
+/// something that did not finish — a declined pacman prompt, or `pacman -Sy`
+/// outside nog.
+fn refresh_reason(lists: Option<u64>, stamp: Option<u64>, max: u64) -> Option<RefreshReason> {
+    let lists = match lists {
+        None => return Some(RefreshReason::ListsMissing),
+        Some(a) => a,
+    };
+    match stamp {
+        None => Some(RefreshReason::NoRecord),
+        Some(s) if s > max => Some(RefreshReason::RecordOld(s)),
+        Some(s) if lists < s => Some(RefreshReason::ListsChangedOutside),
+        Some(_) => None,
+    }
 }
 
 /// "3 days", "1 day", "5 hours" — how old the lists are, in plain words.
@@ -740,7 +774,12 @@ fn refresh_lists_if(before_install: bool) -> UpdateEnd {
     }
     println!();
     println!("{}nog: Refreshing the package lists ...{}", C_BOLD, C_RESET);
-    if pacman::sync_lists().status.success() { UpdateEnd::Done } else { UpdateEnd::Stopped }
+    if pacman::sync_lists().status.success() {
+        sync_db::mark_update_done();
+        UpdateEnd::Done
+    } else {
+        UpdateEnd::Stopped
+    }
 }
 
 /// v1.5.6 (#30): how a run of the update ended, for `nog install`, which runs
@@ -751,16 +790,33 @@ enum UpdateEnd {
     Done,
     /// Cancelled or not completed — the lists may still be old.
     Stopped,
+    /// v1.5.7 (F-4, #36): an error ended the run; carries the exit status.
+    /// Returned, not exited on the spot, so `nog install` can still say it is
+    /// not installing.
+    Failed(i32),
 }
 
 pub fn update(realign: bool) {
-    run_update(realign, false);
+    if let UpdateEnd::Failed(code) = run_update(realign, false) {
+        std::process::exit(code);
+    }
+}
+
+/// v1.5.7 (F-2, #34): checkupdates needs fakeroot, which pacman-contrib only
+/// lists as optional. Name the missing piece when that is why it failed.
+/// `-Syu`, not `-S`: on lists this old a lone `-S` is a partial upgrade.
+fn checkupdates_hint(msg: &str) -> Option<&'static str> {
+    if msg.contains("fakeroot") {
+        Some("     checkupdates needs `fakeroot`. Install it together with a full update:\n       sudo pacman -Syu fakeroot")
+    } else {
+        None
+    }
 }
 
 /// v1.5.6 (#31): set pacman's key store up when it has never been set up.
-fn ensure_keystore() {
+fn ensure_keystore() -> bool {
     if pacman::keystore_ready() {
-        return;
+        return true;
     }
     println!();
     println!("{}nog: pacman's key store has not been set up on this computer yet.{}", C_BOLD, C_RESET);
@@ -769,9 +825,10 @@ fn ensure_keystore() {
     if !pacman::init_keystore() {
         eprintln!("nog: setting up the key store did not complete — stopping. Run:");
         eprintln!("       sudo pacman-key --init && sudo pacman-key --populate");
-        std::process::exit(1);
+        return false;
     }
     println!("nog: key store ready.");
+    true
 }
 
 /// The update itself. `before_install` is set when `nog install` runs it to
@@ -784,18 +841,23 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     let tm = load_tiers();
 
     let (run_date, run_time, run_user) = print_update_header();
-    ensure_keystore();
+    if !ensure_keystore() {
+        return UpdateEnd::Failed(1);
+    }
     println!("nog: Checking for pending updates ...");
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
         Err(CheckUpdatesError::Missing) => {
             eprintln!("nog: `checkupdates` not found. Please install `pacman-contrib`:");
             eprintln!("       sudo pacman -S pacman-contrib");
-            std::process::exit(1);
+            return UpdateEnd::Failed(1);
         }
         Err(CheckUpdatesError::Other(msg)) => {
             eprintln!("nog: checkupdates failed: {}", msg);
-            std::process::exit(1);
+            if let Some(hint) = checkupdates_hint(&msg) {
+                eprintln!("{}", hint);
+            }
+            return UpdateEnd::Failed(1);
         }
     };
     let official_count = pending.len();
@@ -1462,7 +1524,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
                 eprintln!("     {}", r);
             }
             eprintln!("     Every later package's signature would be checked against old keys.");
-            std::process::exit(k.status.code().unwrap_or(1));
+            return UpdateEnd::Failed(k.status.code().unwrap_or(1));
         }
     }
 
@@ -1482,8 +1544,10 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         eprintln!("     whose repo upgrade did not complete.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-        std::process::exit(pac.status.code().unwrap_or(1));
+        return UpdateEnd::Failed(pac.status.code().unwrap_or(1));
     }
+    // v1.5.7 (F-3, #35): pacman refreshed the lists and completed with them.
+    sync_db::mark_update_done();
 
     // Step 2 — the AUR, by name. Only what nog cleared this run is ever passed,
     // so held AUR packages are not merely ignored, they are never mentioned.
@@ -2604,13 +2668,38 @@ mod output_tests {
     #[test]
     fn stale_or_missing_lists_need_a_refresh() {
         // #30: the copied disc's lists were weeks old; a missing list is a refresh.
-        assert!(lists_need_refresh(None, LISTS_MAX_AGE_SECS));
-        assert!(lists_need_refresh(Some(20 * 86_400), LISTS_MAX_AGE_SECS));
-        assert!(!lists_need_refresh(Some(3600), LISTS_MAX_AGE_SECS));
-        assert!(!lists_need_refresh(Some(LISTS_MAX_AGE_SECS), LISTS_MAX_AGE_SECS));
+        let m = LISTS_MAX_AGE_SECS;
+        assert_eq!(refresh_reason(None, Some(60), m), Some(RefreshReason::ListsMissing));
+        assert_eq!(refresh_reason(Some(3600), None, m), Some(RefreshReason::NoRecord));
+        assert_eq!(refresh_reason(Some(3 * 86_400), Some(2 * 86_400), m), Some(RefreshReason::RecordOld(2 * 86_400)));
+        // F-3: pacman refreshed the lists, then its prompt was declined —
+        // lists newer than the last completed update.
+        assert_eq!(refresh_reason(Some(60), Some(3600), m), Some(RefreshReason::ListsChangedOutside));
+        // A completed update: lists synced, then the stamp written.
+        assert_eq!(refresh_reason(Some(3700), Some(3600), m), None);
+        assert_eq!(refresh_reason(Some(m), Some(m), m), None);
+        // Lists older than a day but synced at the last update (pacman leaves
+        // an unchanged list untouched): no refresh needed.
+        assert_eq!(refresh_reason(Some(5 * 86_400), Some(3600), m), None);
         assert_eq!(age_words(20 * 86_400 + 5), "20 days");
+        assert_eq!(RefreshReason::RecordOld(2 * 86_400).words(), "the last completed update was 2 days ago");
         assert_eq!(age_words(86_400), "1 day");
         assert_eq!(age_words(3 * 3600 + 9), "3 hours");
+    }
+
+    #[test]
+    fn checkupdates_hint_names_fakeroot() {
+        // F-2 (#34): the exact message from the KognogOS VM.
+        let h = checkupdates_hint("==> ERROR: Cannot find the fakeroot binary").unwrap();
+        assert!(h.contains("sudo pacman -Syu fakeroot"));
+        assert!(checkupdates_hint("error: failed to synchronize all databases").is_none());
+    }
+
+    #[test]
+    fn a_failed_update_is_not_done() {
+        // F-4 (#36): nog install refuses on anything but Done.
+        assert_ne!(UpdateEnd::Failed(1), UpdateEnd::Done);
+        assert_ne!(UpdateEnd::Stopped, UpdateEnd::Done);
     }
 
     #[test]
