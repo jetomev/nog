@@ -8,7 +8,8 @@
 - [x] Failures inside the update return to the caller, so `nog install` always says it is not installing
 - [x] Tried in the VM before release (tests A–C)
 - [ ] Javier's own VM run
-- [ ] F-1 (#33): nog's key published to keyserver.ubuntu.com and verified on keys.openpgp.org; KognogOS ships it (KognogOS#9)
+- [x] F-1 (#33): the key is fetched from GitHub (`github.com/jetomev.gpg`) in every instruction, no key server — Javier's ruling 2026-10-02
+- [ ] KognogOS ships the key in its pacman keyring (KognogOS#9)
 
 ### v1.5.6 — Released (stale lists before an install, #30; keys first, #31)
 - [x] `nog install`: lists missing or older than a day (local ctime) → tier-aware update first, `pacman -Sy` when nothing may install, then the install; a stopped update stops the install
