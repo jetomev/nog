@@ -8,3 +8,4 @@
 *.swp
 *.swo
 logs/
+dist-rc/
