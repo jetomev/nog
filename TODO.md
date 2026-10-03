@@ -11,6 +11,8 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [ ] **To check (unverified, 2 Oct, alacrittyForge's VM setup):** `nog install python-tomlkit ./a.pkg.tar.zst ./b.pkg.tar.zst` (a name and package files in one command) installed nothing and printed nothing the guest agent captured; `nog install python-tomlkit` alone and the two files alone both worked. nog 1.5.5 in that VM (`kognog-hypeforge`, snapshot `alacrittyforge-1.0.0rc1`). Reproduce on 1.5.8 before calling it a bug.
 
 - [ ] **v1.6.0 for nogForge (Javier, 3 Oct 2026: "Yes")** — part of #7, before nogForge uses any of it: (1) `--json` output for the plan, tiers, holds and search; (2) a "keep these back" choice for the update plan that tells which packages must stay back with an unticked one (no partial-upgrade breakage); (3) root steps through the system's password window (sudo -A / askpass) when nogForge calls nog, terminal prompt otherwise. Flatpak/Snap installs stay later in #7.
+
+- [ ] **To watch (3 Oct, not a bug yet):** #27's fix works — linux-lts (first seen Jul 28) and mkinitcpio (Aug 12) are past their 30-day window and wait only on the 7-day safety rule (newest builds Oct 1 → ready Oct 8). But if new builds keep arriving less than 7 days apart, the safety wait could slip again (a small cousin of #27). Check after Oct 8 whether both went in at the next update.
 ## Done — v1.5.0 released (29 Sep 2026)
 v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through its own `nog install <file>`. Tags v1.4.2 and v1.4.3 ride along. Issues #14, #16, #17, #19–#22 closed. 172 tests, 6 warnings.
 
