@@ -8,6 +8,7 @@ mod config;
 mod holds;
 mod elf;
 mod local_db;
+mod machine;
 mod pacman;
 mod reboot;
 mod runlog;
@@ -71,10 +72,28 @@ enum Commands {
     Update {
         #[arg(long, help = "Pull held kernels into the upgrade to match installed headers")]
         realign: bool,
+        /// Write the plan as JSON and stop before any question or change (v1.6.0)
+        #[arg(long)]
+        json: bool,
+        /// Keep these back this time; what must stay with them follows (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        keep: Vec<String>,
     },
     /// Search pacman repos; results annotated by tier (red/yellow/green)
     Search {
         query: String,
+        /// Results as JSON, with the AUR through the helper (v1.6.0)
+        #[arg(long)]
+        json: bool,
+    },
+    /// List installed packages with their tier and where they came from
+    ///
+    /// `--json` adds what needs each one and whether it is protected from
+    /// removal (Tier 1, the base set, or needed by another package) — what
+    /// nogForge's Home shows (v1.6.0).
+    List {
+        #[arg(long)]
+        json: bool,
     },
     /// Pin a package to a specific tier (persists to /etc/nog/tier-pins.toml)
     ///
@@ -137,6 +156,14 @@ fn main() {
     // requested, and ends with where it was logged and a thank-you (Javier,
     // 2 Oct 2026). The hidden _debug commands are internal and stay bare.
     let internal = matches!(cli.command, Commands::DebugDates { .. } | Commands::DebugHold { .. });
+    let json = matches!(&cli.command,
+        Commands::Update { json: true, .. } | Commands::Search { json: true, .. } | Commands::List { json: true });
+    if json {
+        machine::begin();
+    }
+    // v1.6.0: a JSON run is a program asking, not a person's run: no banner,
+    // no closing note, no line in the run history.
+    let internal = internal || json;
     if !internal {
         let label: Vec<String> = std::env::args().skip(1).collect();
         commands::begin(&label.join(" "));
@@ -144,8 +171,16 @@ fn main() {
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
-        Commands::Update { realign } => commands::update(realign),
-        Commands::Search { query } => commands::search(&query),
+        Commands::Update { realign, json, keep } => {
+            if json {
+                machine::set_plan(keep);
+            } else {
+                machine::set_keep(keep);
+            }
+            commands::update(realign)
+        }
+        Commands::Search { query, json } => commands::search(&query, json),
+        Commands::List { json } => commands::list(json),
         Commands::Pin { package, tier } => commands::pin(&package, tier),
         Commands::Unlock { package, promote } => commands::unlock(&package, promote),
         Commands::Deactivate { source } => commands::deactivate(&source),

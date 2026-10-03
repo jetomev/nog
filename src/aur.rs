@@ -182,6 +182,7 @@ pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
     let mut args = vec!["-S"];
     args.extend_from_slice(&pkgs);
     Command::new(helper.binary())
+        .args(crate::machine::helper_sudo_args())
         .args(&args)
         .status()
         .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
@@ -213,7 +214,7 @@ pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String])
         args.push(excluded.join(","));
     }
     let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    crate::handoff::run(Command::new(helper.binary()).args(&str_args), helper.binary())
+    crate::handoff::run(Command::new(helper.binary()).args(crate::machine::helper_sudo_args()).args(&str_args), helper.binary())
 }
 
 /// Which AUR packages this run cleared: Ready ones, plus Unknowns the user

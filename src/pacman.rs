@@ -42,7 +42,7 @@ pub struct PendingUpdate {
 /// the caller is already root (e.g. legacy `sudo nog install`), sudo is a
 /// no-op, so this is fully backwards-compatible.
 pub fn run(args: &[&str]) -> ExitStatus {
-    Command::new("sudo")
+    crate::machine::sudo()
         .arg("pacman")
         .args(args)
         .status()
@@ -177,7 +177,7 @@ pub fn update() -> ExitStatus {
 /// package is still asked about. Both forms leave pacman's stderr on the
 /// terminal (F-8) so its question cannot overtake its table.
 pub fn update_excluding(excluded: &[String], targets: Option<&[String]>) -> crate::handoff::Handoff {
-    let mut cmd = Command::new("sudo");
+    let mut cmd = crate::machine::sudo();
     match targets {
         None => {
             cmd.args(["pacman", "-Syu"]);
@@ -200,7 +200,7 @@ pub fn update_excluding(excluded: &[String], targets: Option<&[String]>) -> crat
 /// it may install: the system is then exactly where `nog update` leaves it —
 /// every pending update held — but with current lists.
 pub fn sync_lists() -> crate::handoff::Handoff {
-    let mut cmd = Command::new("sudo");
+    let mut cmd = crate::machine::sudo();
     // v1.5.8 (F-7, #39): no progress bars. pacman ends a bar with a cursor
     // move, not a line ending; at the bottom of a full terminal that move does
     // nothing, and the notice after it lost its blank line.
@@ -212,7 +212,7 @@ pub fn sync_lists() -> crate::handoff::Handoff {
 /// else — Arch's own advice when keys fall behind (`pacman -Sy
 /// archlinux-keyring`, then the upgrade).
 pub fn install_keyrings(names: &[String]) -> crate::handoff::Handoff {
-    let mut cmd = Command::new("sudo");
+    let mut cmd = crate::machine::sudo();
     cmd.args(["pacman", "-Sy", "--needed", "--noconfirm"]).args(names);
     crate::handoff::run(&mut cmd, "sudo pacman")
 }
@@ -230,7 +230,7 @@ pub fn keystore_ready() -> bool {
 /// v1.5.6 (#31): set the key store up — `pacman-key --init`, then
 /// `--populate` with every keyring package installed.
 pub fn init_keystore() -> bool {
-    let ok = |args: &[&str]| Command::new("sudo").arg("pacman-key").args(args).status()
+    let ok = |args: &[&str]| crate::machine::sudo().arg("pacman-key").args(args).status()
         .map(|s| s.success()).unwrap_or(false);
     ok(&["--init"]) && ok(&["--populate"])
 }

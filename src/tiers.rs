@@ -313,9 +313,9 @@ pub fn pin_package(path: &str, package: &str, tier: u8) -> Result<(), String> {
 /// regressing.
 pub(crate) fn write_as_root(path: &str, contents: &str) -> Result<(), String> {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
-    let mut child = Command::new("sudo")
+    let mut child = crate::machine::sudo()
         .arg("tee")
         .arg(path)
         .stdin(Stdio::piped())

@@ -346,6 +346,23 @@ pub fn remove(packages: &[String]) {
     }
 }
 
+/// v1.6.0 (#7): installed packages, for people and for nogForge (`--json`).
+pub fn list(json: bool) {
+    let tm = load_tiers();
+    let repos: HashMap<String, String> = sync_db::load_packages().iter()
+        .filter_map(|(n, d)| d.repo.clone().map(|r| (n.clone(), r)))
+        .collect();
+    let v = crate::machine::list_json(&tm, std::path::Path::new("/var/lib/pacman/local"), &repos);
+    if json {
+        crate::machine::emit(&v);
+        return;
+    }
+    for p in v["packages"].as_array().into_iter().flatten().filter(|p| p["explicit"] == true) {
+        println!("{:<28} {:<20} Tier {}  {}", p["name"].as_str().unwrap_or(""), p["version"].as_str().unwrap_or(""),
+            p["tier"], p["source"].as_str().unwrap_or(""));
+    }
+}
+
 pub fn deactivate(source: &str) {
     set_source(source, false);
 }
@@ -442,11 +459,11 @@ pub fn clean() {
 
     let mut failed = false;
     for batch in to_remove.chunks(400) {
-        let status = std::process::Command::new("sudo").args(["rm", "-f", "--"]).args(batch).status();
+        let status = crate::machine::sudo().args(["rm", "-f", "--"]).args(batch).status();
         failed |= !matches!(status, Ok(s) if s.success());
     }
     for batch in stale.chunks(100) {
-        let status = std::process::Command::new("sudo").args(["rm", "-rf", "--"]).args(batch).status();
+        let status = crate::machine::sudo().args(["rm", "-rf", "--"]).args(batch).status();
         failed |= !matches!(status, Ok(s) if s.success());
     }
 
@@ -671,7 +688,7 @@ fn set_chaotic(enable: bool) {
             // 1. Timestamped backup of pacman.conf before we touch it.
             let stamp = timestamp_for_backup();
             let backup = format!("{}.nog-bak-{}", conf_path, stamp);
-            let cp = std::process::Command::new("sudo")
+            let cp = crate::machine::sudo()
                 .args(["cp", "--preserve=all", conf_path, &backup])
                 .status();
             match cp {
@@ -781,6 +798,9 @@ enum HeldReason {
     /// buckets. Carries the partner it is waiting on. Its own window may already
     /// have expired; the countdown shown is the partner's.
     CoupledTo(String),
+    /// v1.6.0 (#7): you kept it back (`--keep`, nogForge's unticked box). Its
+    /// coupled partners then follow it through the same coupling rules.
+    KeptBack,
 }
 
 /// v1.5.6 (#31): the keyring packages. Holding them back is itself the
@@ -1302,6 +1322,25 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         }
     }
 
+    // v1.6.0 (#7): what you chose to keep back is held before the coupling
+    // rules run, so they decide what must stay back with it — the answer
+    // nogForge shows under an unticked box. Keys are never kept back (#31).
+    let keep = crate::machine::keep();
+    if !keep.is_empty() {
+        let wanted = |u: &PendingUpdate| keep.iter().any(|k| k == &u.name)
+            && !(u.source == Source::Pacman && KEYRINGS.contains(&u.name.as_str()));
+        let (kept, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut ready).into_iter().partition(|(u, _, _)| wanted(u));
+        ready = rest;
+        for (u, t, _) in kept {
+            held.push((u, t, 0, HeldReason::KeptBack));
+        }
+        let (kept, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut unknown).into_iter().partition(|(u, _)| wanted(u));
+        unknown = rest;
+        for (u, t) in kept {
+            held.push((u, t, 0, HeldReason::KeptBack));
+        }
+    }
+
     // Desync detection: for each Tier 1 package that is installed, check
     // whether its <X>-headers companion is installed at a *different* version.
     // That's the post-incident fingerprint of the 2026-05-13 nvidia breakage —
@@ -1544,6 +1583,10 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     let labels: HashMap<String, String> = pending.iter()
         .map(|u| (sightings::key(u.source.as_str(), &u.name), source_label(u, &packages)))
         .collect();
+    if crate::machine::plan_mode() {
+        crate::machine::emit(&plan_json(&ready, &held, &unknown, &labels, &source_presence, &cfg.holds));
+        return UpdateEnd::Stopped;
+    }
     if before_install {
         let rows: Vec<TableRow> = ready.iter()
             .map(|(upd, tier, reason)| TableRow::from(upd, tier, label_for(&labels, upd), ready_note(reason)))
@@ -2218,8 +2261,56 @@ fn ready_note(reason: &ReadyReason) -> String {
 }
 
 /// Map a Held bucket entry to its `Note` text.
+/// v1.6.0 (#7): the plan as data, for nogForge. Same buckets, same words.
+fn plan_json(
+    ready: &[(PendingUpdate, Tier, ReadyReason)],
+    held: &[(PendingUpdate, Tier, u64, HeldReason)],
+    unknown: &[(PendingUpdate, Tier)],
+    labels: &HashMap<String, String>,
+    presence: &SourcePresence,
+    holds: &crate::config::HoldsConfig,
+) -> serde_json::Value {
+    use serde_json::json;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let row = |u: &PendingUpdate, t: &Tier| json!({
+        "name": u.name, "source": label_for(labels, u), "tier": crate::machine::tier_number(t),
+        "old": u.old_version, "new": u.new_version,
+    });
+    let ready_rows: Vec<_> = ready.iter().map(|(u, t, r)| {
+        let mut v = row(u, t);
+        v["note"] = json!(ready_note(r));
+        v
+    }).collect();
+    let held_rows: Vec<_> = held.iter().map(|(u, t, rem, r)| {
+        let mut v = row(u, t);
+        v["note"] = json!(held_note(*rem, r));
+        v["days_remaining"] = json!(rem);
+        v["ready_on"] = match r {
+            HeldReason::ManualSignoff | HeldReason::KeptBack => json!(null),
+            HeldReason::CoupledTo(_) if *rem == 0 => json!(null),
+            _ => json!(now + rem * 86_400),
+        };
+        v["kept_back"] = json!(matches!(r, HeldReason::KeptBack));
+        v["coupled_to"] = match r { HeldReason::CoupledTo(p) => json!(p), _ => json!(null) };
+        v
+    }).collect();
+    let unknown_rows: Vec<_> = unknown.iter().map(|(u, t)| row(u, t)).collect();
+    let word = |p: &Presence| match p {
+        Presence::Checked => "checked", Presence::Failed => "could not check",
+        Presence::Off => "off", Presence::Absent => "not installed",
+    };
+    json!({
+        "nog": env!("CARGO_PKG_VERSION"), "kind": "plan",
+        "sources": {"aur": word(&presence.aur), "flatpak": word(&presence.flatpak), "snap": word(&presence.snap),
+                    "chaotic_aur_off": presence.chaotic_off},
+        "ready": ready_rows, "held": held_rows, "unknown": unknown_rows,
+        "holds": {"tier1_days": holds.tier1_days, "tier2_days": holds.tier2_days, "tier3_days": holds.tier3_days},
+    })
+}
+
 fn held_note(remaining: u64, reason: &HeldReason) -> String {
     match reason {
+        HeldReason::KeptBack => "kept back by you".to_string(),
         HeldReason::ManualSignoff =>
             "manual sign-off required — run `nog unlock` to release".to_string(),
         // Countdown first, so the Note column stays scannable by its leading
@@ -2859,6 +2950,13 @@ mod output_tests {
     /// column can be scanned down its leading number. A coupled row is no
     /// exception — the partner is the tail of the note, never its head.
     #[test]
+    fn kept_back_says_so_and_has_no_date() {
+        // v1.6.0 (#7): what you kept back (nogForge's unticked box) is not a countdown
+        assert_eq!(held_note(0, &HeldReason::KeptBack), "kept back by you");
+        assert_eq!(held_note(12, &HeldReason::KeptBack), "kept back by you");
+    }
+
+    #[test]
     fn held_notes_all_lead_with_the_countdown() {
         let cases = [
             (1, HeldReason::Window, "1 day remaining"),
@@ -3109,10 +3207,21 @@ mod output_tests {
     }
 }
 
-pub fn search(query: &str) {
+pub fn search(query: &str, json: bool) {
     let cfg = load_config();
     let tm = load_tiers();
     let output = pacman::search_capture(query);
+    if json {
+        // v1.6.0 (#7): the repositories, then the AUR through the helper (if any
+        // and if the AUR source is on). Read-only: nothing needs root.
+        let repo = String::from_utf8_lossy(&output.stdout).to_string();
+        let aur = resolve_helper(&cfg).filter(|_| sources::load(sources::DEFAULT_PATH).aur).and_then(|h| {
+            std::process::Command::new(h.binary()).args(["-Ssa", query]).output().ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        });
+        crate::machine::emit(&crate::machine::search_json(&tm, query, &repo, aur.as_deref()));
+        return;
+    }
 
     if output.stdout.is_empty() {
         println!("nog: no results for '{}'", query);

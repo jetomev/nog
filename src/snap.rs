@@ -292,7 +292,7 @@ pub fn place_hold(hours: u64, names: &[String]) -> ExitStatus {
     let dur = format!("--hold={}h", hours);
     let mut args: Vec<&str> = vec!["snap", "refresh", &dur];
     args.extend(names.iter().map(|s| s.as_str()));
-    Command::new("sudo")
+    crate::machine::sudo()
         .args(&args)
         .status()
         .unwrap_or_else(|e| panic!("nog: failed to launch sudo snap refresh --hold: {}", e))
@@ -304,7 +304,7 @@ pub fn place_hold(hours: u64, names: &[String]) -> ExitStatus {
 pub fn refresh(names: &[String]) -> crate::handoff::Handoff {
     let mut args: Vec<&str> = vec!["snap", "refresh"];
     args.extend(names.iter().map(|s| s.as_str()));
-    crate::handoff::run(Command::new("sudo").args(&args), "sudo snap refresh")
+    crate::handoff::run(crate::machine::sudo().args(&args), "sudo snap refresh")
 }
 
 /// Convert a SnapUpdate into the shared PendingUpdate shape.
