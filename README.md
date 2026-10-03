@@ -194,6 +194,9 @@ nog search <query>
 # Keep some updates back this time; what must stay with them follows (v1.6.0)
 nog update --keep <package>,<package>
 
+# Promote held updates: ready now, installed with the rest; partners they need come too (v1.6.0)
+nog update --promote <package>,<package>
+
 # Installed packages with their tier and source (v1.6.0)
 nog list
 
@@ -347,6 +350,8 @@ The tier digit is colour-coded — red, yellow, green — and non-official sourc
 | `nog list --json` | every installed package: version, description, tier, source, whether you chose it, what needs it, and why it may not be removed (*the system needs this to start*, *part of the base system*, *needed by …*) |
 | `nog search --json <q>` | the repositories, and the AUR through your helper |
 | `nog update --json [--keep a,b]` | the plan, from the same code as a real update, stopped before any question or change; with `--keep`, what you keep back and what must stay with it (`coupled_to`) |
+
+`--promote` is the opposite: the packages named are ready now and install with the rest of the update (nogForge's Promote). When a coupling rule would pull one back because its partner is still held, the partner is promoted with it instead: promoting `linux-zen` brings `linux-zen-headers` along ("promoted with linux-zen"). Keeping a package back wins over promoting it. `nog unlock <pkg> --promote` still installs one at once, on its own.
 
 `--keep` works in a real `nog update` too: the packages named are held before the coupling rules run, so their partners stay back with them. Keeping `ldb` back, for example, also holds `libwbclient` and `smbclient`, which come from the same Samba build.
 

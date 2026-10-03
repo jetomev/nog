@@ -78,6 +78,9 @@ enum Commands {
         /// Keep these back this time; what must stay with them follows (comma-separated)
         #[arg(long, value_delimiter = ',')]
         keep: Vec<String>,
+        /// Promote these: ready now, installed with the rest; partners they need come too
+        #[arg(long, value_delimiter = ',')]
+        promote: Vec<String>,
     },
     /// Search pacman repos; results annotated by tier (red/yellow/green)
     Search {
@@ -171,7 +174,8 @@ fn main() {
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
-        Commands::Update { realign, json, keep } => {
+        Commands::Update { realign, json, keep, promote } => {
+            machine::set_promote(promote);
             if json {
                 machine::set_plan(keep);
             } else {

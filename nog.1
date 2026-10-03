@@ -339,6 +339,11 @@ any question or transaction: ready, held (with \fBready_on\fR,
 \fBkept_back\fR and \fBcoupled_to\fR), unknown, the sources, and each
 tier's hold days.
 .TP
+.B nog update \-\-promote \fIa\fR,\fIb\fR
+Make these held packages ready now; they install with the rest. A partner the
+coupling rules say must move with one is promoted too ("promoted with ...").
+\fB\-\-keep\fR wins over \fB\-\-promote\fR.
+.TP
 .B nog update \-\-keep \fIa\fR,\fIb\fR
 Keep these packages back this time. They are held before the coupling rules
 run, so what must move with them stays back too.

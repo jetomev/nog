@@ -761,6 +761,10 @@ enum ReadyReason {
     /// v1.6.0 (#27): released after newer builds kept arriving during the
     /// hold. Before v1.6.0 this package would still be waiting.
     AfterWaiting(Waited),
+    /// v1.6.0 (#7): you promoted it (`--promote`, nogForge's Promote): ready
+    /// now, installed with the rest. `Some(p)`: it moved with `p`, which you
+    /// promoted, because the coupling rules say they go together.
+    Promoted(Option<String>),
 }
 
 /// v1.6.0 (#27): how long an update has been waiting, and how many new
@@ -1341,6 +1345,27 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         }
     }
 
+    // v1.6.0 (#7): what you promoted is ready now, before the coupling rules
+    // run; they pull its partners along instead of pulling it back (below).
+    let promote: Vec<String> = crate::machine::promote().into_iter().filter(|p| !keep.contains(p)).collect();
+    let mut promoted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if !promote.is_empty() {
+        let (up, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut held).into_iter()
+            .partition(|(u, _, _, r)| promote.iter().any(|p| p == &u.name) && !matches!(r, HeldReason::KeptBack));
+        held = rest;
+        for (u, t, _, _) in up {
+            promoted.insert(u.name.clone());
+            ready.push((u, t, ReadyReason::Promoted(None)));
+        }
+        let (up, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut unknown).into_iter()
+            .partition(|(u, _)| promote.iter().any(|p| p == &u.name));
+        unknown = rest;
+        for (u, t) in up {
+            promoted.insert(u.name.clone());
+            ready.push((u, t, ReadyReason::Promoted(None)));
+        }
+    }
+
     // Desync detection: for each Tier 1 package that is installed, check
     // whether its <X>-headers companion is installed at a *different* version.
     // That's the post-incident fingerprint of the 2026-05-13 nvidia breakage —
@@ -1521,6 +1546,28 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
             let demotions = holds::coupling_demotions(&ready_pkgs, &held_pkgs, &soname_data);
             if demotions.is_empty() {
                 break;
+            }
+
+            // v1.6.0 (#7): a promoted package isn't pulled back to wait for its
+            // partner; the partner is promoted with it — unless you kept the
+            // partner back, or it has no update to move with (then it's blocked).
+            let mut pulled = false;
+            for (name, partner) in &demotions {
+                if !promoted.contains(name) || keep.contains(partner) {
+                    continue;
+                }
+                if let Some(pos) = held.iter().position(|(u, _, _, _)| &u.name == partner) {
+                    let (u, t, _, _) = held.remove(pos);
+                    promoted.insert(u.name.clone());
+                    ready.push((u, t, ReadyReason::Promoted(Some(name.clone()))));
+                    pulled = true;
+                }
+            }
+            if pulled {
+                passes += 1;
+                if passes < MAX_PASSES {
+                    continue;
+                }
             }
 
             let mut kept: Vec<(PendingUpdate, Tier, ReadyReason)> = Vec::new();
@@ -2257,6 +2304,8 @@ fn ready_note(reason: &ReadyReason) -> String {
         ReadyReason::Realigned => "realigned to match installed headers".to_string(),
         ReadyReason::Keys => "keys · never held, installed first".to_string(),
         ReadyReason::AfterWaiting(w) => w.describe(),
+        ReadyReason::Promoted(None) => "promoted by you".to_string(),
+        ReadyReason::Promoted(Some(p)) => format!("promoted with {}", p),
     }
 }
 
@@ -2949,6 +2998,14 @@ mod output_tests {
     /// Every Held note that *has* a countdown opens with it, so the Note
     /// column can be scanned down its leading number. A coupled row is no
     /// exception — the partner is the tail of the note, never its head.
+    #[test]
+    fn promoted_says_so_and_names_what_it_moved_with() {
+        // v1.6.0 (#7): Promote makes it ready (Javier, 3 Oct: "shouldn't promote just bring the
+        // package to due, so it enters the ready list?"); its partner comes along, and says why
+        assert_eq!(ready_note(&ReadyReason::Promoted(None)), "promoted by you");
+        assert_eq!(ready_note(&ReadyReason::Promoted(Some("linux-zen".into()))), "promoted with linux-zen");
+    }
+
     #[test]
     fn kept_back_says_so_and_has_no_date() {
         // v1.6.0 (#7): what you kept back (nogForge's unticked box) is not a countdown

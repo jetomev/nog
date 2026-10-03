@@ -44,6 +44,16 @@ pub fn keep() -> Vec<String> {
 }
 
 static KEEP: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+static PROMOTE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// v1.6.0: what you promoted (`--promote`): ready now, installed with the rest.
+pub fn set_promote(p: Vec<String>) {
+    let _ = PROMOTE.set(p);
+}
+
+pub fn promote() -> Vec<String> {
+    PROMOTE.get().cloned().unwrap_or_default()
+}
 
 pub fn set_keep(keep: Vec<String>) {
     let _ = KEEP.set(keep);
