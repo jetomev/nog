@@ -319,6 +319,38 @@ Restores the AUR paths, or uncomments exactly the pacman.conf lines nog
 disabled (hand-written comments survive byte-for-byte) and refreshes the
 databases.
 .
+.SH NOG FOR PROGRAMS (v1.6.0)
+nogForge and other programs read nog's decisions as data. With
+.BR \-\-json ,
+stdout carries exactly one JSON document and everything nog usually prints goes
+to stderr; no banner is printed and no line is written to the run history.
+.TP
+.B nog list \fR[\fB\-\-json\fR]
+Installed packages with their tier and source. With \fB\-\-json\fR, also
+whether each was chosen or pulled in, what needs it, and why it may not be
+removed (Tier 1, the \fBbase\fR set, or needed by another package).
+.TP
+.B nog search \-\-json \fIquery\fR
+The repositories, and the AUR through the helper when the AUR source is on.
+.TP
+.B nog update \-\-json \fR[\fB\-\-keep\fR \fIa\fR,\fIb\fR]
+The update plan, computed by the same code as a real update and stopped before
+any question or transaction: ready, held (with \fBready_on\fR,
+\fBkept_back\fR and \fBcoupled_to\fR), unknown, the sources, and each
+tier's hold days.
+.TP
+.B nog update \-\-keep \fIa\fR,\fIb\fR
+Keep these packages back this time. They are held before the coupling rules
+run, so what must move with them stays back too.
+.
+.SH ENVIRONMENT
+.TP
+.B NOG_ASKPASS=1
+Every \fBsudo\fR nog runs gets \fB\-A\fR, and the AUR helper gets
+\fB\-\-sudoflags \-A\fR: the program named by \fBSUDO_ASKPASS\fR (a
+password window, e.g. \fBksshaskpass\fR) asks for the password instead of the
+terminal. Set by nogForge.
+.
 .SH OPTIONS
 .TP
 .B \-h, \-\-help

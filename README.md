@@ -191,6 +191,12 @@ nog update
 # Search, with each result's tier shown
 nog search <query>
 
+# Keep some updates back this time; what must stay with them follows (v1.6.0)
+nog update --keep <package>,<package>
+
+# Installed packages with their tier and source (v1.6.0)
+nog list
+
 # Move a package to a different tier
 nog pin <package> --tier=<1|2|3>
 
@@ -331,6 +337,20 @@ nog: run logged to /home/jetomev/.local/share/nog/logs/20260930 nog-update.csv
 The tier digit is colour-coded — red, yellow, green — and non-official sources get their own colour in the Source column. Details worth spotting: `fresh-editor-bin` is marked `AUR`; `linux-lts` finished its window but its newest build is too new for the safety wait; and `systemd` has been waiting since 13 September — the newer build that arrived since did not restart its countdown.
 
 ---
+
+### nog for programs *(v1.6.0)*
+
+[nogForge](https://github.com/jetomev/nogforge), the Forge Suite's package app, shows what nog decides and never decides itself. So nog says it as data: `--json` gives exactly one JSON document on stdout (everything nog usually prints goes to stderr), and a JSON run writes no banner and no line in the run history.
+
+| Command | Gives |
+|---|---|
+| `nog list --json` | every installed package: version, description, tier, source, whether you chose it, what needs it, and why it may not be removed (*the system needs this to start*, *part of the base system*, *needed by …*) |
+| `nog search --json <q>` | the repositories, and the AUR through your helper |
+| `nog update --json [--keep a,b]` | the plan, from the same code as a real update, stopped before any question or change; with `--keep`, what you keep back and what must stay with it (`coupled_to`) |
+
+`--keep` works in a real `nog update` too: the packages named are held before the coupling rules run, so their partners stay back with them. Keeping `ldb` back, for example, also holds `libwbclient` and `smbclient`, which come from the same Samba build.
+
+With `NOG_ASKPASS=1` in the environment, every `sudo` nog runs gets `-A`, and the AUR helper gets `--sudoflags -A`: the system's own password window asks (set `SUDO_ASKPASS`, e.g. KDE's `ksshaskpass`), never a terminal a program is drawing on. nogForge sets it.
 
 ## Configuration
 
