@@ -36,7 +36,7 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [x] Javier's option A (4 Oct): table (package, version, source, tier) before anything is downloaded; "Install these? [Y/n]" only when the AUR is involved; "Handing off to pacman/yay: …"; not-found stops first. 242 tests
 - [x] rc.1 built (`dist-rc/nog-1.8.0rc1-1-x86_64.pkg.tar.zst`, tests in a terminal)
 - [x] Javier, rc.1 (15:36–15:37): installed only nog; `install sl` → table (extra) + pacman handoff, installed; `install neofetch` → table said "chaotic-aur — unifetch provides it", unifetch went in; `install zzzz` → stopped before anything, not found
-- [ ] Not yet seen by Javier: the AUR path (`nog install aur/neofetch` → "Install these? [Y/n]") and nogForge's Yes/No for it
+- [x] Javier, 18:12: `nog install aur/neofetch` → table (AUR — built by yay), "Install these? [Y/n]", the yay handoff line, yay's menus and build, pacman's conflict question (unifetch removed): neofetch 7.1.0-2 in. PASS
 - [ ] Then the release (docs, man page, roadmap: C3 continues with Flatpak/Snap)
 
 ## Next up — in this order
