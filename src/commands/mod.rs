@@ -925,11 +925,21 @@ fn format_banner(label: &str, date: &str, time: &str, user: &str) -> String {
         format!("nog v{}  ·  {}", env!("CARGO_PKG_VERSION"), title)
     };
     let run = format!("Run:   nog {}", label);
-    let width = [41, heading.chars().count() + 4, run.chars().count() + 4]
-        .into_iter().max().unwrap_or(41);
+    let width = rule_width(&heading, &run);
     let rule = format!("{}{}{}{}", C_BOLD, C_MAUVE, "=".repeat(width), C_RESET);
     format!("\n{rule}\n{b}  {heading}{r}\n{rule}\n  {run}\n  Date:  {date}   {time}\n  User:  {user}\n",
         rule = rule, b = C_BOLD, r = C_RESET, heading = heading, run = run, date = date, time = time, user = user)
+}
+
+/// v1.7.0 (Javier's desktop test, 4 Oct 2026): the banner's rules fit the
+/// heading and the run line, but never pass 80 columns. Four file paths in one
+/// `nog install` made them ~330 characters; a long run line now simply runs
+/// past the rule.
+const RULE_MAX: usize = 80;
+
+fn rule_width(heading: &str, run: &str) -> usize {
+    [41, heading.chars().count() + 4, run.chars().count() + 4]
+        .into_iter().max().unwrap_or(41).min(RULE_MAX)
 }
 
 /// A log file this run wrote, for the end of the run to name.
@@ -3164,6 +3174,13 @@ mod output_tests {
         assert!(p[2].starts_with("nope has no update waiting"));
         assert!(p[3].contains("kept back at the same time"));
         assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
+    }
+
+    #[test]
+    fn the_banner_rule_never_passes_80_columns() {
+        assert_eq!(rule_width("nog v1.7.0  ·  Update", "Run:   nog update"), 41, "short runs keep the classic width");
+        assert_eq!(rule_width("nog v1.7.0  ·  Install", &format!("Run:   nog install {}", "x".repeat(60))), 80);
+        assert_eq!(rule_width("h", &"y".repeat(330)), RULE_MAX, "four file paths: capped, not 330");
     }
 
     #[test]
