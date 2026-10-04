@@ -904,9 +904,12 @@ pub fn end(code: i32) -> ! {
         }
         None => problem = Some("This run could not be logged: `date` is unavailable.".to_string()),
     }
-    // v1.6.0: the whole run, as on screen (record.rs), named first
+    // v1.6.0: the whole run, as on screen (record.rs), is the log a person
+    // reads; the CSVs are nog's own bookkeeping (hold clock, nogForge's
+    // tables) and stay unnamed (Javier, 3 Oct: "option A"). Unrecorded runs
+    // (no terminal) still name their CSVs.
     if let Some(p) = crate::record::current() {
-        f.logs.insert(0, p);
+        f.logs = vec![p];
     }
     let home = std::env::var("HOME").unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();

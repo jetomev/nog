@@ -1,6 +1,6 @@
 [package]
 name = "nog"
-version = "1.6.0-rc.4"
+version = "1.6.0-rc.5"
 edition = "2021"
 
 [[bin]]

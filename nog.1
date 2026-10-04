@@ -536,6 +536,8 @@ screen (\fBYYYYMMDD-HHMMSS\fR \fIcommand\fR\fB.log\fR), recorded with
 (output only: nothing typed is kept); these are deleted after 30 days.
 Not recorded: \fB--json\fR runs, runs without a terminal, or without
 \fBscript\fR installed.
+A recorded run names only its \fB.log\fR when it ends; the CSV logs are nog's
+own bookkeeping (the hold clock reads the update log).
 Every run ends by naming the logs it wrote.
 Columns since v1.4.3:
 .nf
