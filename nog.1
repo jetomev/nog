@@ -530,6 +530,12 @@ package per run with its source, its own outcome and, when a step did not
 complete, the reason; plus reboot advice (\fBYYYYMMDD nog-reboot.csv\fR); and,
 since v1.5.8, one line per nog run of any command
 (\fBYYYYMMDD nog-runs.csv\fR: date, time, user, command, status, outcome).
+Since v1.6.0, each run from a terminal is also kept whole, as it appeared on
+screen (\fBYYYYMMDD-HHMMSS\fR \fIcommand\fR\fB.log\fR), recorded with
+.BR script (1)
+(output only: nothing typed is kept); these are deleted after 30 days.
+Not recorded: \fB--json\fR runs, runs without a terminal, or without
+\fBscript\fR installed.
 Every run ends by naming the logs it wrote.
 Columns since v1.4.3:
 .nf

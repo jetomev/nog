@@ -11,6 +11,7 @@ mod local_db;
 mod machine;
 mod pacman;
 mod reboot;
+mod record;
 mod runlog;
 mod sightings;
 mod sources;
@@ -167,6 +168,10 @@ fn main() {
     // v1.6.0: a JSON run is a program asking, not a person's run: no banner,
     // no closing note, no line in the run history.
     let internal = internal || json;
+    if !internal {
+        // v1.6.0: a person's run is kept whole, as on screen (record.rs)
+        record::rerun_recorded(std::path::Path::new(&runlog::expand_home(&config::NogConfig::load_default().paths.run_logs)));
+    }
     if !internal {
         let label: Vec<String> = std::env::args().skip(1).collect();
         commands::begin(&label.join(" "));

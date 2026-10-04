@@ -904,6 +904,10 @@ pub fn end(code: i32) -> ! {
         }
         None => problem = Some("This run could not be logged: `date` is unavailable.".to_string()),
     }
+    // v1.6.0: the whole run, as on screen (record.rs), named first
+    if let Some(p) = crate::record::current() {
+        f.logs.insert(0, p);
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     if let Some(p) = problem {

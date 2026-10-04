@@ -43,6 +43,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
 - **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer.
 - **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
+- **Every run kept whole** *(v1.6.0)* — what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log` beside the CSV logs, for 30 days. Recorded with util-linux `script`: you answer prompts as usual, and what you type (a password included) is never in the file. nogForge's nog Logs opens it
 - **An install installs only what you asked** *(v1.6.0)* — like `pacman -S`: no update first, and never a list refresh on its own (that would be a partial upgrade). If an install fails and the package lists are old, nog says so: `nog update`, then try again
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
@@ -541,7 +542,7 @@ Three system files, each with one well-defined writer:
 - `/etc/nog/sources.toml` — during `nog activate` / `nog deactivate`
 - `/etc/pacman.conf` — **only** by `activate|deactivate chaotic-aur`, which comments the `[chaotic-aur]` section in or out using a `#nog#` marker, after a timestamped backup. Restoring is byte-exact, and your own comments inside that section survive. No other command touches this file.
 
-In your home folder, as you: the run logs (`~/.local/share/nog/logs/`: the update log by `nog update`, the runs log by every command since v1.5.8), the hold record (`~/.local/state/nog/holds.tsv`, v1.5.2) and the record of the last completed update (`~/.local/share/nog/last-update`, v1.5.7).
+In your home folder, as you: the run logs (`~/.local/share/nog/logs/`: the update log by `nog update`, the runs log by every command since v1.5.8, and each run whole as a `.log` since v1.6.0, kept 30 days), the hold record (`~/.local/state/nog/holds.tsv`, v1.5.2) and the record of the last completed update (`~/.local/share/nog/last-update`, v1.5.7).
 
 ### What nog never touches
 
