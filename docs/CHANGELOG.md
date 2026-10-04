@@ -2,6 +2,19 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.6.1 — October 4, 2026
+
+**Update only what you name** ([#44](https://github.com/jetomev/nog/issues/44), [#43](https://github.com/jetomev/nog/issues/43)). From Javier's test of nogForge's Update screen on the desktop: nogForge handed nog a choice, and nog answered with every pending update, 70 on hold among them. Javier: *"a specific list, it's intentional."*
+
+- **`nog update a b c` updates only those** (F-10, #44). One table, **UPDATING ONLY WHAT YOU NAMED**: no summary, no on-hold list. Underneath, everything else that is ready is kept back this time, so the coupling rules still say what must move together and the handoff to pacman is the same as ever (the foreign fence still applies; only its note is left out). Plain `nog update` is unchanged.
+- **A held package must be promoted first.** A named package that is on hold and not promoted, waits on a partner, has no update waiting, or is also `--keep`'d stops the whole run before any question or change, one line each saying what to do, for example *"git is on hold (1 day remaining) and was not promoted. To bring it in now: nog update git --promote git"*.
+- **pacman's list of what it skips is announced** (Javier's choice). pacman still prints one "ignoring package upgrade" line per package it skips; those come straight from pacman (kept so since v1.5.8, so its question can't land above its table), so nog says first: *"pacman will first list the 68 packages it is skipping (they are on hold). That's normal; only what you named goes in."*
+- **A name found nowhere is said plainly** (F-9, #43). `nog install nogforge`, before nogForge was on the AUR, ended with *"pacman stopped: you answered no"*: nobody was asked, and it wasn't pacman. After a failed install nog now checks each name with pacman (groups and provides included) and the AUR helper; one found nowhere gets *"… was not found in the repositories or the AUR. Nothing was asked and nothing was changed."* Otherwise the stop names the tool that stopped (yay, paru or pacman).
+
+Tested on the desktop: the built program in a scratch home (a held name stops, a ready list shows only its packages, a misspelled name is caught, `base-devel` and an AUR name are found), then Javier through nogForge with 1.6.1-rc.1 and rc.2: `nog update vde2 wolfssl` and `nog update freerdp git --promote git` installed only those, and the note's count matched pacman's 68 lines ([testing/](../testing/20261004%20-%20Test%20Results%20for%20nog%20v1-6-1.md)).
+
+Tests: 234 → 237. Warnings unchanged at 6.
+
 ### v1.6.0 — October 3, 2026
 
 **nog for programs, and for nogForge** ([#7](https://github.com/jetomev/nog/issues/7), [#41](https://github.com/jetomev/nog/issues/41), [#42](https://github.com/jetomev/nog/issues/42)). Built with [nogForge](https://github.com/jetomev/nogforge), the Forge Suite's package app, and tested through Javier's two runs of it on the desktop (rc.1 to rc.5).

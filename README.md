@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.6.0](https://img.shields.io/badge/Version-1.6.0-purple.svg)
+![Version: 1.6.1](https://img.shields.io/badge/Version-1.6.1-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -44,6 +44,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer.
 - **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
 - **Every run kept whole** *(v1.6.0)* — what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log` beside the CSV logs, for 30 days. Recorded with util-linux `script`: you answer prompts as usual, and what you type (a password included) is never in the file. nogForge's nog Logs opens it. It is the log the closing note names; the CSV logs stay as nog's own bookkeeping (the hold clock, nogForge's tables)
+- **Update only what you name** *(v1.6.1)* — `nog update a b c` shows one table with just those and installs only them. A named package that is on hold must be promoted first (`--promote`); otherwise nog stops before anything runs and says what to do
 - **An install installs only what you asked** *(v1.6.0)* — like `pacman -S`: no update first, and never a list refresh on its own (that would be a partial upgrade). If an install fails and the package lists are old, nog says so: `nog update`, then try again
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
@@ -191,6 +192,10 @@ nog update
 
 # Search, with each result's tier shown
 nog search <query>
+
+# Update only these: nothing else moves; a held one must be promoted (v1.6.1)
+nog update <package> <package>
+nog update <package> <held-package> --promote <held-package>
 
 # Keep some updates back this time; what must stay with them follows (v1.6.0)
 nog update --keep <package>,<package>
@@ -368,7 +373,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.6.0"
+version = "1.6.1"
 log_level = "info"
 
 [paths]
@@ -687,7 +692,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.6.0 shipped 2026-10-03** — nog for programs and for nogForge: `--json` answers, `--keep` / `--promote`, installs that install only what you asked ([#41](https://github.com/jetomev/nog/issues/41)), every run kept whole ([#42](https://github.com/jetomev/nog/issues/42)). **v1.5.8 shipped 2026-10-02** — installs and removals ask ([#38](https://github.com/jetomev/nog/issues/38)), a short install screen ([#37](https://github.com/jetomev/nog/issues/37)), designed messages ([#39](https://github.com/jetomev/nog/issues/39)), pacman's question under its table ([#40](https://github.com/jetomev/nog/issues/40)), and the same start and end on every run. **v1.5.7 the same day** — what the KognogOS VM test found ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). Before: v1.5.6 ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)) and v1.5.5 … v1.5.2 on 30 September.
+> **v1.6.1 shipped 2026-10-04** — update only what you name, a held one only when promoted ([#44](https://github.com/jetomev/nog/issues/44)), and a name found nowhere said plainly ([#43](https://github.com/jetomev/nog/issues/43)); from Javier's nogForge Update test. **v1.6.0 shipped 2026-10-03** — nog for programs and for nogForge: `--json` answers, `--keep` / `--promote`, installs that install only what you asked ([#41](https://github.com/jetomev/nog/issues/41)), every run kept whole ([#42](https://github.com/jetomev/nog/issues/42)). **v1.5.8 shipped 2026-10-02** — installs and removals ask ([#38](https://github.com/jetomev/nog/issues/38)), a short install screen ([#37](https://github.com/jetomev/nog/issues/37)), designed messages ([#39](https://github.com/jetomev/nog/issues/39)), pacman's question under its table ([#40](https://github.com/jetomev/nog/issues/40)), and the same start and end on every run. **v1.5.7 the same day** — what the KognogOS VM test found ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). Before: v1.5.6 ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)) and v1.5.5 … v1.5.2 on 30 September.
 
 ### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.7.0)
 
@@ -711,7 +716,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [ ] **C3 · v1.7.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up again: v1.5.0 went to `nog install <file>`, #17, and v1.6.0 to nogForge's needs)*
 - [ ] **C4 · v1.8.0** — Full command surface plus `--json` output. *Its `--json` half shipped early, in v1.6.0: `list`, `search` and the update plan, for nogForge.*
 - [ ] **C5 · v1.9.0** — Maintenance and cleanup: orphans, AUR build caches, unused Flatpak runtimes, old Snap revisions. *Its first piece shipped early: `nog clean` for pacman's cache, v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)).*
-- [ ] **C6** — nogForge, the visual companion, built on forgekit. *Its first beta, [v0.3.0](https://github.com/jetomev/nogforge/releases), shipped 2026-10-03 with nog v1.6.0; it stays a beta until Flatpak and Snap installs are in.*
+- [ ] **C6** — nogForge, the visual companion, built on forgekit. *Its first beta, v0.3.0, shipped 2026-10-03 with nog v1.6.0; [v1.0.0](https://github.com/jetomev/nogforge/releases), its first stable release, on 2026-10-04 with nog v1.6.1 (Javier's call). Flatpak and Snap installs come with C3.*
 - [ ] **C7 · v2.0.0** — the crown release
 
 *Every released version's roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).*
@@ -719,6 +724,19 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.6.1 — October 4, 2026
+
+**Update only what you name** ([#44](https://github.com/jetomev/nog/issues/44), [#43](https://github.com/jetomev/nog/issues/43)). From Javier's test of nogForge's Update screen on the desktop: nogForge handed nog a choice, and nog answered with every pending update, 70 on hold among them. Javier: *"a specific list, it's intentional."*
+
+- **`nog update a b c` updates only those** (F-10, #44). One table, **UPDATING ONLY WHAT YOU NAMED**: no summary, no on-hold list. Underneath, everything else that is ready is kept back this time, so the coupling rules still say what must move together and the handoff to pacman is the same as ever (the foreign fence still applies; only its note is left out). Plain `nog update` is unchanged.
+- **A held package must be promoted first.** A named package that is on hold and not promoted, waits on a partner, has no update waiting, or is also `--keep`'d stops the whole run before any question or change, one line each saying what to do, for example *"git is on hold (1 day remaining) and was not promoted. To bring it in now: nog update git --promote git"*.
+- **pacman's list of what it skips is announced** (Javier's choice). pacman still prints one "ignoring package upgrade" line per package it skips; those come straight from pacman (kept so since v1.5.8, so its question can't land above its table), so nog says first: *"pacman will first list the 68 packages it is skipping (they are on hold). That's normal; only what you named goes in."*
+- **A name found nowhere is said plainly** (F-9, #43). `nog install nogforge`, before nogForge was on the AUR, ended with *"pacman stopped: you answered no"*: nobody was asked, and it wasn't pacman. After a failed install nog now checks each name with pacman (groups and provides included) and the AUR helper; one found nowhere gets *"… was not found in the repositories or the AUR. Nothing was asked and nothing was changed."* Otherwise the stop names the tool that stopped (yay, paru or pacman).
+
+Tested on the desktop: the built program in a scratch home (a held name stops, a ready list shows only its packages, a misspelled name is caught, `base-devel` and an AUR name are found), then Javier through nogForge with 1.6.1-rc.1 and rc.2: `nog update vde2 wolfssl` and `nog update freerdp git --promote git` installed only those, and the note's count matched pacman's 68 lines ([testing/](testing/20261004%20-%20Test%20Results%20for%20nog%20v1-6-1.md)).
+
+Tests: 234 → 237. Warnings unchanged at 6.
 
 ### v1.6.0 — October 3, 2026
 
@@ -733,20 +751,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 Tested on the desktop against its real plan (keep and promote with their partners), with print-only stand-ins (installs run exactly `yay -S <name>` / `pacman -U <file>`), recorded runs in a scratch home (a failing run keeps its status), and Javier's own installs of rc.3–rc.5 and forgekit 0.5.2 ([testing/](testing/20261003%20-%20Test%20Results%20for%20nog%20v1-6-0.md)).
 
 Tests: 224 → 234. Warnings unchanged at 6.
-
-### v1.5.8 — October 2, 2026
-
-**Installs that ask, a short install screen, and the same start and end on every run** ([#37](https://github.com/jetomev/nog/issues/37), [#38](https://github.com/jetomev/nog/issues/38), [#39](https://github.com/jetomev/nog/issues/39), [#40](https://github.com/jetomev/nog/issues/40)). From Javier's own test of v1.5.7 in the KognogOS VM, and his rulings the same day.
-
-- **`nog install` and `nog remove` ask before they change anything** (F-6, #38). Since the very first version they told pacman to answer its own "Proceed?" (`--noconfirm`). A machine with an AUR helper never showed it, because installs went through the helper, which asks; a fresh KognogOS has no helper. pacman now shows exactly what will be installed or removed, dependencies included, and waits for your answer.
-- **A one-package install no longer shows the hold list** (F-5, #37). When `nog install` has to update first, it used to print the entire `nog update` report: summary, every held package, every unknown, and pacman's warning line for each held package. Now it shows why it updates first, the updates that will install in a full table (source, versions, tier), and the holds as one line. pacman is given exactly the Ready packages, so it has no hold list to warn about. `nog update` itself keeps its full report.
-- **Messages have a designed form** (F-7, #39). Javier's rule: exactly one blank line before and after, a coloured `==>` heading that stands out, the explanation indented under it. One helper prints them all, so the form can't drift.
-- **pacman's question stays under its table** (F-8, #40). nog passed pacman's messages through itself to keep failure reasons (v1.4.3), while the table came through sudo. The two raced, and the question could land above the table and scroll out of sight. This is the likely cause of the missing prompt Javier saw on 1 October. The steps that ask now go straight to the terminal; their failure reason stays on screen rather than in the log.
-- **Every run starts and ends the same way, whatever the command.** It starts with a banner: nog's version and the command, the run as typed, the date, time and user. It ends with "Done" or "Stopped", the logs this run wrote, and a thank-you, including every early stop. A new daily log, `YYYYMMDD nog-runs.csv`, records one line per run so the ending can always name one.
-
-Tried by Claude in the VM with recorded screens, then by Javier: *"all looks much better, always room for improvement, but one step-at-a-time."* ([testing/](testing/)).
-
-Tests: 221 → 224. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

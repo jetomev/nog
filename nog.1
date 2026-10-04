@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.6.0" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.6.1" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -328,6 +328,15 @@ The update plan, computed by the same code as a real update and stopped before
 any question or transaction: ready, held (with \fBready_on\fR,
 \fBkept_back\fR and \fBcoupled_to\fR), unknown, the sources, and each
 tier's hold days.
+.TP
+.B nog update \fIa b c\fR
+Update only the packages named (v1.6.1): one table, \fBUPDATING ONLY WHAT YOU
+NAMED\fR, and nothing else moves. Everything else that is ready is kept back
+this time, so the coupling rules still say what must move together, and pacman
+lists each package it skips; nog says so first. A named package that is on hold
+and not promoted, waits on a partner, has no update, or is also kept back stops
+the run before any question, one line each with what to do (exit status 1).
+With \fB\-\-promote\fR, a held one named in both goes in.
 .TP
 .B nog update \-\-promote \fIa\fR,\fIb\fR
 Make these held packages ready now; they install with the rest. A partner the

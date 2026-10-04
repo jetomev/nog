@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.6.1 — Released (from Javier's nogForge Update test: F-10 #44, F-9 #43)
+- [x] `nog update a b c`: only the named, one table; everything else kept back this time (coupling + handoff unchanged)
+- [x] A named package held and not promoted, waiting on a partner, not pending, or also kept back: the run stops before any question, one line each
+- [x] One line before pacman's own "ignoring package upgrade" list (Javier's option b)
+- [x] F-9 #43: a name found nowhere is said plainly; the stop names the tool
+- [x] Javier through nogForge with rc.1 and rc.2 (vde2 + wolfssl; freerdp + git promoted)
+
 ### v1.6.0 — Released (nog for programs and for nogForge: #7's --json half, #41, #42)
 - [x] `nog list --json`, `nog search --json`, `nog update --json` (the plan, same code, stops before any question; stdout one JSON document)
 - [x] `nog update --keep a,b` (partners stay back with them) and `--promote a,b` (partners promoted with them; keep wins)
