@@ -13,4 +13,4 @@ Issue #47 (Javier: "why isn't nog doing the yay handoff (mention it) and then as
 | 7 | Javier: `nog install zzzz` | PASS — stopped before anything: not found |
 | 8 | Javier: `nog install aur/neofetch` | PASS — table (AUR — built by yay), "Install these? [Y/n]", yay handoff line, yay's menus and build (signature Passed), pacman's conflict question (unifetch removed); neofetch 7.1.0-2 in |
 
-Still to come: Javier's install of 1.8.0 from the AUR.
+| 9 | Javier: `nog install nog` from the AUR (18:44) | PASS — the table (AUR — built by yay), "Install these?", the handoff line, signature Passed, 242 tests in the build, no debug-package noise; `nog --version` → 1.8.0 |
