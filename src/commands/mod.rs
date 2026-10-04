@@ -96,36 +96,12 @@ pub fn install(packages: &[String]) {
 
     let tm = load_tiers();
 
-    // v1.5.6 (#30): stale package lists ask the mirrors for files they have
-    // already replaced, and the install fails — the first thing a freshly
-    // installed KognogOS met. Refreshing only the lists and then installing one
-    // package is a partial upgrade, which Arch does not support, so the safe
-    // way runs the tier-aware update first: refresh, install what is Ready,
-    // keep the holds. Then the install.
-    // v1.5.7 (F-3, #35): judged against nog's record of its last completed
-    // update, not the lists' age alone — a prompt declined inside pacman
-    // leaves fresh lists behind and nothing installed.
-    let reason = refresh_reason(
-        sync_db::lists_age_secs(), sync_db::update_stamp_age_secs(), LISTS_MAX_AGE_SECS);
-    if let Some(r) = reason {
-        // v1.5.8 (F-7, #39): a designed notice, not one more `nog:` line.
-        let mut why = r.words();
-        if let Some(c) = why.get(0..1) {
-            why = c.to_uppercase() + &why[1..];
-        }
-        notice(C_BLUE, "nog updates the system first, the safe way", &[
-            format!("{}.", why),
-            "Installing on top of that could mix old and new packages, so the".to_string(),
-            "updates that are ready install first. Held packages stay as they are.".to_string(),
-        ]);
-        if run_update(false, true) != UpdateEnd::Done {
-            enotice(C_PEACH, &format!("Not installing {}", packages.join(" ")), &[
-                "The update did not complete, so the package lists may still be old.".to_string(),
-                "Run `nog update`, then try again.".to_string(),
-            ]);
-            end(1);
-        }
-    }
+    // v1.6.0 (F-8, Javier 3 Oct 2026): "if I ask pacman to install a package,
+    // it just installs the package. nog has to do the same, not update the
+    // system." An install does what was typed, like `pacman -S`; the tier-aware
+    // update is `nog update`'s job. (v1.5.6 #30 ran an update first; installing
+    // a package file pulled 20 unrelated updates with it.) When old package
+    // lists are why an install failed, the closing notice says so instead.
 
     // Issue #17: a locally built package file goes to `pacman -U`. Every Forge
     // release installs one for its dogfood, and until now that step had to
@@ -192,11 +168,19 @@ pub fn install(packages: &[String]) {
 /// v1.5.8 (F-6 #38, F-7 #39): the install was declined or failed. pacman's
 /// exit status cannot tell the two apart, so say both.
 fn stopped_installing(what: &[String], code: Option<i32>) -> ! {
-    enotice(C_PEACH, &format!("Not installed: {}", what.join(" ")), &[
+    let mut lines = vec![
         format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
             code.unwrap_or(-1)),
         "Nothing was changed by this install.".to_string(),
-    ]);
+    ];
+    // F-8: no update before an install any more, so old package lists are a
+    // likely cause of a failed download (#30). Say it; never do it unasked.
+    if let Some(r) = refresh_reason(
+        sync_db::lists_age_secs(), sync_db::update_stamp_age_secs(), LISTS_MAX_AGE_SECS) {
+        lines.push(format!("If it could not find or download a file: {}.", r.words()));
+        lines.push("`nog update` brings the system and its lists up to date; then try again.".to_string());
+    }
+    enotice(C_PEACH, &format!("Not installed: {}", what.join(" ")), &lines);
     end(code.unwrap_or(1));
 }
 
@@ -206,10 +190,10 @@ fn needs_the_keyboard<F: Fn(&str) -> bool>(packages: &[String], official: F) -> 
     packages.iter().filter(|p| !official(p)).cloned().collect()
 }
 
-/// v1.5.6 (#30): package lists older than this are refreshed before an install.
+/// v1.5.6 (#30): package lists older than this may be why an install failed.
 const LISTS_MAX_AGE_SECS: u64 = 24 * 3600;
 
-/// v1.5.7 (F-3, #35): why `nog install` has to update first, if it does.
+/// v1.5.7 (F-3, #35): why the package lists may be out of date (said when an install fails).
 #[derive(Debug, PartialEq)]
 enum RefreshReason {
     ListsMissing,
@@ -812,37 +796,19 @@ enum HeldReason {
 /// they are never held and are installed before the rest.
 const KEYRINGS: [&str; 2] = ["archlinux-keyring", "chaotic-keyring"];
 
-/// v1.5.6 (#30): before `nog install`, a run that handed nothing to pacman
-/// still has to leave current package lists behind.
-fn refresh_lists_if(before_install: bool) -> UpdateEnd {
-    if !before_install {
-        return UpdateEnd::Done;
-    }
-    println!("{}nog: refreshing the package lists ...{}", C_SUBTEXT, C_RESET);
-    if pacman::sync_lists().status.success() {
-        sync_db::mark_update_done();
-        UpdateEnd::Done
-    } else {
-        UpdateEnd::Stopped
-    }
-}
-
-/// v1.5.6 (#30): how a run of the update ended, for `nog install`, which runs
-/// one first when the package lists are out of date.
+/// How a run of the update ended.
 #[derive(Debug, PartialEq)]
 enum UpdateEnd {
-    /// The package lists are current: pacman ran, or nothing was pending.
+    /// pacman ran, or nothing was pending.
     Done,
-    /// Cancelled or not completed — the lists may still be old.
+    /// Cancelled, or stopped before the end (a plan for nogForge).
     Stopped,
     /// v1.5.7 (F-4, #36): an error ended the run; carries the exit status.
-    /// Returned, not exited on the spot, so `nog install` can still say it is
-    /// not installing.
     Failed(i32),
 }
 
 pub fn update(realign: bool) {
-    if let UpdateEnd::Failed(code) = run_update(realign, false) {
+    if let UpdateEnd::Failed(code) = run_update(realign) {
         end(code);
     }
 }
@@ -989,37 +955,6 @@ fn format_notice(colour: &str, heading: &str, lines: &[String]) -> String {
     out
 }
 
-/// v1.5.8 (F-5, #37): what `nog install` shows when it updates first —
-/// what will change, by name, and the holds as one line. A one-package
-/// install never shows the hold list (Javier: "Hard no from this point").
-fn print_install_preview(ready: &[TableRow], held: usize, unknown: usize) {
-    let mut lines = Vec::new();
-    if ready.is_empty() {
-        lines.push("No updates are ready, so nothing else is installed.".to_string());
-    } else {
-        lines.push("Listed below with their versions; you approve them next.".to_string());
-    }
-    if held > 0 {
-        let more = if ready.is_empty() { "" } else { " more" };
-        lines.push(format!("{}{}{} stay on hold — `nog update` shows them.{}",
-            C_SUBTEXT, held, more, C_RESET));
-    }
-    if unknown > 0 {
-        lines.push(format!("{} have no build date; nog asks about each below.", unknown));
-    }
-    let heading = match ready.len() {
-        0 => "Nothing to update first".to_string(),
-        1 => "1 update is ready and installs first".to_string(),
-        n => format!("{} updates are ready and install first", n),
-    };
-    notice(C_BLUE, &heading, &lines);
-    // Javier (2 Oct 2026): what installs is shown in full — package, source,
-    // versions, tier — like `nog update` shows it. The holds stay one line.
-    if !ready.is_empty() {
-        println!("{}", format_table("READY TO INSTALL", ready, true));
-    }
-}
-
 /// v1.5.7 (F-2, #34): checkupdates needs fakeroot, which pacman-contrib only
 /// lists as optional. Name the missing piece when that is why it failed.
 /// `-Syu`, not `-S`: on lists this old a lone `-S` is a partial upgrade.
@@ -1049,10 +984,8 @@ fn ensure_keystore() -> bool {
     true
 }
 
-/// The update itself. `before_install` is set when `nog install` runs it to
-/// bring stale package lists up to date first (#30): then the lists are
-/// refreshed even when nothing may be installed.
-fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
+/// The update itself.
+fn run_update(realign: bool) -> UpdateEnd {
     let cfg = load_config();
     let helper = resolve_helper(&cfg);
     guard_not_sudo_with_helper(helper);
@@ -1062,11 +995,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     if !ensure_keystore() {
         return UpdateEnd::Failed(1);
     }
-    if before_install {
-        println!("{}nog: checking what is waiting ...{}", C_SUBTEXT, C_RESET);
-    } else {
-        println!("nog: Checking for pending updates ...");
-    }
+    println!("nog: Checking for pending updates ...");
     let mut pending = match pacman::checkupdates_capture() {
         Ok(list) => list,
         Err(CheckUpdatesError::Missing) => {
@@ -1190,13 +1119,9 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         println!();
         print!("{}", format_summary(&rows, true));
         println!();
-        if before_install {
-            print_install_preview(&[], 0, 0);
-        } else {
-            println!("nog: System is up to date — nothing to do.");
-        }
+        println!("nog: System is up to date — nothing to do.");
         write_run_log(&cfg, &run_date, &run_time, &run_user, Vec::new(), "up to date");
-        return refresh_lists_if(before_install);
+        return UpdateEnd::Done;
     }
 
     // v1.0.5: evaluate holds against the SAME database snapshot that produced
@@ -1512,7 +1437,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
                 .chain(held.iter().map(|(u, _, _, _)| u.name.as_str()))
                 .collect();
             let dropped = holds::dropped_sonames(&data, &pending);
-            if !dropped.is_empty() && !before_install {
+            if !dropped.is_empty() {
                 println!(
                     "{}Checking installed programs for {} library version(s) this update removes...{}",
                     C_SUBTEXT,
@@ -1634,12 +1559,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
         crate::machine::emit(&plan_json(&ready, &held, &unknown, &labels, &source_presence, &cfg.holds));
         return UpdateEnd::Stopped;
     }
-    if before_install {
-        let rows: Vec<TableRow> = ready.iter()
-            .map(|(upd, tier, reason)| TableRow::from(upd, tier, label_for(&labels, upd), ready_note(reason)))
-            .collect();
-        print_install_preview(&rows, held.len(), unknown.len());
-    } else {
+    {
         let r: Vec<&PendingUpdate> = ready.iter().map(|(u, _, _)| u).collect();
         let h: Vec<&PendingUpdate> = held.iter().map(|(u, _, _, _)| u).collect();
         let k: Vec<&PendingUpdate> = unknown.iter().map(|(u, _)| u).collect();
@@ -1728,13 +1648,11 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     ignore.extend(extra_ignore);
 
     if ready.is_empty() && ignore.len() == pending.len() {
-        if !before_install {
-            println!();
-            println!("nog: Nothing to install — every pending update is held.");
-        }
+        println!();
+        println!("nog: Nothing to install — every pending update is held.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::AllHeld), "");
-        return refresh_lists_if(before_install);
+        return UpdateEnd::Done;
     }
 
     // v1.0.9 (Ironhold): the foreign fence — every foreign package is ignored
@@ -1778,9 +1696,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     // asks again — deliberate layers, so an expert can still catch and cancel
     // at the point where the detail is in front of them. One prompt per tool
     // that actually runs; sources with nothing to do stay silent.
-    if !before_install {
-        println!();
-    }
+    println!();
     if !prompt_proceed() {
         println!("nog: Cancelled — nothing was installed.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
@@ -1832,13 +1748,7 @@ fn run_update(realign: bool, before_install: bool) -> UpdateEnd {
     // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
     println!("{}nog: Handing off official packages to pacman ...{}", C_BOLD, C_RESET);
-    // v1.5.8 (F-5, #37): before an install, exactly the official packages
-    // cleared this run, named — no `-Syu`, so no line per held package.
-    let targets: Vec<String> = pending.iter()
-        .filter(|u| u.source == Source::Pacman && !ignore.contains(&u.name))
-        .map(|u| u.name.clone())
-        .collect();
-    let pac = pacman::update_excluding(&ignore, if before_install { Some(&targets) } else { None });
+    let pac = pacman::update_excluding(&ignore);
     steps.insert(Source::Pacman, StepState::from(&pac));
     if !pac.status.success() {
         let code = pac.status.code().unwrap_or(-1);

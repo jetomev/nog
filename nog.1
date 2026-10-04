@@ -54,10 +54,7 @@ the install routes through the helper, so AUR-only packages work transparently
 without any pre-check. Tier protection applies to future updates, not to installs.
 .IP
 Since v1.5.8 pacman asks before installing (no \fB--noconfirm\fR), showing
-exactly what will be installed, dependencies included. When the install has to
-update first, nog shows only what will install, as a table, and the holds as
-one line; pacman is given exactly those packages
-(\fBpacman -Sy --needed\fR \fIready\fR... \fB--ignore\fR \fIheld\fR).
+exactly what will be installed, dependencies included.
 .IP
 Since v1.5.0 a locally built package file \(em any argument containing
 .B .pkg.tar
@@ -72,20 +69,13 @@ it installed. A mistyped path is reported as a missing file, never searched for
 in the repositories. There is no signature gate beyond pacman's own
 .BR LocalFileSigLevel .
 .IP
-Since v1.5.6, \fBnog install\fR first checks how long ago the package lists were
-refreshed on this machine. When a list is missing or more than a day old, it runs
-the tier-aware update first (ready updates install, holds stay; when nothing may
-be installed, the lists are refreshed with \fBpacman -Sy\fR), then the install.
-Refreshing only the lists and installing one package would be a partial upgrade,
-which Arch does not support. If that update is cancelled or fails, the install
-stops and says why.
-.IP
-Since v1.5.7 the decision also reads nog's record of its last completed update,
-\fI~/.local/share/nog/last-update\fR, written only when the lists were refreshed and
-the repository step finished. The update runs first when that record is missing,
-more than a day old, or older than the lists: pacman refreshes the lists before it
-asks to proceed, so a declined prompt, or \fBpacman -Sy\fR run by hand, leaves
-fresh lists and nothing installed.
+Since v1.6.0 \fBnog install\fR installs only what was asked, like
+\fBpacman -S\fR: it never updates the system first (v1.5.6 to v1.5.8 did, when
+the package lists were more than a day old). It never refreshes the lists on
+their own either, which would be a partial upgrade. If an install fails and the
+lists are old (nog's record of its last completed update,
+\fI~/.local/share/nog/last-update\fR, is missing, over a day old, or older than
+the lists), nog says so: \fBnog update\fR, then try again.
 .IP
 Since v1.5.4, when standard input is not a terminal and a requested name is not
 in any enabled repository (so the helper would build it from the AUR), nog

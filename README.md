@@ -41,9 +41,9 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 **The tier system**
 - Every package is Tier 1, Tier 2, or Tier 3, with 30 / 15 / 7-day holds
 - **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
-- **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer. A one-package install that has to update first shows only what installs, in a table, and the holds as one line
+- **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer.
 - **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
-- **Never installs from stale package lists** *(v1.5.6, v1.5.7)* — if the lists are missing, or nog has no record of a completed update in the last day (a fresh install copied from a disc, an update declined at pacman's prompt, `pacman -Sy` run by hand), `nog install` runs the safe tier-aware update first, then installs
+- **An install installs only what you asked** *(v1.6.0)* — like `pacman -S`: no update first, and never a list refresh on its own (that would be a partial upgrade). If an install fails and the package lists are old, nog says so: `nog update`, then try again
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
 - Pin anything to any tier — `nog pin <pkg> --tier=<N>`
 - Need a held package now? `nog unlock <pkg> --promote`

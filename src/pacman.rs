@@ -170,42 +170,15 @@ pub fn update() -> ExitStatus {
     run(&["-Syu"])
 }
 
-/// v1.5.8: `targets` is set when `nog install` updates first (F-5, #37):
-/// pacman is then given exactly the Ready packages (`-Sy --needed <ready>`)
-/// instead of `-Syu --ignore <held>`, so it prints no line per held package.
-/// `--ignore` still rides along, so a dependency that reaches for a held
-/// package is still asked about. Both forms leave pacman's stderr on the
-/// terminal (F-8) so its question cannot overtake its table.
-pub fn update_excluding(excluded: &[String], targets: Option<&[String]>) -> crate::handoff::Handoff {
+/// `-Syu --ignore <held>`. pacman's stderr stays on the terminal (v1.5.8
+/// F-8) so its question cannot overtake its table.
+pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
     let mut cmd = crate::machine::sudo();
-    match targets {
-        None => {
-            cmd.args(["pacman", "-Syu"]);
-        }
-        Some(t) if t.is_empty() => {
-            cmd.args(["pacman", "-Sy"]);
-        }
-        Some(t) => {
-            cmd.args(["pacman", "-Sy", "--needed"]).args(t);
-        }
-    }
-    if !excluded.is_empty() && targets.map_or(true, |t| !t.is_empty()) {
+    cmd.args(["pacman", "-Syu"]);
+    if !excluded.is_empty() {
         cmd.args(["--ignore", &excluded.join(",")]);
     }
     crate::handoff::run_on_screen(&mut cmd, "sudo pacman")
-}
-
-/// v1.5.6 (#30): refresh the package lists only (`sudo pacman -Sy`). Used
-/// solely before `nog install`, right after a tier-aware update found nothing
-/// it may install: the system is then exactly where `nog update` leaves it —
-/// every pending update held — but with current lists.
-pub fn sync_lists() -> crate::handoff::Handoff {
-    let mut cmd = crate::machine::sudo();
-    // v1.5.8 (F-7, #39): no progress bars. pacman ends a bar with a cursor
-    // move, not a line ending; at the bottom of a full terminal that move does
-    // nothing, and the notice after it lost its blank line.
-    cmd.args(["pacman", "-Sy", "--noprogressbar"]);
-    crate::handoff::run(&mut cmd, "sudo pacman")
 }
 
 /// v1.5.6 (#31): install the keyring packages on their own, before anything
