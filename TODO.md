@@ -32,6 +32,11 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [x] AUR search index caught up to 1.5.0-1 (checked 29 Sep, ~17:30)
 - [x] README AUR badge shows 1.5.1 on github.com (checked through GitHub's own image cache, ~18:10)
 
+## Now · v1.8.0 — the install shows where each package comes from (C3 part 1) · #47
+- [x] Javier's option A (4 Oct): table (package, version, source, tier) before anything is downloaded; "Install these? [Y/n]" only when the AUR is involved; "Handing off to pacman/yay: …"; not-found stops first. 242 tests
+- [x] rc.1 built (`dist-rc/nog-1.8.0rc1-1-x86_64.pkg.tar.zst`, tests in a terminal)
+- [ ] Javier installs rc.1 and tries `nog install` (a repo package, an AUR one, aur/neofetch, a typo), and one from nogForge → then the release (docs, man page, roadmap: C3 continues with Flatpak/Snap)
+
 ## Next up — in this order
 
 - [ ] Next AUR recipe: `options=('!debug')` — makepkg tries a debug package for nog and prints "No debugging symbols" (seen in Javier's yay build of 1.7.0, 4 Oct); harmless noise
