@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.7.0" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.8.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -58,6 +58,15 @@ the AUR (never swapped for a repository package that provides the same name), an
 .IP
 Since v1.5.8 pacman asks before installing (no \fB--noconfirm\fR), showing
 exactly what will be installed, dependencies included.
+.IP
+Since v1.8.0 nog first shows where each package comes from, before anything is
+downloaded or built: package, version, source and tier. The source follows
+pacman's own order \(em the exact name in a repository, then a repository
+package that provides the name (said plainly), then a group \(em and then the
+AUR, built by the helper. A name found nowhere stops the run here. When the AUR
+is involved nog asks \fBInstall these? [Y/n]\fR itself, because pacman's
+question would only come after the build; then a line says who takes over
+(pacman, or the helper with its recipe review and build).
 .IP
 Since v1.5.0 a locally built package file \(em any argument containing
 .B .pkg.tar

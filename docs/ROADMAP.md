@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.8.0 — Released (C3 part 1: #47)
+- [x] `nog install`: version, source (pacman's order, providers said plainly, then the AUR) and tier before anything is downloaded
+- [x] "Install these? [Y/n]" only when the AUR is involved (Javier's option A); "Handing off to pacman/yay: …"
+- [x] A name found nowhere stops first; `options=('!debug')` in the AUR recipe
+- [x] Javier on the desktop with rc.1: repository, provider, not-found and AUR installs
+- [ ] Still in C3 (v1.9.0): Flatpak and Snap in the install chain
+
 ### v1.7.0 — Released (for nogForge 1.1: #45 NOG_EVENTS + F-11, #46 F-12)
 - [x] `NOG_EVENTS`: steps, starts and ends, nog's questions, the end status, as JSON lines
 - [x] `aur/x` and `repo/x` install from that source only (F-11)

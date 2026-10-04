@@ -2,6 +2,20 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.8.0 — October 4, 2026
+
+**See where it comes from before installing** ([#47](https://github.com/jetomev/nog/issues/47)). Javier, installing nogForge from the AUR: *"why isn't nog doing the yay handoff (mention it) and then asking yes/no to install the packages?"* nog went straight into yay: nothing said yay had taken over, and the first yes/no came only after the download and the build. He chose how it should work (option A). The first part of C3.
+
+- **A table before anything is downloaded or built**: each package's version, source and tier. The source follows pacman's own order: the exact name in a repository, then a repository package that provides the name, said plainly (*"neofetch · chaotic-aur — unifetch provides it"*), then a group, then the AUR (*"AUR — built by yay"*, with the AUR's version). `aur/x` and `repo/x` show that source only.
+- **nog asks "Install these? [Y/n]" when the AUR is involved** (option A). For repository packages pacman's own question already comes before anything changes, so nog doesn't ask twice. nogForge shows the question with Yes/No buttons.
+- **Who takes over is said**: *"Handing off to yay: it shows each build recipe to review, builds, then pacman asks once more before installing"*, or *"Handing off to pacman: it shows what comes with it and asks before anything changes"* (package files too).
+- **A name found nowhere stops before anything happens** (it used to stop after the helper failed).
+- The AUR recipe no longer makes an empty debug package for nog (makepkg printed "No debugging symbols" in Javier's build).
+
+pacman and the helper still decide the transaction; the table only shows where each package comes from. Tested on Javier's desktop with 1.8.0-rc.1: `sl` (extra), `neofetch` (the table said unifetch provides it), `zzzz` (stopped first), `aur/neofetch` (the question, yay's build, pacman's conflict question) ([testing/](../testing/20261004%20-%20Test%20Results%20for%20nog%20v1-8-0.md)).
+
+Tests: 240 → 242. Warnings unchanged at 6.
+
 ### v1.7.0 — October 4, 2026
 
 **nog for nogForge's window: its steps, and installs from the source you name** ([#45](https://github.com/jetomev/nog/issues/45), [#46](https://github.com/jetomev/nog/issues/46)). Javier, about nogForge handing the terminal to nog: *"it is not beautiful, it is disrupting."* nogForge 1.1 now runs nog inside its own window; this is nog's half.

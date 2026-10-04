@@ -1,6 +1,6 @@
 # nog — the list
 
-**Current release: v1.7.0** (4 Oct, GitHub + AUR) — was: test package built 4 Oct: `NOG_EVENTS` for nogForge's steps view, `repo/name` installs from that source (F-11) — issue #45; waits on Javier's desktop test (nogforge matrix §2), then C3 moves to v1.8.0. **Current release: v1.6.1** (4 Oct 2026) — `nog update a b c` updates only those (#44), a name found nowhere said plainly (#43); GitHub Latest + AUR. Earlier: v1.5.8 (2 Oct 2026) — installs and removals ask (#38), a short install screen with the ready table (#37), designed notices (#39), pacman's question under its table (#40), and a banner + closing (logs, thanks) on every run, with `nog-runs.csv`. 224 tests. Javier tried it in the VM: *"all looks much better"*. Same day: v1.5.7 (#34–#36), and the key now comes from GitHub (#33).
+**Current release: v1.8.0** (4 Oct, GitHub + AUR): the install shows where each package comes from (#47). Before: v1.7.0 (4 Oct, GitHub + AUR) — was: test package built 4 Oct: `NOG_EVENTS` for nogForge's steps view, `repo/name` installs from that source (F-11) — issue #45; waits on Javier's desktop test (nogforge matrix §2), then C3 moves to v1.8.0. **Current release: v1.6.1** (4 Oct 2026) — `nog update a b c` updates only those (#44), a name found nowhere said plainly (#43); GitHub Latest + AUR. Earlier: v1.5.8 (2 Oct 2026) — installs and removals ask (#38), a short install screen with the ready table (#37), designed notices (#39), pacman's question under its table (#40), and a banner + closing (logs, thanks) on every run, with `nog-runs.csv`. 224 tests. Javier tried it in the VM: *"all looks much better"*. Same day: v1.5.7 (#34–#36), and the key now comes from GitHub (#33).
 nog is the package updater for KognogOS. It holds new packages back for a waiting period set by their tier, so a bad update has time to be noticed before it reaches this computer.
 
 **Updated after every step.** The full story behind each item is in its GitHub issue.
@@ -32,16 +32,16 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 - [x] AUR search index caught up to 1.5.0-1 (checked 29 Sep, ~17:30)
 - [x] README AUR badge shows 1.5.1 on github.com (checked through GitHub's own image cache, ~18:10)
 
-## Now · v1.8.0 — the install shows where each package comes from (C3 part 1) · #47
+## Done · v1.8.0 — the install shows where each package comes from (C3 part 1) · released 2026-10-04 (#47)
 - [x] Javier's option A (4 Oct): table (package, version, source, tier) before anything is downloaded; "Install these? [Y/n]" only when the AUR is involved; "Handing off to pacman/yay: …"; not-found stops first. 242 tests
 - [x] rc.1 built (`dist-rc/nog-1.8.0rc1-1-x86_64.pkg.tar.zst`, tests in a terminal)
 - [x] Javier, rc.1 (15:36–15:37): installed only nog; `install sl` → table (extra) + pacman handoff, installed; `install neofetch` → table said "chaotic-aur — unifetch provides it", unifetch went in; `install zzzz` → stopped before anything, not found
 - [x] Javier, 18:12: `nog install aur/neofetch` → table (AUR — built by yay), "Install these? [Y/n]", the yay handoff line, yay's menus and build, pacman's conflict question (unifetch removed): neofetch 7.1.0-2 in. PASS
-- [ ] Then the release (docs, man page, roadmap: C3 continues with Flatpak/Snap)
+- [x] Released: docs, man page, roadmap (C3 continues with Flatpak/Snap in v1.9.0), tag, GitHub, AUR (`options=('!debug')`)
 
 ## Next up — in this order
 
-- [ ] Next AUR recipe: `options=('!debug')` — makepkg tries a debug package for nog and prints "No debugging symbols" (seen in Javier's yay build of 1.7.0, 4 Oct); harmless noise
+- [x] (1.8.0) AUR recipe: `options=('!debug')` — makepkg tries a debug package for nog and prints "No debugging symbols" (seen in Javier's yay build of 1.7.0, 4 Oct); harmless noise
 
 ### 00 · Found in the KognogOS VM, 30 Sep — v1.5.6, released for the VM test
 - [ ] **NEW 2026-10-01 · found by Javier on this desktop, nog 1.5.6:** after the warnings are listed and nog is ready to install, **the prompt to continue does not appear**. Last `nog update` in fish history: 08:35. To do: reproduce, find the cause, open an F-n issue. **Reproduce on the next day nog has something ready** (1 Oct: 71 updates pending, all held, so no prompt is reached): `script -q ~/Programs/nog/logs/prompt-bug.log -c "nog update"`, answer `n` where the question should be; "Cancelled — nothing was installed" means nog's own gate was hidden, "exited with status 1" means pacman's. Suspect: pacman's prompt through the stderr relay / CRLF translation (v1.5.3) right after the `ignoring package upgrade` warnings. **Narrowed 2026-10-01 evening:** on kognogos-dev, nog 1.5.6 `nog update` (recorded with `script`, 26 `ignoring package upgrade` warnings) showed BOTH prompts — "Begin the handoff?" and pacman's "Proceed?" — so the bug is not in nog 1.5.6 alone; look at what differs on the desktop (fish, the terminal, sudo's pty, the KDE askpass) (Related to the open matrix line above: pacman's own "Proceed?" visible, 7.3)
