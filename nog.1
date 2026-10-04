@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.6.1" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.7.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -52,6 +52,9 @@ user intent. If an AUR helper is configured (see
 .BR nog.conf (5)),
 the install routes through the helper, so AUR-only packages work transparently
 without any pre-check. Tier protection applies to future updates, not to installs.
+Since v1.7.0 a name can carry its source: \fBaur/\fIname\fR is always built from
+the AUR (never swapped for a repository package that provides the same name), and
+\fIrepo\fB/\fIname\fR comes from that repository only. nogForge installs this way.
 .IP
 Since v1.5.8 pacman asks before installing (no \fB--noconfirm\fR), showing
 exactly what will be installed, dependencies included.
@@ -352,8 +355,15 @@ run, so what must move with them stays back too.
 .B NOG_ASKPASS=1
 Every \fBsudo\fR nog runs gets \fB\-A\fR, and the AUR helper gets
 \fB\-\-sudoflags \-A\fR: the program named by \fBSUDO_ASKPASS\fR (a
-password window, e.g. \fBksshaskpass\fR) asks for the password instead of the
-terminal. Set by nogForge.
+password window, or since nogForge 1.1 a helper that asks inside nogForge) asks
+for the password instead of the terminal. Set by nogForge.
+.TP
+.B NOG_EVENTS=\fIfile\fR
+(v1.7.0) nog appends its steps to \fIfile\fR, one JSON line each: the steps that
+will run (\fB{"ev":"steps",...}\fR), each step's start and end (check, keys, pacman,
+aur, flatpak, snap; install, remove, clean), nog's own questions
+(\fB{"ev":"ask",...}\fR) and the end status. Best-effort: a file that cannot be
+written never stops a run. nogForge reads it for its steps view.
 .
 .SH OPTIONS
 .TP

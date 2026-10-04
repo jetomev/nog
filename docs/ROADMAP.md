@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.7.0 — Released (for nogForge 1.1: #45 NOG_EVENTS + F-11, #46 F-12)
+- [x] `NOG_EVENTS`: steps, starts and ends, nog's questions, the end status, as JSON lines
+- [x] `aur/x` and `repo/x` install from that source only (F-11)
+- [x] Banner rules capped at 80 columns (F-12)
+- [x] Proven through nogForge in the KognogOS VM (tty3) and by Javier (desktop + tty3)
+- [x] v2 arc renumbered again: C3 → v1.8.0, C4 → v1.9.0, C5 → v1.10.0
+
 ### v1.6.1 — Released (from Javier's nogForge Update test: F-10 #44, F-9 #43)
 - [x] `nog update a b c`: only the named, one table; everything else kept back this time (coupling + handoff unchanged)
 - [x] A named package held and not promoted, waiting on a partner, not pending, or also kept back: the run stops before any question, one line each

@@ -7,7 +7,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 1.6.1](https://img.shields.io/badge/Version-1.6.1-purple.svg)
+![Version: 1.7.0](https://img.shields.io/badge/Version-1.7.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -44,6 +44,8 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer.
 - **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
 - **Every run kept whole** *(v1.6.0)* — what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log` beside the CSV logs, for 30 days. Recorded with util-linux `script`: you answer prompts as usual, and what you type (a password included) is never in the file. nogForge's nog Logs opens it. It is the log the closing note names; the CSV logs stay as nog's own bookkeeping (the hold clock, nogForge's tables)
+- **Install from the source you name** *(v1.7.0)* — `nog install aur/<name>` is always built from the AUR, `nog install extra/<name>` comes from that repository only; nothing can be swapped in because it "provides" the same name
+- **Steps for programs** *(v1.7.0)* — with `NOG_EVENTS=<file>`, nog writes each step it takes (and its own questions) as a line a program can read; nogForge shows them as a checklist with a progress bar
 - **Update only what you name** *(v1.6.1)* — `nog update a b c` shows one table with just those and installs only them. A named package that is on hold must be promoted first (`--promote`); otherwise nog stops before anything runs and says what to do
 - **An install installs only what you asked** *(v1.6.0)* — like `pacman -S`: no update first, and never a list refresh on its own (that would be a partial upgrade). If an install fails and the package lists are old, nog says so: `nog update`, then try again
 - **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
@@ -192,6 +194,10 @@ nog update
 
 # Search, with each result's tier shown
 nog search <query>
+
+# Install from that source only: the AUR, or one repository (v1.7.0)
+nog install aur/<package>
+nog install extra/<package>
 
 # Update only these: nothing else moves; a held one must be promoted (v1.6.1)
 nog update <package> <package>
@@ -373,7 +379,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "1.6.1"
+version = "1.7.0"
 log_level = "info"
 
 [paths]
@@ -692,9 +698,9 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v1.6.1 shipped 2026-10-04** — update only what you name, a held one only when promoted ([#44](https://github.com/jetomev/nog/issues/44)), and a name found nowhere said plainly ([#43](https://github.com/jetomev/nog/issues/43)); from Javier's nogForge Update test. **v1.6.0 shipped 2026-10-03** — nog for programs and for nogForge: `--json` answers, `--keep` / `--promote`, installs that install only what you asked ([#41](https://github.com/jetomev/nog/issues/41)), every run kept whole ([#42](https://github.com/jetomev/nog/issues/42)). **v1.5.8 shipped 2026-10-02** — installs and removals ask ([#38](https://github.com/jetomev/nog/issues/38)), a short install screen ([#37](https://github.com/jetomev/nog/issues/37)), designed messages ([#39](https://github.com/jetomev/nog/issues/39)), pacman's question under its table ([#40](https://github.com/jetomev/nog/issues/40)), and the same start and end on every run. **v1.5.7 the same day** — what the KognogOS VM test found ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). Before: v1.5.6 ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)) and v1.5.5 … v1.5.2 on 30 September.
+> **v1.7.0 shipped 2026-10-04** — nog's steps for programs (`NOG_EVENTS`), so nogForge 1.1 runs nog inside its own window; installs from the source you name (`aur/x`, `repo/x`); the banner never wider than 80 columns ([#45](https://github.com/jetomev/nog/issues/45), [#46](https://github.com/jetomev/nog/issues/46)). **v1.6.1 shipped 2026-10-04** — update only what you name, a held one only when promoted ([#44](https://github.com/jetomev/nog/issues/44)), and a name found nowhere said plainly ([#43](https://github.com/jetomev/nog/issues/43)); from Javier's nogForge Update test. **v1.6.0 shipped 2026-10-03** — nog for programs and for nogForge: `--json` answers, `--keep` / `--promote`, installs that install only what you asked ([#41](https://github.com/jetomev/nog/issues/41)), every run kept whole ([#42](https://github.com/jetomev/nog/issues/42)). **v1.5.8 shipped 2026-10-02** — installs and removals ask ([#38](https://github.com/jetomev/nog/issues/38)), a short install screen ([#37](https://github.com/jetomev/nog/issues/37)), designed messages ([#39](https://github.com/jetomev/nog/issues/39)), pacman's question under its table ([#40](https://github.com/jetomev/nog/issues/40)), and the same start and end on every run. **v1.5.7 the same day** — what the KognogOS VM test found ([#34](https://github.com/jetomev/nog/issues/34), [#35](https://github.com/jetomev/nog/issues/35), [#36](https://github.com/jetomev/nog/issues/36)). Before: v1.5.6 ([#30](https://github.com/jetomev/nog/issues/30), [#31](https://github.com/jetomev/nog/issues/31)) and v1.5.5 … v1.5.2 on 30 September.
 
-### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.7.0)
+### Next — the install chain, C3 ([#7](https://github.com/jetomev/nog/issues/7) · v1.8.0)
 
 - [ ] `nog install` tries pacman, then the AUR, then Flatpak, then Snap — and always shows which source it picked before installing.
 
@@ -713,10 +719,10 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 - [x] **C1 · v1.1.0** — Flatpak
 - [x] **C2 · v1.2.0** — Snap
-- [ ] **C3 · v1.7.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up again: v1.5.0 went to `nog install <file>`, #17, and v1.6.0 to nogForge's needs)*
-- [ ] **C4 · v1.8.0** — Full command surface plus `--json` output. *Its `--json` half shipped early, in v1.6.0: `list`, `search` and the update plan, for nogForge.*
-- [ ] **C5 · v1.9.0** — Maintenance and cleanup: orphans, AUR build caches, unused Flatpak runtimes, old Snap revisions. *Its first piece shipped early: `nog clean` for pacman's cache, v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)).*
-- [ ] **C6** — nogForge, the visual companion, built on forgekit. *Its first beta, v0.3.0, shipped 2026-10-03 with nog v1.6.0; [v1.0.0](https://github.com/jetomev/nogforge/releases), its first stable release, on 2026-10-04 with nog v1.6.1 (Javier's call). Flatpak and Snap installs come with C3.*
+- [ ] **C3 · v1.8.0** — Install chain: pacman → AUR → Flatpak → Snap, always showing the source before installing *(numbers moved up again: v1.5.0 went to `nog install <file>`, #17, v1.6.0 and v1.7.0 to nogForge's needs)*
+- [ ] **C4 · v1.9.0** — Full command surface plus `--json` output. *Its `--json` half shipped early, in v1.6.0: `list`, `search` and the update plan, for nogForge.*
+- [ ] **C5 · v1.10.0** — Maintenance and cleanup: orphans, AUR build caches, unused Flatpak runtimes, old Snap revisions. *Its first piece shipped early: `nog clean` for pacman's cache, v1.5.5 ([#15](https://github.com/jetomev/nog/issues/15)).*
+- [ ] **C6** — nogForge, the visual companion, built on forgekit. *Its first beta, v0.3.0, shipped 2026-10-03 with nog v1.6.0; [v1.0.0](https://github.com/jetomev/nogforge/releases), its first stable release, on 2026-10-04 with nog v1.6.1 (Javier's call); v1.1.0 the same day runs nog inside its own window, on nog v1.7.0's steps. Flatpak and Snap installs come with C3.*
 - [ ] **C7 · v2.0.0** — the crown release
 
 *Every released version's roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).*
@@ -724,6 +730,18 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 ---
 
 ## Changelog
+
+### v1.7.0 — October 4, 2026
+
+**nog for nogForge's window: its steps, and installs from the source you name** ([#45](https://github.com/jetomev/nog/issues/45), [#46](https://github.com/jetomev/nog/issues/46)). Javier, about nogForge handing the terminal to nog: *"it is not beautiful, it is disrupting."* nogForge 1.1 now runs nog inside its own window; this is nog's half.
+
+- **`NOG_EVENTS=<file>`**: nog appends one JSON line per event — the steps that will run, each step's start and end (checking for updates, new keys, official packages, AUR, Flatpak, Snap; install, remove, clean), nog's own questions, and the end status. nogForge shows them as a checklist with a progress bar. Best-effort; without it nothing changes.
+- **`nog install aur/<name>` / `<repo>/<name>`** (F-11). Found in the KognogOS VM: neofetch picked from the AUR in nogForge became chaotic-aur's **unifetch**, which says it provides neofetch, so the review and the install disagreed. `aur/` always goes to the AUR helper (and says so plainly when there is none); `repo/` goes to pacman as is; tiers and messages use the plain name. nogForge names the source of the row you picked.
+- **The banner never passes 80 columns** (F-12, #46). Installing four package files at once made its `=====` lines about 330 characters wide.
+
+Tested in the KognogOS VM on a real text console, through nogForge (installs from the repositories and the AUR with yay's menus, an update with steps, a cancelled password, a removal), then by Javier on his desktop and tty3: *"wow! better than expected!"* ([testing/](testing/20261004%20-%20Test%20Results%20for%20nog%20v1-7-0.md)).
+
+Tests: 237 → 240. Warnings unchanged at 6.
 
 ### v1.6.1 — October 4, 2026
 
@@ -737,20 +755,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 Tested on the desktop: the built program in a scratch home (a held name stops, a ready list shows only its packages, a misspelled name is caught, `base-devel` and an AUR name are found), then Javier through nogForge with 1.6.1-rc.1 and rc.2: `nog update vde2 wolfssl` and `nog update freerdp git --promote git` installed only those, and the note's count matched pacman's 68 lines ([testing/](testing/20261004%20-%20Test%20Results%20for%20nog%20v1-6-1.md)).
 
 Tests: 234 → 237. Warnings unchanged at 6.
-
-### v1.6.0 — October 3, 2026
-
-**nog for programs, and for nogForge** ([#7](https://github.com/jetomev/nog/issues/7), [#41](https://github.com/jetomev/nog/issues/41), [#42](https://github.com/jetomev/nog/issues/42)). Built with [nogForge](https://github.com/jetomev/nogforge), the Forge Suite's package app, and tested through Javier's two runs of it on the desktop (rc.1 to rc.5).
-
-- **nog answers programs in JSON**: `nog list --json` (installed packages with tier, source and, for protected ones, the reason in words), `nog search --json` (repositories and the AUR), and `nog update --json`, nog's whole update plan from the same code as a real update, stopping before any question. One JSON document on stdout; everything else goes to stderr; no banner and no line in the run history. This is the `--json` half of C4, shipped early.
-- **Choices in an update**: `--keep a,b` keeps updates back this time, and nog says what must stay back with them (ldb takes libwbclient and smbclient). `--promote a,b` makes held updates ready now, installed with the rest; a partner that must move with one is promoted too (linux-zen brings linux-zen-headers). Keep wins over promote.
-- **`nog install` installs only what you asked** (F-8, #41). **A change from v1.5.6–v1.5.8**, which ran a full update first when the package lists were a day old: installing one package file pulled twenty updates with it. Javier: *"if I ask pacman to install a package, it just installs the package. nog has to do the same."* No update first and no list refresh on its own (that would be a partial upgrade). If an install fails and the lists are old, nog says so: `nog update`, then try again.
-- **Every run kept whole** (#42, Javier's idea): what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log`, for 30 days. Recorded with util-linux `script`: prompts work as usual and nothing typed (a password included) is kept. The closing note names the `.log`; the CSV logs stay as nog's own bookkeeping (the hold clock reads them).
-- **`NOG_ASKPASS=1`**: every sudo nog runs uses the system's password window (`sudo -A`), the AUR helper too, so an app like nogForge never handles a password.
-
-Tested on the desktop against its real plan (keep and promote with their partners), with print-only stand-ins (installs run exactly `yay -S <name>` / `pacman -U <file>`), recorded runs in a scratch home (a failing run keeps its status), and Javier's own installs of rc.3–rc.5 and forgekit 0.5.2 ([testing/](testing/20261003%20-%20Test%20Results%20for%20nog%20v1-6-0.md)).
-
-Tests: 224 → 234. Warnings unchanged at 6.
 
 *Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
 

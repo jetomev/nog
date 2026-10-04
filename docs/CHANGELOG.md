@@ -2,6 +2,18 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.7.0 — October 4, 2026
+
+**nog for nogForge's window: its steps, and installs from the source you name** ([#45](https://github.com/jetomev/nog/issues/45), [#46](https://github.com/jetomev/nog/issues/46)). Javier, about nogForge handing the terminal to nog: *"it is not beautiful, it is disrupting."* nogForge 1.1 now runs nog inside its own window; this is nog's half.
+
+- **`NOG_EVENTS=<file>`**: nog appends one JSON line per event — the steps that will run, each step's start and end (checking for updates, new keys, official packages, AUR, Flatpak, Snap; install, remove, clean), nog's own questions, and the end status. nogForge shows them as a checklist with a progress bar. Best-effort; without it nothing changes.
+- **`nog install aur/<name>` / `<repo>/<name>`** (F-11). Found in the KognogOS VM: neofetch picked from the AUR in nogForge became chaotic-aur's **unifetch**, which says it provides neofetch, so the review and the install disagreed. `aur/` always goes to the AUR helper (and says so plainly when there is none); `repo/` goes to pacman as is; tiers and messages use the plain name. nogForge names the source of the row you picked.
+- **The banner never passes 80 columns** (F-12, #46). Installing four package files at once made its `=====` lines about 330 characters wide.
+
+Tested in the KognogOS VM on a real text console, through nogForge (installs from the repositories and the AUR with yay's menus, an update with steps, a cancelled password, a removal), then by Javier on his desktop and tty3: *"wow! better than expected!"* ([testing/](../testing/20261004%20-%20Test%20Results%20for%20nog%20v1-7-0.md)).
+
+Tests: 237 → 240. Warnings unchanged at 6.
+
 ### v1.6.1 — October 4, 2026
 
 **Update only what you name** ([#44](https://github.com/jetomev/nog/issues/44), [#43](https://github.com/jetomev/nog/issues/43)). From Javier's test of nogForge's Update screen on the desktop: nogForge handed nog a choice, and nog answered with every pending update, 70 on hold among them. Javier: *"a specific list, it's intentional."*
