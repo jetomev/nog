@@ -55,6 +55,17 @@ pub fn promote() -> Vec<String> {
     PROMOTE.get().cloned().unwrap_or_default()
 }
 
+static ONLY: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// v1.6.1: `nog update a b c` — only these, on purpose (Javier, 4 Oct 2026).
+pub fn set_only(p: Vec<String>) {
+    let _ = ONLY.set(p);
+}
+
+pub fn only() -> Vec<String> {
+    ONLY.get().cloned().unwrap_or_default()
+}
+
 pub fn set_keep(keep: Vec<String>) {
     let _ = KEEP.set(keep);
 }

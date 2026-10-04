@@ -1261,7 +1261,20 @@ fn run_update(realign: bool) -> UpdateEnd {
     // v1.6.0 (#7): what you chose to keep back is held before the coupling
     // rules run, so they decide what must stay back with it — the answer
     // nogForge shows under an unticked box. Keys are never kept back (#31).
-    let keep = crate::machine::keep();
+    let mut keep = crate::machine::keep();
+    // v1.6.1: `nog update a b c` names what goes in, on purpose (Javier, 4 Oct
+    // 2026: "a specific list, it's intentional"). Everything else that is ready
+    // is kept back this time, so the coupling rules below still say what must
+    // move together with what you named — and the handoff is the same safe one.
+    let only = crate::machine::only();
+    if !only.is_empty() {
+        let promote = crate::machine::promote();
+        keep.extend(ready.iter().map(|(u, _, _)| &u.name)
+            .chain(unknown.iter().map(|(u, _)| &u.name))
+            .filter(|n| !only.contains(n) && !promote.contains(n))
+            .cloned());
+    }
+    let keep = keep;
     if !keep.is_empty() {
         let wanted = |u: &PendingUpdate| keep.iter().any(|k| k == &u.name)
             && !(u.source == Source::Pacman && KEYRINGS.contains(&u.name.as_str()));
@@ -1566,7 +1579,45 @@ fn run_update(realign: bool) -> UpdateEnd {
         crate::machine::emit(&plan_json(&ready, &held, &unknown, &labels, &source_presence, &cfg.holds));
         return UpdateEnd::Stopped;
     }
-    {
+    // v1.6.1: a named list shows only what it will update. A named package that
+    // is held — not promoted, or waiting on a partner — stops the run before any
+    // question or change, with what to do instead.
+    let named = !only.is_empty();
+    if named {
+        let held_view: Vec<(&str, String, Option<&str>)> = held.iter()
+            .map(|(u, _, r, why)| (u.name.as_str(), held_note(*r, why),
+                match why { HeldReason::CoupledTo(p) => Some(p.as_str()), _ => None }))
+            .collect();
+        let pending_names: Vec<&str> = ready.iter().map(|(u, _, _)| u.name.as_str())
+            .chain(unknown.iter().map(|(u, _)| u.name.as_str()))
+            .collect();
+        let problems = named_problems(&only, &pending_names, &held_view);
+        if !problems.is_empty() {
+            println!();
+            println!("{}nog: Not updating — {} of the packages you named can't go in now:{}",
+                C_BOLD, problems.len(), C_RESET);
+            println!();
+            for p in &problems {
+                println!("  {}", p);
+            }
+            println!();
+            println!("nog: Nothing was installed or changed.");
+            return UpdateEnd::Failed(1);
+        }
+        let src = |upd: &PendingUpdate| label_for(&labels, upd);
+        let rows: Vec<TableRow> = ready.iter()
+            .map(|(upd, tier, reason)| TableRow::from(upd, tier, src(upd), ready_note(reason)))
+            .collect();
+        println!();
+        print!("{}", format_table("UPDATING ONLY WHAT YOU NAMED", &rows, true));
+        if !unknown.is_empty() {
+            let rows: Vec<TableRow> = unknown.iter()
+                .map(|(upd, tier)| TableRow::from(upd, tier, src(upd), "no build date in sync DB".to_string()))
+                .collect();
+            println!();
+            print!("{}", format_table("UNKNOWN", &rows, true));
+        }
+    } else {
         let r: Vec<&PendingUpdate> = ready.iter().map(|(u, _, _)| u).collect();
         let h: Vec<&PendingUpdate> = held.iter().map(|(u, _, _, _)| u).collect();
         let k: Vec<&PendingUpdate> = unknown.iter().map(|(u, _)| u).collect();
@@ -1685,7 +1736,10 @@ fn run_update(realign: bool) -> UpdateEnd {
                 .filter(|n| !ignore.contains(n)),
         );
         let fence = holds::foreign_fence(&pacman::foreign_package_names(), &cleared, &ignore);
+        // v1.6.1: with a named list the fence still applies; only its note is
+        // left out, because the screen shows just what you named.
         if !fence.is_empty() {
+            if !named {
             println!();
             println!(
                 "{}nog: foreign fence — {} AUR/local package(s) held back as a dependency{}",
@@ -1695,6 +1749,7 @@ fn run_update(realign: bool) -> UpdateEnd {
                 "{}     (the AUR step installs only what nog named; this also blocks them as deps).{}",
                 C_SUBTEXT, C_RESET
             );
+            }
             ignore.extend(fence);
         }
     }
@@ -2272,6 +2327,31 @@ fn plan_json(
         "ready": ready_rows, "held": held_rows, "unknown": unknown_rows,
         "holds": {"tier1_days": holds.tier1_days, "tier2_days": holds.tier2_days, "tier3_days": holds.tier3_days},
     })
+}
+
+/// v1.6.1: why each package you named can't go in now, in plain words with
+/// what to do instead. Empty means every named one is ready (or promoted).
+/// `held` = (name, its held note, the partner it waits on).
+fn named_problems(only: &[String], pending: &[&str], held: &[(&str, String, Option<&str>)]) -> Vec<String> {
+    let mut out = Vec::new();
+    for n in only {
+        if pending.contains(&n.as_str()) {
+            continue;
+        }
+        match held.iter().find(|(h, _, _)| *h == n.as_str()) {
+            Some((_, note, Some(partner))) => out.push(format!(
+                "{} must go in together with {} ({}). Name both: nog update {} {}",
+                n, partner, note, n, partner)),
+            Some((_, note, None)) if note == "kept back by you" => out.push(format!(
+                "{} is named and kept back at the same time (--keep). Leave out one or the other.", n)),
+            Some((_, note, None)) => out.push(format!(
+                "{} is on hold ({}) and was not promoted. To bring it in now: nog update {} --promote {}",
+                n, note, n, n)),
+            None => out.push(format!(
+                "{} has no update waiting: it is up to date, or not installed.", n)),
+        }
+    }
+    out
 }
 
 fn held_note(remaining: u64, reason: &HeldReason) -> String {
@@ -2928,6 +3008,26 @@ mod output_tests {
         // v1.6.0 (#7): what you kept back (nogForge's unticked box) is not a countdown
         assert_eq!(held_note(0, &HeldReason::KeptBack), "kept back by you");
         assert_eq!(held_note(12, &HeldReason::KeptBack), "kept back by you");
+    }
+
+    #[test]
+    fn a_named_list_stops_on_a_held_one_and_says_what_to_do() {
+        // v1.6.1 (Javier, 4 Oct 2026): "messages in case a package that is being
+        // held is requested to be updated without being promoted first, and don't execute it"
+        let only: Vec<String> = ["vde2", "git", "ldb", "nope", "freerdp"].iter().map(|s| s.to_string()).collect();
+        let held = vec![
+            ("git", "1 day remaining".to_string(), None),
+            ("ldb", "3 days · coupled to libwbclient".to_string(), Some("libwbclient")),
+            ("freerdp", "kept back by you".to_string(), None),
+        ];
+        let p = named_problems(&only, &["vde2", "wolfssl"], &held);
+        assert_eq!(p.len(), 4, "vde2 is ready: no problem; the other four each get one line");
+        assert_eq!(p[0], "git is on hold (1 day remaining) and was not promoted. To bring it in now: nog update git --promote git");
+        assert!(p[1].starts_with("ldb must go in together with libwbclient"));
+        assert!(p[1].ends_with("Name both: nog update ldb libwbclient"));
+        assert!(p[2].starts_with("nope has no update waiting"));
+        assert!(p[3].contains("kept back at the same time"));
+        assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
     }
 
     #[test]

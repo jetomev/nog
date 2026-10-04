@@ -71,6 +71,9 @@ enum Commands {
     /// version out of the Held bucket and into the upgrade transaction. Useful
     /// after a partial upgrade left DKMS in a broken state.
     Update {
+        /// Update only these (v1.6.1): nothing else moves, and only they are shown. A held one
+        /// must be promoted first (`--promote`), or nog stops without changing anything
+        packages: Vec<String>,
         #[arg(long, help = "Pull held kernels into the upgrade to match installed headers")]
         realign: bool,
         /// Write the plan as JSON and stop before any question or change (v1.6.0)
@@ -179,7 +182,8 @@ fn main() {
     match cli.command {
         Commands::Install { packages } => commands::install(&packages),
         Commands::Remove { packages } => commands::remove(&packages),
-        Commands::Update { realign, json, keep, promote } => {
+        Commands::Update { packages, realign, json, keep, promote } => {
+            machine::set_only(packages);
             machine::set_promote(promote);
             if json {
                 machine::set_plan(keep);
