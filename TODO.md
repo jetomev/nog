@@ -10,6 +10,8 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 
 - [x] **Answered (3 Oct): a name plus package files in one `nog install` doing nothing is by design** — the man page (since 1.5.0): "Names and files cannot be mixed in one command; they are separate pacman operations, and splitting one request could leave half of [the request done]". To consider: say so on screen when someone mixes them, instead of nothing visible (it printed nothing the guest agent captured).
 
+- [ ] **F-9 · #43 (1.6.1)** — a name found nowhere is reported as "pacman stopped: you answered no, or it hit a problem"; say "not found in the repositories or the AUR" and name the tool (Javier, 3 Oct 22:34).
+- [x] **AUR 1.6.0 installed by Javier (3 Oct 22:33)** — built from the AUR recipe, 234 tests passed in the build.
 - [x] **v1.6.0 RELEASED 3 Oct (Javier: "push … to final versions … very solid")** — tag, GitHub Latest (signed assets), AUR. #41 #42 closed; #30 closed (superseded by #41); #7 advanced. Tests 224 → 234, warnings 6. Javier tests the AUR install + nogForge Update on 4 Oct; issues as needed.
 - [x] **rc.5 (3 Oct): a recorded run names only its `.log`** — Javier chose "A": the CSVs stay as nog's bookkeeping (the hold clock reads the update CSV; nogForge's tables, 90 days, runs without a terminal), unnamed. Javier considered dropping the CSVs; why not: see #42.
 - [x] **#42 · each run kept whole as a `.log` (3 Oct, rc.4)** — Javier's idea for nogForge's nog Logs. util-linux `script`, output only, 30 days (his number). Tests 231 → 234. **Goes in the 1.6.0 changelog.** Close #42 at the release.
