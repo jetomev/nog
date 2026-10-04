@@ -2,6 +2,14 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v1.6.0 — Released (nog for programs and for nogForge: #7's --json half, #41, #42)
+- [x] `nog list --json`, `nog search --json`, `nog update --json` (the plan, same code, stops before any question; stdout one JSON document)
+- [x] `nog update --keep a,b` (partners stay back with them) and `--promote a,b` (partners promoted with them; keep wins)
+- [x] `NOG_ASKPASS=1` → `sudo -A` everywhere, helper `--sudoflags -A`
+- [x] F-8 #41: `nog install` installs only what was asked; the update-before-install path removed
+- [x] #42: every run from a terminal kept whole as `YYYYMMDD-HHMMSS <command>.log`, 30 days; the closing note names only the `.log`
+- [x] Javier's desktop runs through nogForge (rc.1–rc.5)
+
 ### v1.5.8 — Released (from Javier's v1.5.7 run: F-5 #37, F-6 #38, F-7 #39, F-8 #40, the run frame)
 - [x] `nog install` updating first: a notice, the READY TO INSTALL table, the holds as one line; pacman given `-Sy --needed <ready> --ignore <held>`
 - [x] `pacman -S`, `-U` and `-Rs` without `--noconfirm`

@@ -2,6 +2,20 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v1.6.0 — October 3, 2026
+
+**nog for programs, and for nogForge** ([#7](https://github.com/jetomev/nog/issues/7), [#41](https://github.com/jetomev/nog/issues/41), [#42](https://github.com/jetomev/nog/issues/42)). Built with [nogForge](https://github.com/jetomev/nogforge), the Forge Suite's package app, and tested through Javier's two runs of it on the desktop (rc.1 to rc.5).
+
+- **nog answers programs in JSON**: `nog list --json` (installed packages with tier, source and, for protected ones, the reason in words), `nog search --json` (repositories and the AUR), and `nog update --json`, nog's whole update plan from the same code as a real update, stopping before any question. One JSON document on stdout; everything else goes to stderr; no banner and no line in the run history. This is the `--json` half of C4, shipped early.
+- **Choices in an update**: `--keep a,b` keeps updates back this time, and nog says what must stay back with them (ldb takes libwbclient and smbclient). `--promote a,b` makes held updates ready now, installed with the rest; a partner that must move with one is promoted too (linux-zen brings linux-zen-headers). Keep wins over promote.
+- **`nog install` installs only what you asked** (F-8, #41). **A change from v1.5.6–v1.5.8**, which ran a full update first when the package lists were a day old: installing one package file pulled twenty updates with it. Javier: *"if I ask pacman to install a package, it just installs the package. nog has to do the same."* No update first and no list refresh on its own (that would be a partial upgrade). If an install fails and the lists are old, nog says so: `nog update`, then try again.
+- **Every run kept whole** (#42, Javier's idea): what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log`, for 30 days. Recorded with util-linux `script`: prompts work as usual and nothing typed (a password included) is kept. The closing note names the `.log`; the CSV logs stay as nog's own bookkeeping (the hold clock reads them).
+- **`NOG_ASKPASS=1`**: every sudo nog runs uses the system's password window (`sudo -A`), the AUR helper too, so an app like nogForge never handles a password.
+
+Tested on the desktop against its real plan (keep and promote with their partners), with print-only stand-ins (installs run exactly `yay -S <name>` / `pacman -U <file>`), recorded runs in a scratch home (a failing run keeps its status), and Javier's own installs of rc.3–rc.5 and forgekit 0.5.2 ([testing/](../testing/20261003%20-%20Test%20Results%20for%20nog%20v1-6-0.md)).
+
+Tests: 224 → 234. Warnings unchanged at 6.
+
 ### v1.5.8 — October 2, 2026
 
 **Installs that ask, a short install screen, and the same start and end on every run** ([#37](https://github.com/jetomev/nog/issues/37), [#38](https://github.com/jetomev/nog/issues/38), [#39](https://github.com/jetomev/nog/issues/39), [#40](https://github.com/jetomev/nog/issues/40)). From Javier's own test of v1.5.7 in the KognogOS VM, and his rulings the same day.
