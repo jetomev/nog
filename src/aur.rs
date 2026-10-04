@@ -295,6 +295,32 @@ pub fn build_dates_for(helper: Helper, packages: &[String]) -> HashMap<String, u
     out
 }
 
+/// v1.8.0: name → version of each AUR package the helper knows, for the
+/// install table (`-Sai` answers the AUR only). Unknown names are simply absent.
+pub fn versions_for(helper: Helper, packages: &[String]) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if packages.is_empty() {
+        return out;
+    }
+    let Ok(output) = Command::new(helper.binary()).arg("-Sai").arg("--").args(packages)
+        .stdin(std::process::Stdio::null()).output() else { return out };
+    let mut name: Option<String> = None;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if line.trim().is_empty() {
+            name = None;
+            continue;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            match k.trim() {
+                "Name" => name = Some(v.trim().to_string()),
+                "Version" => if let Some(n) = name.as_ref() { out.insert(n.clone(), v.trim().to_string()); },
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 /// Convert a human-readable date string (as printed by yay/paru's `-Si`) into
 /// a Unix timestamp by shelling out to `date -d`. Matches how `_debug-dates`
 /// already handles epoch display — no new Rust dep needed.

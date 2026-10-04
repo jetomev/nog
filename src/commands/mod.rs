@@ -130,15 +130,36 @@ pub fn install(packages: &[String]) {
             end(1);
         }
     }
-    let tier_lines: Vec<String> = packages.iter().map(|pkg| {
-        let tier = tm.classify(bare_name(pkg));
-        match tier {
-            Tier::One => format!("{} is {} — a critical system package; its updates wait 30 days.", pkg, tier),
-            Tier::Two => format!("{} is {} — its updates wait 15 days.", pkg, tier),
-            Tier::Three => format!("{} is {} — its updates wait 7 days.", pkg, tier),
-        }
+    // v1.8.0 (Javier, 4 Oct 2026, option A): where each package comes from,
+    // before anything is downloaded or built; nog's own question only when the
+    // AUR is involved (there pacman's question comes after the build), and a
+    // line saying who takes over. pacman and the helper still decide the
+    // transaction; this table follows pacman's own order (exact name, then a
+    // package that provides it, then a group), then the AUR.
+    let official = sync_db::load_packages();
+    let unresolved: Vec<String> = packages.iter()
+        .filter(|p| p.starts_with("aur/") || (!p.contains('/') && !official.contains_key(p.as_str())
+            && providers_of(p, official).is_empty() && !pacman_resolves(p)))
+        .map(|p| bare_name(p).to_string()).collect();
+    let aur_versions = match helper {
+        Some(h) => aur::versions_for(h, &unresolved),
+        None => HashMap::new(),
+    };
+    let sources: Vec<(String, InstallSource)> = packages.iter().map(|p| {
+        (p.clone(), resolve_install(p, official, &|n: &str| aur_versions.get(n).cloned(), &pacman_resolves))
     }).collect();
-    notice(C_GREEN, &format!("Installing {}", packages.join(" ")), &tier_lines);
+    let missing: Vec<String> = sources.iter().filter(|(_, s)| matches!(s, InstallSource::Nowhere))
+        .map(|(p, _)| bare_name(p).to_string()).collect();
+    if !missing.is_empty() {
+        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &not_found_lines(&missing, helper.is_some()));
+        end(1);
+    }
+    let any_aur = sources.iter().any(|(_, s)| matches!(s, InstallSource::Aur { .. }));
+    let helper_name = helper.map(|h| h.binary()).unwrap_or("pacman");
+    notice(C_GREEN, &format!("Installing {}", packages.iter().map(|p| bare_name(p)).collect::<Vec<_>>().join(" ")), &[
+        "Where each comes from, before anything is downloaded or built:".to_string()]);
+    print!("{}", format_install_table(&install_rows(&sources, &tm, helper_name)));
+    println!();
 
     // v1.5.4 (#26): the AUR helper stops to let you review each build recipe.
     // With nobody at the keyboard it read end-of-input in its menu and died
@@ -160,11 +181,17 @@ pub fn install(packages: &[String]) {
         }
     }
 
+    // v1.8.0 (option A): nog asks only when the AUR is involved
+    if any_aur && !prompt_install() {
+        println!("nog: Cancelled — nothing was installed.");
+        end(1);
+    }
+    println!("{}", handoff_line(any_aur, helper_name));
+
     // When a helper is configured we always route through it — the helper
     // checks sync repos before AUR, so official packages still install via
-    // pacman under the hood. This keeps the code simple and avoids a brittle
-    // "is this package in a sync DB?" pre-check that would have to stay in
-    // sync with pacman's own resolution order.
+    // pacman under the hood. The table above only shows where each comes from;
+    // pacman and the helper still make the transaction.
     let label = format!("Installing {}", packages.join(" "));
     crate::events::steps(&[("install", label.clone())]);
     crate::events::start("install", &label);
@@ -181,6 +208,130 @@ pub fn install(packages: &[String]) {
             end(status.code().unwrap_or(1));
         }
         stopped_installing(packages, status.code(), helper.map(|h| h.binary()).unwrap_or("pacman"));
+    }
+}
+
+/// v1.8.0: where a package to install comes from, in pacman's own order.
+#[derive(Debug, PartialEq)]
+enum InstallSource {
+    /// From a repository: the exact name, or `provider` which provides it
+    /// (several providers: pacman asks which).
+    Repo { repo: String, version: Option<String>, providers: Vec<String> },
+    /// A name pacman resolves that is not a package: a group.
+    Group,
+    /// Built from the AUR by the helper.
+    Aur { version: Option<String> },
+    Nowhere,
+}
+
+/// The repository packages that provide `name` (by `%PROVIDES%`), as `(package, repo, version)`.
+fn providers_of(name: &str, official: &HashMap<String, sync_db::PackageDesc>) -> Vec<(String, String, Option<String>)> {
+    let mut out: Vec<(String, String, Option<String>)> = official.iter()
+        .filter(|(_, d)| d.provides.iter().any(|p| p == name || p.split(['=', '<', '>']).next() == Some(name)))
+        .map(|(n, d)| (n.clone(), d.repo.clone().unwrap_or_default(), d.version.clone()))
+        .collect();
+    out.sort();
+    out
+}
+
+fn pacman_resolves(name: &str) -> bool {
+    use std::process::{Command, Stdio};
+    Command::new("pacman").args(["-Sp", "--print-format", "%n", "--", name])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// v1.8.0: pacman's order — exact name, a provider, a group — then the AUR. Pure
+/// apart from the two lookups passed in.
+fn resolve_install(name: &str, official: &HashMap<String, sync_db::PackageDesc>,
+                   aur: &dyn Fn(&str) -> Option<String>, resolves: &dyn Fn(&str) -> bool) -> InstallSource {
+    if let Some(n) = name.strip_prefix("aur/") {
+        return match aur(n) { Some(v) => InstallSource::Aur { version: Some(v) }, None => InstallSource::Nowhere };
+    }
+    if let Some((repo, n)) = name.split_once('/') {
+        return match official.get(n) {
+            Some(d) if d.repo.as_deref() == Some(repo) =>
+                InstallSource::Repo { repo: repo.to_string(), version: d.version.clone(), providers: vec![] },
+            _ if resolves(name) => InstallSource::Repo { repo: repo.to_string(), version: None, providers: vec![] },
+            _ => InstallSource::Nowhere,
+        };
+    }
+    if let Some(d) = official.get(name) {
+        return InstallSource::Repo { repo: d.repo.clone().unwrap_or_default(), version: d.version.clone(), providers: vec![] };
+    }
+    let prov = providers_of(name, official);
+    if let Some((_, repo, version)) = prov.first() {
+        let version = if prov.len() == 1 { version.clone() } else { None };
+        return InstallSource::Repo { repo: repo.clone(), version, providers: prov.into_iter().map(|p| p.0).collect() };
+    }
+    if resolves(name) {
+        return InstallSource::Group;
+    }
+    match aur(name) {
+        Some(v) => InstallSource::Aur { version: Some(v) },
+        None => InstallSource::Nowhere,
+    }
+}
+
+/// v1.8.0: the install table's rows: package, version, source, tier.
+fn install_rows(sources: &[(String, InstallSource)], tm: &TierManager, helper: &str) -> Vec<[String; 4]> {
+    sources.iter().map(|(asked, src)| {
+        let name = bare_name(asked).to_string();
+        let tier = format!("{}", tm.classify(&name));
+        let (version, from) = match src {
+            InstallSource::Repo { repo, version, providers } => {
+                let from = match providers.len() {
+                    0 => repo.clone(),
+                    1 => format!("{} — {} provides it", repo, providers[0]),
+                    n => format!("{} packages provide it; pacman asks which", n),
+                };
+                (version.clone().unwrap_or_else(|| "—".into()), from)
+            }
+            InstallSource::Group => ("—".into(), "a group — pacman lists its members".into()),
+            InstallSource::Aur { version } => (version.clone().unwrap_or_else(|| "—".into()),
+                                               format!("AUR — built by {}", helper)),
+            InstallSource::Nowhere => ("—".into(), "not found".into()),
+        };
+        [name, version, from, tier]
+    }).collect()
+}
+
+fn format_install_table(rows: &[[String; 4]]) -> String {
+    let head = ["Package", "Version", "Source", "Tier"];
+    let w: Vec<usize> = (0..3).map(|i| rows.iter().map(|r| r[i].chars().count())
+        .chain(std::iter::once(head[i].len())).max().unwrap_or(0)).collect();
+    let line = |c: [&str; 4]| format!("    {:<a$}  {:<b$}  {:<c$}  {}\n", c[0], c[1], c[2], c[3], a = w[0], b = w[1], c = w[2]);
+    let mut out = line(head);
+    out.push_str(&format!("    {}\n", "-".repeat(w[0] + w[1] + w[2] + 6 + head[3].len() + 2)));
+    for r in rows {
+        out.push_str(&line([&r[0], &r[1], &r[2], &r[3]]));
+    }
+    out
+}
+
+/// v1.8.0: who takes over, said before they do.
+fn handoff_line(aur: bool, helper: &str) -> String {
+    if aur {
+        format!("nog: Handing off to {}: it shows each build recipe to review, builds, then pacman asks once more before installing.", helper)
+    } else {
+        "nog: Handing off to pacman: it shows what comes with it and asks before anything changes.".to_string()
+    }
+}
+
+/// v1.8.0 (option A): nog's own question, only when the AUR is involved.
+fn prompt_install() -> bool {
+    use std::io::{self, IsTerminal, Write};
+    crate::events::ask("Install these? [Y/n]");
+    print!("nog: Install these? [Y/n] ");
+    let _ = io::stdout().flush();
+    if !io::stdin().is_terminal() {
+        println!();
+        return false;
+    }
+    let mut buf = String::new();
+    match io::stdin().read_line(&mut buf) {
+        Ok(0) | Err(_) => false,
+        Ok(_) => matches!(buf.trim().to_lowercase().as_str(), "" | "y" | "yes"),
     }
 }
 
@@ -365,6 +516,7 @@ fn install_files(files: &[String], tm: &TierManager) {
         }
     }
     notice(C_GREEN, &format!("Installing {}", names.join(" ")), &lines);
+    println!("{}", handoff_line(false, "pacman"));
     let label = format!("Installing {}", names.join(" "));
     crate::events::steps(&[("install", label.clone())]);
     crate::events::start("install", &label);
@@ -3174,6 +3326,46 @@ mod output_tests {
         assert!(p[2].starts_with("nope has no update waiting"));
         assert!(p[3].contains("kept back at the same time"));
         assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
+    }
+
+    fn desc(repo: &str, version: &str, provides: &[&str]) -> sync_db::PackageDesc {
+        sync_db::PackageDesc { builddate: 0, pkgbase: None, version: Some(version.into()),
+            provides: provides.iter().map(|s| s.to_string()).collect(), repo: Some(repo.into()) }
+    }
+
+    #[test]
+    fn an_install_shows_where_each_package_comes_from_in_pacmans_order() {
+        // v1.8.0 (Javier, 4 Oct 2026, option A)
+        let mut official = HashMap::new();
+        official.insert("cowsay".to_string(), desc("extra", "3.8.4-1", &[]));
+        official.insert("unifetch".to_string(), desc("chaotic-aur", "1.3.3-2", &["neofetch=7.1.0"]));
+        official.insert("jre-a".to_string(), desc("extra", "21-1", &["java-runtime"]));
+        official.insert("jre-b".to_string(), desc("extra", "25-1", &["java-runtime"]));
+        let aur = |n: &str| if n == "neofetch" || n == "pfetch-git" { Some("7.1.0-2".to_string()) } else { None };
+        let resolves = |n: &str| n == "base-devel";
+        let r = |n: &str| resolve_install(n, &official, &aur, &resolves);
+        assert_eq!(r("cowsay"), InstallSource::Repo { repo: "extra".into(), version: Some("3.8.4-1".into()), providers: vec![] });
+        assert_eq!(r("neofetch"), InstallSource::Repo { repo: "chaotic-aur".into(), version: Some("1.3.3-2".into()),
+            providers: vec!["unifetch".into()] }, "a plain name: a repository provider wins, as in pacman (and it says so)");
+        assert_eq!(r("aur/neofetch"), InstallSource::Aur { version: Some("7.1.0-2".into()) }, "aur/ is the AUR's own");
+        assert!(matches!(r("java-runtime"), InstallSource::Repo { ref providers, version: None, .. } if providers.len() == 2));
+        assert_eq!(r("base-devel"), InstallSource::Group);
+        assert_eq!(r("pfetch-git"), InstallSource::Aur { version: Some("7.1.0-2".into()) });
+        assert_eq!(r("zzz-nope"), InstallSource::Nowhere);
+        assert_eq!(r("extra/cowsay"), InstallSource::Repo { repo: "extra".into(), version: Some("3.8.4-1".into()), providers: vec![] });
+    }
+
+    #[test]
+    fn the_install_table_and_who_takes_over() {
+        let rows = vec![["cowsay".to_string(), "3.8.4-1".into(), "extra".into(), "Tier 3".into()],
+                        ["pfetch-git".to_string(), "r432-1".into(), "AUR — built by yay".into(), "Tier 3".into()]];
+        let t = format_install_table(&rows);
+        let lines: Vec<&str> = t.lines().collect();
+        assert!(lines[0].trim_start().starts_with("Package"));
+        assert!(lines[3].contains("AUR — built by yay"));
+        assert_eq!(lines[2].find("extra"), lines[3].find("AUR"), "the Source column lines up");
+        assert!(handoff_line(true, "yay").starts_with("nog: Handing off to yay: it shows each build recipe"));
+        assert!(handoff_line(false, "yay").starts_with("nog: Handing off to pacman"));
     }
 
     #[test]
