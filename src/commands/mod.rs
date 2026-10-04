@@ -121,8 +121,17 @@ pub fn install(packages: &[String]) {
 
     // v1.5.8 (F-7, #39): one notice for the install itself; pacman asks
     // next (F-6, #38), showing exactly what, dependencies included.
+    // v1.7.0 (F-11): `repo/name` installs from that source only (nogForge names
+    // the row you picked: `aur/neofetch` is built from the AUR, never swapped for
+    // a repository package that says it provides neofetch)
+    if helper.is_none() {
+        if let Some(p) = packages.iter().find(|p| p.starts_with("aur/")) {
+            eprintln!("nog: {} is from the AUR, and no AUR helper is set up (yay or paru).", bare_name(p));
+            end(1);
+        }
+    }
     let tier_lines: Vec<String> = packages.iter().map(|pkg| {
-        let tier = tm.classify(pkg);
+        let tier = tm.classify(bare_name(pkg));
         match tier {
             Tier::One => format!("{} is {} — a critical system package; its updates wait 30 days.", pkg, tier),
             Tier::Two => format!("{} is {} — its updates wait 15 days.", pkg, tier),
@@ -139,7 +148,7 @@ pub fn install(packages: &[String]) {
         use std::io::IsTerminal;
         if !std::io::stdin().is_terminal() {
             let official = sync_db::load_packages();
-            let aur = needs_the_keyboard(packages, |p| official.contains_key(p));
+            let aur = needs_the_keyboard(packages, |p| !p.starts_with("aur/") && official.contains_key(bare_name(p)));
             if !aur.is_empty() {
                 eprintln!("nog: {} not in the official repositories, so it would be built from the AUR.",
                     aur.join(", "));
@@ -175,19 +184,27 @@ pub fn install(packages: &[String]) {
     }
 }
 
+/// v1.7.0 (F-11): a name as typed, without its `repo/` (or `aur/`) in front.
+fn bare_name(name: &str) -> &str {
+    name.split_once('/').map(|(_, n)| n).unwrap_or(name)
+}
+
 /// v1.6.1 (F-9, #43): is there anything by this name to install? pacman
 /// resolves it the way an install would (groups and provides included), then
 /// the AUR through the helper. Asked only after an install failed.
 fn exists_anywhere(name: &str, helper: Option<crate::aur::Helper>) -> bool {
     use std::process::{Command, Stdio};
-    let official = Command::new("pacman").args(["-Sp", "--print-format", "%n", "--", name])
+    if name.starts_with("aur/") && helper.is_none() {
+        return false;
+    }
+    let official = !name.starts_with("aur/") && Command::new("pacman").args(["-Sp", "--print-format", "%n", "--", name])
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .status().map(|s| s.success()).unwrap_or(true);
     if official {
         return true;
     }
     match helper {
-        Some(h) => Command::new(h.binary()).args(["-Sai", "--", name]).stdin(Stdio::null()).output()
+        Some(h) => Command::new(h.binary()).args(["-Sai", "--", bare_name(name)]).stdin(Stdio::null()).output()
             .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.starts_with("Name")))
             .unwrap_or(true),
         None => false,
@@ -3147,6 +3164,19 @@ mod output_tests {
         assert!(p[2].starts_with("nope has no update waiting"));
         assert!(p[3].contains("kept back at the same time"));
         assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
+    }
+
+    #[test]
+    fn a_repo_or_aur_prefix_is_kept_for_the_tool_and_dropped_for_nog() {
+        // v1.7.0 (F-11, the KognogOS VM 4 Oct 2026): "neofetch" picked from the AUR
+        // was installed as chaotic-aur's unifetch, which provides neofetch
+        assert_eq!(bare_name("aur/neofetch"), "neofetch");
+        assert_eq!(bare_name("extra/git"), "git");
+        assert_eq!(bare_name("git"), "git");
+        let pk = vec!["aur/neofetch".to_string(), "extra/git".to_string(), "steam".to_string()];
+        let official = |p: &str| !p.starts_with("aur/") && ["neofetch", "git"].contains(&bare_name(p));
+        assert_eq!(needs_the_keyboard(&pk, official), vec!["aur/neofetch".to_string(), "steam".to_string()],
+            "aur/ is always the AUR, even when a repository provides the name");
     }
 
     #[test]
