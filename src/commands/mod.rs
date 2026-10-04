@@ -1810,6 +1810,16 @@ fn run_update(realign: bool) -> UpdateEnd {
     // Step 1 — official repositories (including binary repos like chaotic-aur).
     println!();
     println!("{}nog: Handing off official packages to pacman ...{}", C_BOLD, C_RESET);
+    // v1.6.1 (Javier, 4 Oct 2026, option b): with a named list, pacman still
+    // prints one "ignoring package upgrade" warning per package it skips. Those
+    // lines come from pacman straight to the terminal (v1.5.8 F-8 keeps it that
+    // way, so its question can't overtake its table); nog says so first.
+    if named {
+        let skipped = held.iter().filter(|(u, _, _, _)| u.source == Source::Pacman).count();
+        if let Some(note) = skip_note(skipped) {
+            println!("{}{}{}", C_SUBTEXT, note, C_RESET);
+        }
+    }
     let pac = pacman::update_excluding(&ignore);
     steps.insert(Source::Pacman, StepState::from(&pac));
     if !pac.status.success() {
@@ -2327,6 +2337,17 @@ fn plan_json(
         "ready": ready_rows, "held": held_rows, "unknown": unknown_rows,
         "holds": {"tier1_days": holds.tier1_days, "tier2_days": holds.tier2_days, "tier3_days": holds.tier3_days},
     })
+}
+
+/// v1.6.1: the line before pacman's own list of what it skips (named list only).
+fn skip_note(skipped: usize) -> Option<String> {
+    match skipped {
+        0 => None,
+        1 => Some("nog: pacman will first list the 1 package it is skipping (it is on hold). That's normal; \
+                   only what you named goes in.".to_string()),
+        n => Some(format!("nog: pacman will first list the {} packages it is skipping (they are on hold). \
+                   That's normal; only what you named goes in.", n)),
+    }
 }
 
 /// v1.6.1: why each package you named can't go in now, in plain words with
@@ -3028,6 +3049,16 @@ mod output_tests {
         assert!(p[2].starts_with("nope has no update waiting"));
         assert!(p[3].contains("kept back at the same time"));
         assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
+    }
+
+    #[test]
+    fn a_named_list_says_pacman_will_list_what_it_skips() {
+        // v1.6.1 (Javier, 4 Oct 2026: option b) — the ~70 "ignoring package upgrade" lines explained first
+        assert_eq!(skip_note(0), None, "nothing skipped: no line");
+        assert!(skip_note(1).unwrap().contains("the 1 package it is skipping (it is on hold)"));
+        let n = skip_note(70).unwrap();
+        assert!(n.contains("the 70 packages it is skipping (they are on hold)"));
+        assert!(n.ends_with("only what you named goes in."));
     }
 
     #[test]
