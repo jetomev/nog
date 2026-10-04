@@ -161,16 +161,51 @@ pub fn install(packages: &[String]) {
         None    => pacman::install(packages),
     };
     if !status.success() {
-        stopped_installing(packages, status.code());
+        // v1.6.1 (F-9, #43): a name found nowhere is said plainly, not as "you answered no".
+        let missing: Vec<String> = packages.iter().filter(|p| !exists_anywhere(p, helper)).cloned().collect();
+        if !missing.is_empty() {
+            enotice(C_PEACH, &format!("Not installed: {}", packages.join(" ")), &not_found_lines(&missing, helper.is_some()));
+            end(status.code().unwrap_or(1));
+        }
+        stopped_installing(packages, status.code(), helper.map(|h| h.binary()).unwrap_or("pacman"));
     }
+}
+
+/// v1.6.1 (F-9, #43): is there anything by this name to install? pacman
+/// resolves it the way an install would (groups and provides included), then
+/// the AUR through the helper. Asked only after an install failed.
+fn exists_anywhere(name: &str, helper: Option<crate::aur::Helper>) -> bool {
+    use std::process::{Command, Stdio};
+    let official = Command::new("pacman").args(["-Sp", "--print-format", "%n", "--", name])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(true);
+    if official {
+        return true;
+    }
+    match helper {
+        Some(h) => Command::new(h.binary()).args(["-Sai", "--", name]).stdin(Stdio::null()).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.starts_with("Name")))
+            .unwrap_or(true),
+        None => false,
+    }
+}
+
+/// v1.6.1 (F-9, #43): the words for names found nowhere. Pure.
+fn not_found_lines(missing: &[String], aur: bool) -> Vec<String> {
+    let (what, verb) = if missing.len() == 1 { (missing[0].clone(), "was") } else { (missing.join(", "), "were") };
+    vec![
+        format!("{} {} not found in the repositories{}.", what, verb, if aur { " or the AUR" } else { "" }),
+        format!("Nothing was asked and nothing was changed. Check the spelling: `nog search {}` shows close matches.",
+            missing[0]),
+    ]
 }
 
 /// v1.5.8 (F-6 #38, F-7 #39): the install was declined or failed. pacman's
 /// exit status cannot tell the two apart, so say both.
-fn stopped_installing(what: &[String], code: Option<i32>) -> ! {
+fn stopped_installing(what: &[String], code: Option<i32>, tool: &str) -> ! {
     let mut lines = vec![
-        format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
-            code.unwrap_or(-1)),
+        format!("{} stopped (status {}): you answered no, or it hit a problem shown above.",
+            tool, code.unwrap_or(-1)),
         "Nothing was changed by this install.".to_string(),
     ];
     // F-8: no update before an install any more, so old package lists are a
@@ -311,7 +346,7 @@ fn install_files(files: &[String], tm: &TierManager) {
     notice(C_GREEN, &format!("Installing {}", names.join(" ")), &lines);
     let status = pacman::install_files(files);
     if !status.success() {
-        stopped_installing(&names, status.code());
+        stopped_installing(&names, status.code(), "pacman");
     }
 }
 
@@ -3049,6 +3084,19 @@ mod output_tests {
         assert!(p[2].starts_with("nope has no update waiting"));
         assert!(p[3].contains("kept back at the same time"));
         assert!(named_problems(&only[..1], &["vde2"], &held).is_empty(), "all ready: the run goes on");
+    }
+
+    #[test]
+    fn a_name_found_nowhere_is_said_plainly() {
+        // v1.6.1 (F-9, #43, Javier 3 Oct 2026): "nogforge" wasn't on the AUR, and nog said
+        // "pacman stopped: you answered no" — nobody was asked, and it wasn't pacman.
+        let l = not_found_lines(&["nogforge".to_string()], true);
+        assert_eq!(l[0], "nogforge was not found in the repositories or the AUR.");
+        assert!(l[1].starts_with("Nothing was asked and nothing was changed."));
+        assert!(l[1].contains("`nog search nogforge`"));
+        let l = not_found_lines(&["a".to_string(), "b".to_string()], false);
+        assert_eq!(l[0], "a, b were not found in the repositories.", "no helper: no AUR named");
+        assert!(!l.join(" ").contains("answered no"));
     }
 
     #[test]
