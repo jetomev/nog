@@ -156,10 +156,14 @@ pub fn install(packages: &[String]) {
     // pacman under the hood. This keeps the code simple and avoids a brittle
     // "is this package in a sync DB?" pre-check that would have to stay in
     // sync with pacman's own resolution order.
+    let label = format!("Installing {}", packages.join(" "));
+    crate::events::steps(&[("install", label.clone())]);
+    crate::events::start("install", &label);
     let status = match helper {
         Some(h) => aur::install(h, packages),
         None    => pacman::install(packages),
     };
+    crate::events::finished("install", &label, status.success(), "");
     if !status.success() {
         // v1.6.1 (F-9, #43): a name found nowhere is said plainly, not as "you answered no".
         let missing: Vec<String> = packages.iter().filter(|p| !exists_anywhere(p, helper)).cloned().collect();
@@ -344,7 +348,11 @@ fn install_files(files: &[String], tm: &TierManager) {
         }
     }
     notice(C_GREEN, &format!("Installing {}", names.join(" ")), &lines);
+    let label = format!("Installing {}", names.join(" "));
+    crate::events::steps(&[("install", label.clone())]);
+    crate::events::start("install", &label);
     let status = pacman::install_files(files);
+    crate::events::finished("install", &label, status.success(), "");
     if !status.success() {
         stopped_installing(&names, status.code(), "pacman");
     }
@@ -354,7 +362,11 @@ pub fn remove(packages: &[String]) {
     notice(C_GREEN, &format!("Removing {}", packages.join(" ")), &[
         "With what only it needed; pacman shows the list and asks first.".to_string(),
     ]);
+    let label = format!("Removing {}", packages.join(" "));
+    crate::events::steps(&[("remove", label.clone())]);
+    crate::events::start("remove", &label);
     let status = pacman::remove(packages);
+    crate::events::finished("remove", &label, status.success(), "");
     if !status.success() {
         enotice(C_PEACH, &format!("Not removed: {}", packages.join(" ")), &[
             format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
@@ -465,6 +477,8 @@ pub fn clean() {
         end(1);
     }
 
+    crate::events::steps(&[("clean", "Removing old downloads".to_string())]);
+    crate::events::ask("Remove them? [y/N]");
     println!();
     print!("nog: Remove them? [y/N] ");
     let _ = io::stdout().flush();
@@ -476,6 +490,7 @@ pub fn clean() {
         return;
     }
 
+    crate::events::start("clean", "Removing old downloads");
     let mut failed = false;
     for batch in to_remove.chunks(400) {
         let status = crate::machine::sudo().args(["rm", "-f", "--"]).args(batch).status();
@@ -495,6 +510,8 @@ pub fn clean() {
     }
     println!("nog: Cache is now {} (was {}): {} freed.",
         human_size(after), human_size(total_bytes), human_size(total_bytes.saturating_sub(after)));
+    crate::events::finished("clean", "Removing old downloads", !failed,
+        &format!("{} freed", human_size(total_bytes.saturating_sub(after))));
     if failed {
         end(1);
     }
@@ -917,6 +934,7 @@ pub fn end(code: i32) -> ! {
     if ENDING.swap(true, std::sync::atomic::Ordering::SeqCst) {
         std::process::exit(code);
     }
+    crate::events::end(code);
     let frame = RUN.lock().ok().and_then(|mut r| r.take());
     let Some(mut f) = frame else {
         std::process::exit(code);
@@ -1028,6 +1046,7 @@ fn ensure_keystore() -> bool {
 
 /// The update itself.
 fn run_update(realign: bool) -> UpdateEnd {
+    crate::events::start("check", "Checking for updates");
     let cfg = load_config();
     let helper = resolve_helper(&cfg);
     guard_not_sudo_with_helper(helper);
@@ -1637,6 +1656,8 @@ fn run_update(realign: bool) -> UpdateEnd {
             }
             println!();
             println!("nog: Nothing was installed or changed.");
+            crate::events::finished("check", "Checking for updates", false,
+                &format!("{} of the packages you named can't go in now", problems.len()));
             return UpdateEnd::Failed(1);
         }
         let src = |upd: &PendingUpdate| label_for(&labels, upd);
@@ -1743,6 +1764,7 @@ fn run_update(realign: bool) -> UpdateEnd {
     if ready.is_empty() && ignore.len() == pending.len() {
         println!();
         println!("nog: Nothing to install — every pending update is held.");
+        crate::events::finished("check", "Checking for updates", true, "nothing to install: every update is on hold");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::AllHeld), "");
         return UpdateEnd::Done;
@@ -1789,6 +1811,34 @@ fn run_update(realign: bool) -> UpdateEnd {
         }
     }
 
+    // v1.7.0: the plan is ready — say so, and which steps will run
+    {
+        let mut planned: Vec<(&str, String)> = Vec::new();
+        let n_ready = ready.len() + unknown.iter().filter(|(u, _)| !ignore.contains(&u.name)).count();
+        if ready.iter().any(|(u, _, _)| u.source == Source::Pacman && KEYRINGS.contains(&u.name.as_str())) {
+            planned.push(("keys", "New package keys".to_string()));
+        }
+        planned.push(("pacman", "Official packages".to_string()));
+        let rn: Vec<String> = ready.iter().map(|(u, _, _)| u.name.clone()).collect();
+        let un: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
+        if let Some(h) = helper {
+            let a = aur::apply_list(&aur_names, &rn, &un, &ignore).len();
+            if a > 0 {
+                planned.push(("aur", format!("AUR packages ({}, built by {})", a, h)));
+            }
+        }
+        if !flatpak_names.is_empty() && !flatpak::apply_list(&flatpak_names, &rn, &un, &ignore).is_empty() {
+            planned.push(("flatpak", "Flatpak apps".to_string()));
+        }
+        if !snap_names.is_empty() && !snap::apply_list(&snap_names, &rn, &un, &ignore).is_empty() {
+            planned.push(("snap", "Snaps".to_string()));
+        }
+        crate::events::steps(&std::iter::once(("check", "Checking for updates".to_string()))
+            .chain(planned.into_iter()).collect::<Vec<_>>());
+        crate::events::finished("check", "Checking for updates", true,
+            &format!("{} to install, {} on hold", n_ready, held.len()));
+    }
+
     // First review gate. Each source's own tool presents its transaction and
     // asks again — deliberate layers, so an expert can still catch and cancel
     // at the point where the detail is in front of them. One prompt per tool
@@ -1829,7 +1879,9 @@ fn run_update(realign: bool) -> UpdateEnd {
     if !keyrings.is_empty() {
         println!();
         println!("{}nog: Installing the new keys first ({}) ...{}", C_BOLD, keyrings.join(", "), C_RESET);
+        crate::events::start("keys", "New package keys");
         let k = pacman::install_keyrings(&keyrings);
+        crate::events::finished("keys", "New package keys", k.status.success(), &keyrings.join(", "));
         if !k.status.success() {
             eprintln!();
             eprintln!("{}nog: the keys did not install (status {}) — stopping.{}",
@@ -1855,7 +1907,10 @@ fn run_update(realign: bool) -> UpdateEnd {
             println!("{}{}{}", C_SUBTEXT, note, C_RESET);
         }
     }
+    crate::events::start("pacman", "Official packages");
     let pac = pacman::update_excluding(&ignore);
+    crate::events::finished("pacman", "Official packages", pac.status.success(),
+        &if pac.status.success() { String::new() } else { format!("pacman stopped (status {})", pac.status.code().unwrap_or(-1)) });
     steps.insert(Source::Pacman, StepState::from(&pac));
     if !pac.status.success() {
         let code = pac.status.code().unwrap_or(-1);
@@ -1883,7 +1938,10 @@ fn run_update(realign: bool) -> UpdateEnd {
                 C_BOLD, aur_apply.len(), h, C_RESET);
             println!("{}     ({} shows its own build and transaction below){}",
                 C_SUBTEXT, h, C_RESET);
+            let label = format!("AUR packages ({}, built by {})", aur_apply.len(), h);
+            crate::events::start("aur", &label);
             let aur_run = aur::upgrade_cleared(h, &aur_apply, &ignore);
+            crate::events::finished("aur", &label, aur_run.status.success(), "");
             steps.insert(Source::Aur, StepState::from(&aur_run));
             if !aur_run.status.success() {
                 let code = aur_run.status.code().unwrap_or(-1);
@@ -1907,7 +1965,9 @@ fn run_update(realign: bool) -> UpdateEnd {
             println!();
             println!("{}nog: Handing off {} app(s) to flatpak ...{}", C_BOLD, fp_apply.len(), C_RESET);
             println!("{}     (flatpak shows its own transaction below){}", C_SUBTEXT, C_RESET);
+            crate::events::start("flatpak", "Flatpak apps");
             let fp_run = flatpak::update(&fp_apply);
+            crate::events::finished("flatpak", "Flatpak apps", fp_run.status.success(), "");
             steps.insert(Source::Flatpak, StepState::from(&fp_run));
             if !fp_run.status.success() {
                 let code = fp_run.status.code().unwrap_or(-1);
@@ -1930,7 +1990,9 @@ fn run_update(realign: bool) -> UpdateEnd {
             println!("{}nog: Handing off {} snap(s) to snapd ...{}", C_BOLD, sn_apply.len(), C_RESET);
             println!("{}     (snap refresh needs root — sudo may prompt; snap shows its own progress){}",
                 C_SUBTEXT, C_RESET);
+            crate::events::start("snap", "Snaps");
             let sn_run = snap::refresh(&sn_apply);
+            crate::events::finished("snap", "Snaps", sn_run.status.success(), "");
             steps.insert(Source::Snap, StepState::from(&sn_run));
             if !sn_run.status.success() {
                 let code = sn_run.status.code().unwrap_or(-1);
@@ -2134,6 +2196,7 @@ fn now_date_time() -> (String, String) {
 /// stdin (EOF) declines rather than auto-installing.
 fn prompt_proceed() -> bool {
     use std::io::{self, Write};
+    crate::events::ask("Begin the handoff? [Y/n]");
     print!("nog: Begin the handoff? [Y/n] ");
     if io::stdout().flush().is_err() {
         return false;

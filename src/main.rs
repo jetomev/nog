@@ -4,6 +4,7 @@ mod handoff;
 mod aur;
 mod cache;
 mod commands;
+mod events;
 mod config;
 mod holds;
 mod elf;
