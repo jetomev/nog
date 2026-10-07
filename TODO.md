@@ -90,6 +90,7 @@ One change to the log file fixes all four, so they ship together.
 
 ### 7 · Later
 - [ ] **#32 · found 2026-10-01 (forgeKit session):** `nog install` has no way to answer the AUR helper's "Proceed?" for **repository** packages when run from a script (a piped `y` was needed for python-pyte). Proposal: `nog install --yes`, passed through to the helper; AUR builds keep refusing without a person (that refusal worked correctly the same day)
+  - **Seen again 2026-10-07 (nog 1.8.0):** three runs from Claude's terminal-less shell (`install` ×2 of repository packages, `remove monique`) stopped at pacman's / yay's [Y/n], reported as "you answered no"; same line in a terminal worked. `remove` has the same gap; `nog install --help` shows no options. #48 filed then closed as a duplicate of #32
 - [ ] **#5 · priority-4** · A rare mismatch: a newer app built against a newer system library than the one nog is still holding back.
 
 ---
