@@ -21,6 +21,9 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **v1.6.0 for nogForge — built 3 Oct (09:00–09:25), as 1.6.0-rc.1, NOT released, NOT committed (GPG passphrase expired; commit when Javier unlocks it)**: `nog list --json` (protection in words: Tier 1 / base set / needed by), `nog search --json` (repos + AUR via helper), `nog update --json` (same code as a real update, stops before any question; stdout = one JSON document, the rest to stderr; no banner, no run-history line), `--keep a,b` (held before the coupling rules — checked: ldb takes libwbclient + smbclient with it), `NOG_ASKPASS=1` → every sudo gets -A, helper gets `--sudoflags -A`. Tests 229 → 234, warnings 6 → 6. `scripts/make-rc-package.sh` → `dist-rc/nog-1.6.0rc1-1-x86_64.pkg.tar.zst` (package check ran every test). Next: Javier's run (nogForge matrix §6.1), then the release: README + man page for the new options, version 1.6.0 everywhere, CHANGELOG, tag, GitHub, AUR, close/advance #7.
 
 - [ ] **To watch (3 Oct, not a bug yet):** #27's fix works — linux-lts (first seen Jul 28) and mkinitcpio (Aug 12) are past their 30-day window and wait only on the 7-day safety rule (newest builds Oct 1 → ready Oct 8). But if new builds keep arriving less than 7 days apart, the safety wait could slip again (a small cousin of #27). Check after Oct 8 whether both went in at the next update.
+## At the next release
+- [ ] **The AUR description, at the next release** (Javier, 2026-10-09): the AUR `pkgdesc` (and `.SRCINFO`) gets the same "where it runs" words as the README, GitHub About and kognogos.org — distribution · desktop · plain text console. Not pushed on its own: AUR pushes stay one per proven version.
+
 ## Done — v1.5.0 released (29 Sep 2026)
 v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through its own `nog install <file>`. Tags v1.4.2 and v1.4.3 ride along. Issues #14, #16, #17, #19–#22 closed. 172 tests, 6 warnings.
 

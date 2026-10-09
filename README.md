@@ -2,6 +2,8 @@
 
 > A tier-aware package manager for Arch Linux — pacman with a safety net, written in Rust.
 
+> 🖥 **Where it runs:** **Arch Linux and Arch-based distributions** (it drives pacman) · **no desktop needed**: any desktop, or none · **works on a plain text console** (a tty).
+
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 ![Platform: Linux](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
@@ -763,7 +765,7 @@ Tests: 237 → 240. Warnings unchanged at 6.
 
 ## Related Projects
 
-- **[KognogOS](https://github.com/jetomev/KognogOS)** — the distribution nog was built for. Arch-based, KDE Plasma on Wayland, tier-aware by default.
+- **[KognogOS](https://github.com/jetomev/KognogOS)** — the distribution nog was built for. Arch-based, tier-aware by default; its desktop is hypeForge, on Sway.
 - **[forgekit](https://github.com/jetomev/forgekit)** — the shared foundation every Forge app is built on.
 - **[nogForge](https://github.com/jetomev/nogforge)** — packages, the KognogOS way: nog's decisions in a terminal app (installed, install, updates with choices, history). Beta.
 - **[grubForge](https://github.com/jetomev/grubforge)** — GRUB bootloader manager.
