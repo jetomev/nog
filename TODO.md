@@ -41,6 +41,7 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 
 ## Next up — in this order
 
+- [ ] **F-13 #49 (found 2026-10-08):** `nog remove` (-Rs) quietly takes along a dependency another installed app uses *optionally* (Elisa → `vlc-plugin-ffmpeg`, VLC would have lost most formats); no way to keep it. Fix: warn in plain words + ask Keep, and a `nog keep <pkg>` command (= `pacman -D --asexplicit`); test in the failing direction. Follow-up in nogForge #27
 - [x] (1.8.0) AUR recipe: `options=('!debug')` — makepkg tries a debug package for nog and prints "No debugging symbols" (seen in Javier's yay build of 1.7.0, 4 Oct); harmless noise
 
 ### 00 · Found in the KognogOS VM, 30 Sep — v1.5.6, released for the VM test
