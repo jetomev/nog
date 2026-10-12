@@ -141,8 +141,13 @@ The driver modules themselves don't need grouping. Once the kernel and headers a
 
 ## Requirements
 
+**Everything it needs** to build, run and test, with why, is in [docs/PACKAGING.md](docs/PACKAGING.md), measured from the code (the Forge Suite's [dependency audit](https://github.com/jetomev/forge-suite/issues/91), 2026-10-11).
+
 - Arch Linux, or an Arch-based distribution
 - `pacman`, `pacman-contrib` and `fakeroot` (pacman-contrib's update check needs it)
+- `sudo`: every change nog makes runs through it (with `-A` for a password window)
+- `zstd`: nog links the system's zstd library (pacman brings it on every Arch)
+- `flatpak`, `snapd` — optional: nog updates and installs them when they're there, and leaves them out when they're not
 - `yay` or `paru` — optional, adds AUR support. nog works fine without one; you just get official repos only.
 - A Rust toolchain, only if building from source
 
