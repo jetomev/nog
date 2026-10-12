@@ -23,7 +23,7 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [ ] **To watch (3 Oct, not a bug yet):** #27's fix works — linux-lts (first seen Jul 28) and mkinitcpio (Aug 12) are past their 30-day window and wait only on the 7-day safety rule (newest builds Oct 1 → ready Oct 8). But if new builds keep arriving less than 7 days apart, the safety wait could slip again (a small cousin of #27). Check after Oct 8 whether both went in at the next update.
 ## 2026-10-11 · What it needs, measured
 - [x] **What it needs, measured** (2026-10-11, forge-suite#91): `docs/PACKAGING.md`; the recipe lacked **sudo** and **zstd** (+ optional flatpak, snapd) — F-14 #50 → **1.8.0-2** built clean in a clean Arch system, tests included
-- [ ] AUR push of 1.8.0-2 after Javier's local test
+- [x] AUR 1.8.0-2 (`8d7e5af`) after Javier's local test; #50 closed
 
 ## At the next release
 - [ ] **The AUR description, at the next release** (Javier, 2026-10-09): the AUR `pkgdesc` (and `.SRCINFO`) gets the same "where it runs" words as the README, GitHub About and kognogos.org — distribution · desktop · plain text console. Not pushed on its own: AUR pushes stay one per proven version.
