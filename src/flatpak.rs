@@ -204,6 +204,158 @@ pub fn to_pending(u: &FlatpakUpdate, installed: &HashMap<String, String>) -> Pen
     }
 }
 
+// ── v1.9.0 (C3): the install chain ───────────────────────────────────────────
+
+/// One app a remote offers, from `flatpak search`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatpakApp {
+    pub app_id: String,
+    pub version: String,
+    /// The human name ("GIMP"), as the remote's metadata gives it.
+    pub name: String,
+    pub remote: String,
+}
+
+/// Ask every configured remote what it has for `query`. `flatpak search` is a
+/// fuzzy search over names and descriptions, so the caller picks the exact
+/// match with `find`. "No matches found" is a plain line on stdout with exit
+/// 0; a non-zero exit is a real failure (no remotes, no network), bubbled up
+/// so the chain says "could not check" instead of "not found".
+pub fn search(query: &str) -> Result<Vec<FlatpakApp>, String> {
+    let output = Command::new("flatpak")
+        .args(["search", "--columns=application,version,name,remotes", "--", query])
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to launch flatpak: {}", e))?;
+    if !output.status.success() {
+        let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if msg.is_empty() {
+            format!("flatpak search exited with status {}", output.status)
+        } else {
+            msg
+        });
+    }
+    Ok(parse_search(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Parse `--columns=application,version,name,remotes` (tab-separated). Pure.
+pub fn parse_search(stdout: &str) -> Vec<FlatpakApp> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with("No matches found") {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let app_id = match parts.next() {
+            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+            _ => continue,
+        };
+        let version = parts.next().unwrap_or("").trim().to_string();
+        let name = parts.next().unwrap_or("").trim().to_string();
+        // Several remotes are listed comma-separated; the first configured wins.
+        let remote = parts.next().unwrap_or("flathub").split(',').next().unwrap_or("flathub").trim().to_string();
+        out.push(FlatpakApp { app_id, version, name, remote });
+    }
+    out
+}
+
+/// What the search found for the name typed.
+#[derive(Debug, PartialEq)]
+pub enum Found {
+    One(FlatpakApp),
+    /// More than one app answers to the name; the person names the app ID.
+    Several(Vec<FlatpakApp>),
+    None,
+}
+
+/// Pure. The exact match for a typed name, in this order: the full app ID
+/// (`org.gimp.GIMP`), the ID's last segment (`gimp` → `org.gimp.GIMP`), the
+/// human name (`spotify` → `com.spotify.Client`, named "Spotify"). Case does
+/// not matter. A fuzzy hit (`gimp` also lists `org.gimp.GIMP.Manual`) is never
+/// taken: an install goes only to a package that answers to the name.
+pub fn find(typed: &str, apps: &[FlatpakApp]) -> Found {
+    let t = typed.to_lowercase();
+    let pick = |hits: Vec<&FlatpakApp>| -> Option<Found> {
+        let mut ids: Vec<&FlatpakApp> = Vec::new();
+        for h in hits {
+            if !ids.iter().any(|i| i.app_id == h.app_id) { ids.push(h); }
+        }
+        match ids.len() {
+            0 => None,
+            1 => Some(Found::One(ids[0].clone())),
+            _ => Some(Found::Several(ids.into_iter().cloned().collect())),
+        }
+    };
+    let by_id = apps.iter().filter(|a| a.app_id.to_lowercase() == t).collect();
+    if let Some(f) = pick(by_id) { return f; }
+    let by_last = apps.iter()
+        .filter(|a| a.app_id.rsplit('.').next().map(|s| s.to_lowercase()) == Some(t.clone())).collect();
+    if let Some(f) = pick(by_last) { return f; }
+    let by_name = apps.iter().filter(|a| a.name.to_lowercase() == t).collect();
+    if let Some(f) = pick(by_name) { return f; }
+    Found::None
+}
+
+/// Installed apps as (app ID, human name), for `nog remove` to recognise a
+/// flatpak by either.
+pub fn installed_apps() -> Vec<(String, String)> {
+    let output = match Command::new("flatpak")
+        .args(["list", "--app", "--columns=application,name"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&output.stdout).lines().filter_map(|l| {
+        let mut parts = l.split('\t');
+        let id = parts.next()?.trim();
+        if id.is_empty() { return None; }
+        Some((id.to_string(), parts.next().unwrap_or("").trim().to_string()))
+    }).collect()
+}
+
+/// Pure. The installed app a typed name refers to: the ID, its last segment,
+/// or the human name, case ignored.
+pub fn installed_match(typed: &str, apps: &[(String, String)]) -> Option<String> {
+    let t = typed.to_lowercase();
+    apps.iter().find(|(id, _)| id.to_lowercase() == t)
+        .or_else(|| apps.iter().find(|(id, _)| id.rsplit('.').next().map(|s| s.to_lowercase()) == Some(t.clone())))
+        .or_else(|| apps.iter().find(|(_, name)| name.to_lowercase() == t))
+        .map(|(id, _)| id.clone())
+}
+
+/// Install apps from one remote. flatpak shows its own transaction (the app,
+/// the runtimes it needs, the sizes) and asks before anything changes; with
+/// `yes` it is answered for the person (`nog install --yes`). Its output
+/// stays on the screen, like pacman's.
+pub fn install(remote: &str, app_ids: &[String], yes: bool) -> crate::handoff::Handoff {
+    let mut cmd = Command::new("flatpak");
+    cmd.arg("install");
+    if yes { cmd.arg("-y"); }
+    cmd.arg(remote).args(app_ids);
+    crate::handoff::run_on_screen(&mut cmd, "flatpak")
+}
+
+/// Remove an app. flatpak lists what goes and asks; `yes` answers it.
+pub fn uninstall(app_ids: &[String], yes: bool) -> crate::handoff::Handoff {
+    let mut cmd = Command::new("flatpak");
+    cmd.arg("uninstall");
+    if yes { cmd.arg("-y"); }
+    cmd.args(app_ids);
+    crate::handoff::run_on_screen(&mut cmd, "flatpak")
+}
+
+/// Does flatpak have anywhere to look? Arch's package ships Flathub, but a
+/// hand-set-up flatpak may have no remote at all, and `search` then finds
+/// nothing without saying why.
+pub fn has_remotes() -> bool {
+    Command::new("flatpak").args(["remotes", "--columns=name"]).output()
+        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +426,67 @@ mod tests {
         let p = to_pending(&u, &HashMap::new());
         assert_eq!(p.old_version, "?");
         assert_eq!(p.new_version, "?");
+    }
+
+    // ── v1.9.0 (C3): the install chain ─────────────────────────────────────
+
+    fn app(id: &str, name: &str) -> FlatpakApp {
+        FlatpakApp { app_id: id.into(), version: "1".into(), name: name.into(), remote: "flathub".into() }
+    }
+
+    #[test]
+    fn search_output_is_parsed_and_no_matches_is_empty() {
+        let out = "org.gimp.GIMP\t3.2.6\tGNU Image Manipulation Program\tflathub\n\
+                   com.spotify.Client\t\tSpotify\tflathub,fedora\n";
+        let got = parse_search(out);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].app_id, "org.gimp.GIMP");
+        assert_eq!(got[0].version, "3.2.6");
+        assert_eq!(got[1].name, "Spotify");
+        assert_eq!(got[1].remote, "flathub");
+        assert!(parse_search("No matches found\n").is_empty());
+    }
+
+    #[test]
+    fn a_typed_name_finds_the_app_that_answers_to_it_and_nothing_fuzzier() {
+        // `flatpak search gimp` lists the manual and plugins too; only GIMP answers to "gimp".
+        let apps = vec![
+            app("org.gimp.GIMP.Manual", "GIMP User Manual"),
+            app("org.gimp.GIMP", "GNU Image Manipulation Program"),
+            app("org.gimp.GIMP.Plugin.Lensfun", "GimpLensfun"),
+        ];
+        assert_eq!(find("gimp", &apps), Found::One(apps[1].clone()));
+        assert_eq!(find("org.gimp.GIMP", &apps), Found::One(apps[1].clone()));
+        assert_eq!(find("GIMP User Manual", &apps), Found::One(apps[0].clone()));
+        assert_eq!(find("lensfun", &apps), Found::One(apps[2].clone()), "the ID's last segment answers");
+        assert_eq!(find("plugin", &apps), Found::None, "a middle segment does not");
+        assert_eq!(find("image", &apps), Found::None, "a word of the description does not");
+    }
+
+    #[test]
+    fn the_human_name_counts_when_the_id_does_not() {
+        let apps = vec![app("com.spotify.Client", "Spotify"), app("com.termius.Termius", "Termius")];
+        assert_eq!(find("spotify", &apps), Found::One(apps[0].clone()));
+        assert_eq!(find("termius", &apps), Found::One(apps[1].clone()));
+    }
+
+    #[test]
+    fn two_apps_answering_to_one_name_are_both_shown_not_guessed() {
+        let apps = vec![app("org.one.Editor", "Editor"), app("org.two.Editor", "Editor")];
+        match find("editor", &apps) {
+            Found::Several(v) => assert_eq!(v.len(), 2),
+            other => panic!("expected Several, got {:?}", other),
+        }
+        // The same app listed by two remotes is one app.
+        let twice = vec![app("org.gimp.GIMP", "GIMP"), app("org.gimp.GIMP", "GIMP")];
+        assert_eq!(find("gimp", &twice), Found::One(twice[0].clone()));
+    }
+
+    #[test]
+    fn an_installed_flatpak_is_recognised_by_id_segment_or_name() {
+        let apps = vec![("com.github.tchx84.Flatseal".to_string(), "Flatseal".to_string())];
+        assert_eq!(installed_match("flatseal", &apps).as_deref(), Some("com.github.tchx84.Flatseal"));
+        assert_eq!(installed_match("com.github.tchx84.Flatseal", &apps).as_deref(), Some("com.github.tchx84.Flatseal"));
+        assert_eq!(installed_match("gimp", &apps), None);
     }
 }

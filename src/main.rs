@@ -13,6 +13,7 @@ mod machine;
 mod pacman;
 mod reboot;
 mod record;
+mod removal;
 mod runlog;
 mod sightings;
 mod sources;
@@ -43,18 +44,41 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Install packages (tier classification shown; installs are never gated)
+    /// Install packages: the repositories, then the AUR, then Flatpak, then Snap
     ///
-    /// Routes through the configured AUR helper if one is detected, so
-    /// AUR-only packages work transparently. Tier protection applies to
+    /// Shows where each package comes from (and its tier) before anything is
+    /// downloaded or built, and says who takes over. `aur/x`, `extra/x`,
+    /// `flatpak/x` and `snap/x` name that source only. A package file
+    /// (`*.pkg.tar.*`) is installed as it is. Tier protection applies to
     /// future updates, not to installs — explicit user commands execute
     /// user intent.
     Install {
         #[arg(required = true)]
         packages: Vec<String>,
+        /// Answer yes to the install's question for you — repository packages, package
+        /// files, Flatpak and Snap. Never the AUR: its build review needs a person (v1.9.0)
+        #[arg(long)]
+        yes: bool,
     },
-    /// Remove packages (works for both official and AUR-installed)
+    /// Remove packages, Flatpak apps and snaps; says what else goes and who still uses it
+    ///
+    /// Before pacman removes anything, nog lists each package that would go
+    /// along but another installed app still uses optionally, and offers to
+    /// keep it (F-13). A Flatpak or a snap nog installed is removed by its own
+    /// tool.
     Remove {
+        #[arg(required = true)]
+        packages: Vec<String>,
+        /// Answer yes to the removal's question for you; what another app still uses is kept (v1.9.0)
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Mark packages as installed on purpose, so removing something else never takes them along
+    ///
+    /// pacman's own "install reason" (`pacman -D --asexplicit`), without
+    /// leaving nog for it. `nog remove` offers the same for each package it
+    /// would take along that another app still uses (v1.9.0, F-13).
+    Keep {
         #[arg(required = true)]
         packages: Vec<String>,
     },
@@ -181,8 +205,9 @@ fn main() {
         commands::begin(&label.join(" "));
     }
     match cli.command {
-        Commands::Install { packages } => commands::install(&packages),
-        Commands::Remove { packages } => commands::remove(&packages),
+        Commands::Install { packages, yes } => commands::install(&packages, yes),
+        Commands::Remove { packages, yes } => commands::remove(&packages, yes),
+        Commands::Keep { packages } => commands::keep(&packages),
         Commands::Update { packages, realign, json, keep, promote } => {
             machine::set_only(packages);
             machine::set_promote(promote);

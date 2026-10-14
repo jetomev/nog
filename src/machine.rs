@@ -150,6 +150,9 @@ pub struct Installed {
     pub depends: Vec<String>,
     pub provides: Vec<String>,
     pub groups: Vec<String>,
+    /// v1.9.0 (F-13, #49): `%OPTDEPENDS%` as (name, why) — what this package
+    /// uses when it is there, and what for ("vlc-plugin-ffmpeg: ffmpeg plugin").
+    pub optdepends: Vec<(String, String)>,
 }
 
 fn strip_dep(d: &str) -> &str {
@@ -178,6 +181,10 @@ pub fn parse_desc(text: &str) -> Installed {
             "%DEPENDS%" => p.depends.push(strip_dep(line).to_string()),
             "%PROVIDES%" => p.provides.push(strip_dep(line).to_string()),
             "%GROUPS%" => p.groups.push(line.to_string()),
+            "%OPTDEPENDS%" => p.optdepends.push((
+                strip_dep(line).to_string(),
+                line.split_once(':').map(|(_, why)| why.trim().to_string()).unwrap_or_default(),
+            )),
             _ => {}
         }
     }

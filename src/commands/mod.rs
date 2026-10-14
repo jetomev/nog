@@ -86,7 +86,7 @@ fn guard_not_sudo_with_helper(helper: Option<Helper>) {
     end(1);
 }
 
-pub fn install(packages: &[String]) {
+pub fn install(packages: &[String], yes: bool) {
     // Explicit user action — never gate or block. Just report tier classification
     // for transparency, then hand off. Tier protection lives in the passive
     // `nog update` path, not at install time.
@@ -115,7 +115,11 @@ pub fn install(packages: &[String]) {
         }
     };
     if let Some(files) = files {
-        install_files(files, &tm);
+        if !yes && !at_the_keyboard() {
+            enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &nobody_to_answer_lines("install"));
+            end(1);
+        }
+        install_files(files, &tm, yes);
         return;
     }
 
@@ -127,6 +131,18 @@ pub fn install(packages: &[String]) {
     if helper.is_none() {
         if let Some(p) = packages.iter().find(|p| p.starts_with("aur/")) {
             eprintln!("nog: {} is from the AUR, and no AUR helper is set up (yay or paru).", bare_name(p));
+            end(1);
+        }
+    }
+    // v1.9.0 (C3): `flatpak/<app>` and `snap/<name>` name that source only, like `aur/`.
+    let state = sources::load(sources::DEFAULT_PATH);
+    for p in packages {
+        if p.starts_with("flatpak/") && !state.flatpak {
+            eprintln!("nog: {} is a Flatpak, and Flatpak is DEACTIVATED. `nog activate flatpak` re-enables.", bare_name(p));
+            end(1);
+        }
+        if p.starts_with("snap/") && !state.snap {
+            eprintln!("nog: {} is a Snap, and Snap is DEACTIVATED. `nog activate snap` re-enables.", bare_name(p));
             end(1);
         }
     }
@@ -145,70 +161,434 @@ pub fn install(packages: &[String]) {
         Some(h) => aur::versions_for(h, &unresolved),
         None => HashMap::new(),
     };
-    let sources: Vec<(String, InstallSource)> = packages.iter().map(|p| {
+    let mut sources: Vec<(String, InstallSource)> = packages.iter().map(|p| {
         (p.clone(), resolve_install(p, official, &|n: &str| aur_versions.get(n).cloned(), &pacman_resolves))
     }).collect();
-    let missing: Vec<String> = sources.iter().filter(|(_, s)| matches!(s, InstallSource::Nowhere))
-        .map(|(p, _)| bare_name(p).to_string()).collect();
+
+    // v1.9.0 (C3, the rest of the chain): what the repositories and the AUR do
+    // not have is looked for in Flatpak, then Snap — the order locked in
+    // docs/v2-design.md. A backend that is not set up is offered, once, to a
+    // person at the keyboard; never installed unasked. `flatpak/x` and
+    // `snap/x` look in that source only.
+    let mut chain = Chain::new(&state, helper, yes);
+    for (asked, src) in sources.iter_mut() {
+        let only_flatpak = asked.starts_with("flatpak/");
+        let only_snap = asked.starts_with("snap/");
+        if !(only_flatpak || only_snap || (matches!(src, InstallSource::Nowhere) && !asked.contains('/'))) {
+            continue;
+        }
+        let name = bare_name(asked);
+        if !only_snap {
+            match chain.flatpak(name) {
+                ChainAnswer::Found(s) => { *src = s; continue; }
+                ChainAnswer::Ambiguous(apps) => {
+                    enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &ambiguous_flatpak_lines(name, &apps));
+                    end(1);
+                }
+                ChainAnswer::NotFound => {}
+            }
+        }
+        if !only_flatpak {
+            if let ChainAnswer::Found(s) = chain.snap(name) {
+                *src = s;
+            }
+        }
+    }
+    let missing: Vec<&String> = sources.iter().filter(|(_, s)| matches!(s, InstallSource::Nowhere))
+        .map(|(p, _)| p).collect();
     if !missing.is_empty() {
-        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &not_found_lines(&missing, helper.is_some()));
+        // A `flatpak/` or `snap/` name was looked for in that source only, so
+        // the notice names only it; a plain name names the whole chain.
+        let looked: Vec<&str> = if missing.iter().all(|p| p.starts_with("flatpak/")) { vec!["Flatpak"] }
+            else if missing.iter().all(|p| p.starts_with("snap/")) { vec!["Snap"] }
+            else { chain.looked_in(helper.is_some()) };
+        let missing: Vec<String> = missing.iter().map(|p| bare_name(p).to_string()).collect();
+        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")),
+            &not_found_lines(&missing, &looked, &chain.skipped));
         end(1);
     }
     let any_aur = sources.iter().any(|(_, s)| matches!(s, InstallSource::Aur { .. }));
+    let any_snap = sources.iter().any(|(_, s)| matches!(s, InstallSource::Snap { .. }));
     let helper_name = helper.map(|h| h.binary()).unwrap_or("pacman");
     notice(C_GREEN, &format!("Installing {}", packages.iter().map(|p| bare_name(p)).collect::<Vec<_>>().join(" ")), &[
         "Where each comes from, before anything is downloaded or built:".to_string()]);
     print!("{}", format_install_table(&install_rows(&sources, &tm, helper_name)));
     println!();
 
+    // v1.9.0 (#32): `--yes` answers the install's question for you — for
+    // repository packages, Flatpak and Snap. Never for the AUR: the helper
+    // stops to let you review each build recipe, and that review is the one
+    // safety the AUR has. A script that wants an AUR build runs in a terminal.
+    if yes && any_aur {
+        let aur: Vec<String> = sources.iter().filter(|(_, s)| matches!(s, InstallSource::Aur { .. }))
+            .map(|(p, _)| bare_name(p).to_string()).collect();
+        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &[
+            format!("--yes does not answer the AUR, and {} would be built from it.", aur.join(", ")),
+            format!("{} stops to let you review each build recipe; that review is the AUR's one safety,", helper_name),
+            format!("so nog never answers it for you. Run this in a terminal: nog install {}", packages.join(" ")),
+        ]);
+        end(1);
+    }
     // v1.5.4 (#26): the AUR helper stops to let you review each build recipe.
     // With nobody at the keyboard it read end-of-input in its menu and died
     // there, and the reason was buried in its output. Answering for you would
     // skip the one review the AUR offers, so nog refuses up front instead.
-    if helper.is_some() {
-        use std::io::IsTerminal;
-        if !std::io::stdin().is_terminal() {
-            let official = sync_db::load_packages();
-            let aur = needs_the_keyboard(packages, |p| !p.starts_with("aur/") && official.contains_key(bare_name(p)));
-            if !aur.is_empty() {
-                eprintln!("nog: {} not in the official repositories, so it would be built from the AUR.",
-                    aur.join(", "));
-                eprintln!("     The AUR helper stops to let you review each build recipe, and nothing");
-                eprintln!("     is at the keyboard to answer. Run this in a terminal: nog install {}",
-                    packages.join(" "));
-                end(1);
-            }
-        }
+    if any_aur && !at_the_keyboard() {
+        let aur: Vec<String> = sources.iter().filter(|(_, s)| matches!(s, InstallSource::Aur { .. }))
+            .map(|(p, _)| bare_name(p).to_string()).collect();
+        eprintln!("nog: {} not in the official repositories, so it would be built from the AUR.",
+            aur.join(", "));
+        eprintln!("     The AUR helper stops to let you review each build recipe, and nothing");
+        eprintln!("     is at the keyboard to answer. Run this in a terminal: nog install {}",
+            packages.join(" "));
+        end(1);
+    }
+    // v1.9.0 (#32): the same gap for everything else. pacman and flatpak ask
+    // before changing anything, and with no terminal they read end-of-input
+    // as "no" — reported as if someone had answered. Say the real cause, and
+    // the way out, before anything runs.
+    if !yes && !at_the_keyboard() {
+        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &nobody_to_answer_lines("install"));
+        end(1);
     }
 
-    // v1.8.0 (option A): nog asks only when the AUR is involved
-    if any_aur && !prompt_install() {
+    // v1.8.0 (option A): nog asks only when the AUR is involved — and, since
+    // v1.9.0, Snap: `snap install` never asks, so nog's question is the one
+    // chance to say no.
+    if (any_aur || any_snap) && !yes && !prompt_install() {
         println!("nog: Cancelled — nothing was installed.");
         end(1);
     }
-    println!("{}", handoff_line(any_aur, helper_name));
 
-    // When a helper is configured we always route through it — the helper
-    // checks sync repos before AUR, so official packages still install via
-    // pacman under the hood. The table above only shows where each comes from;
-    // pacman and the helper still make the transaction.
-    let label = format!("Installing {}", packages.join(" "));
-    crate::events::steps(&[("install", label.clone())]);
-    crate::events::start("install", &label);
-    let status = match helper {
-        Some(h) => aur::install(h, packages),
-        None    => pacman::install(packages),
-    };
-    crate::events::finished("install", &label, status.success(), "");
-    if !status.success() {
-        // v1.6.1 (F-9, #43): a name found nowhere is said plainly, not as "you answered no".
-        let missing: Vec<String> = packages.iter().filter(|p| !exists_anywhere(p, helper)).cloned().collect();
-        if !missing.is_empty() {
-            enotice(C_PEACH, &format!("Not installed: {}", packages.join(" ")), &not_found_lines(&missing, helper.is_some()));
-            end(status.code().unwrap_or(1));
-        }
-        stopped_installing(packages, status.code(), helper.map(|h| h.binary()).unwrap_or("pacman"));
+    // v1.9.0 (C3): one transaction per source, in the chain's order: pacman
+    // (with the AUR through the helper), then Flatpak, then Snap. The table
+    // above showed every one; each tool keeps its own voice. A step that
+    // stops ends the run there, and the closing notice says what went in.
+    let pacman_names: Vec<String> = sources.iter()
+        .filter(|(_, s)| matches!(s, InstallSource::Repo { .. } | InstallSource::Group | InstallSource::Aur { .. }))
+        .map(|(p, _)| p.clone()).collect();
+    let flatpaks: Vec<(String, String)> = sources.iter().filter_map(|(_, s)| match s {
+        InstallSource::Flatpak { app } => Some((app.remote.clone(), app.app_id.clone())),
+        _ => None,
+    }).collect();
+    let snaps: Vec<(String, bool)> = sources.iter().filter_map(|(_, s)| match s {
+        InstallSource::Snap { info } => Some((info.name.clone(), info.confinement == "classic")),
+        _ => None,
+    }).collect();
+    let mut steps: Vec<(&str, String)> = Vec::new();
+    if !pacman_names.is_empty() {
+        steps.push(("install", format!("Installing {}", pacman_names.join(" "))));
     }
+    if !flatpaks.is_empty() {
+        steps.push(("flatpak", format!("Installing {} through Flatpak",
+            flatpaks.iter().map(|(_, id)| id.as_str()).collect::<Vec<_>>().join(" "))));
+    }
+    if !snaps.is_empty() {
+        steps.push(("snap", format!("Installing {} through Snap",
+            snaps.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(" "))));
+    }
+    crate::events::steps(&steps);
+    let mut done: Vec<String> = Vec::new();
+
+    if !pacman_names.is_empty() {
+        println!("{}", handoff_line(any_aur, helper_name, yes));
+        let label = steps[0].1.clone();
+        crate::events::start("install", &label);
+        // When a helper is configured we route through it — the helper checks
+        // sync repos before AUR, so official packages still install via pacman
+        // under the hood. With --yes there is nothing for the helper to ask, so
+        // pacman is called directly with the answer. The table above only shows
+        // where each comes from; pacman and the helper still make the transaction.
+        let status = match helper {
+            Some(h) if !yes => aur::install(h, &pacman_names),
+            _ => pacman::install(&pacman_names, yes),
+        };
+        crate::events::finished("install", &label, status.success(), "");
+        if !status.success() {
+            // v1.6.1 (F-9, #43): a name found nowhere is said plainly, not as "you answered no".
+            let missing: Vec<String> = pacman_names.iter().filter(|p| !exists_anywhere(p, helper)).cloned().collect();
+            if !missing.is_empty() {
+                enotice(C_PEACH, &format!("Not installed: {}", packages.join(" ")),
+                    &not_found_lines(&missing, &["the repositories", "the AUR"], &[]));
+                end(status.code().unwrap_or(1));
+            }
+            stopped_installing(&pacman_names, status.code(), if yes { "pacman" } else { helper_name });
+        }
+        done.extend(pacman_names.iter().map(|p| bare_name(p).to_string()));
+    }
+
+    if !flatpaks.is_empty() {
+        println!("{}", flatpak_handoff_line(yes));
+        let label = format!("Installing {} through Flatpak",
+            flatpaks.iter().map(|(_, id)| id.as_str()).collect::<Vec<_>>().join(" "));
+        crate::events::start("flatpak", &label);
+        let mut remotes: Vec<String> = flatpaks.iter().map(|(r, _)| r.clone()).collect();
+        remotes.sort();
+        remotes.dedup();
+        for remote in &remotes {
+            let ids: Vec<String> = flatpaks.iter().filter(|(r, _)| r == remote).map(|(_, id)| id.clone()).collect();
+            let h = flatpak::install(remote, &ids, yes);
+            if !h.status.success() {
+                crate::events::finished("flatpak", &label, false, "");
+                stopped_in_chain(&done, &ids, h.status.code(), "flatpak");
+            }
+            done.extend(ids);
+        }
+        crate::events::finished("flatpak", &label, true, "");
+    }
+
+    if !snaps.is_empty() {
+        println!("nog: Handing off to snap: it installs without asking — nog asked above.");
+        let label = format!("Installing {} through Snap",
+            snaps.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(" "));
+        crate::events::start("snap", &label);
+        for classic in [false, true] {
+            let names: Vec<String> = snaps.iter().filter(|(_, c)| *c == classic).map(|(n, _)| n.clone()).collect();
+            if names.is_empty() { continue; }
+            let h = snap::install(&names, classic);
+            if !h.status.success() {
+                crate::events::finished("snap", &label, false, "");
+                stopped_in_chain(&done, &names, h.status.code(), "snap");
+            }
+            done.extend(names);
+        }
+        crate::events::finished("snap", &label, true, "");
+    }
+}
+
+/// v1.9.0 (C3): the chain after the repositories and the AUR — Flatpak, then
+/// Snap. Remembers what was already looked into, offered or skipped, so a
+/// request with several names asks about a missing backend once and the
+/// not-found notice can say where it did and did not look.
+struct Chain {
+    flatpak_on: bool,
+    snap_on: bool,
+    helper: Option<Helper>,
+    yes: bool,
+    flatpak_ready: Option<bool>,
+    snap_ready: Option<bool>,
+    looked: Vec<&'static str>,
+    /// Plain-words reasons a source was not looked in, for the not-found notice.
+    skipped: Vec<String>,
+}
+
+enum ChainAnswer {
+    Found(InstallSource),
+    Ambiguous(Vec<flatpak::FlatpakApp>),
+    NotFound,
+}
+
+impl Chain {
+    fn new(state: &sources::SourceState, helper: Option<Helper>, yes: bool) -> Chain {
+        Chain { flatpak_on: state.flatpak, snap_on: state.snap, helper, yes,
+                flatpak_ready: None, snap_ready: None, looked: Vec::new(), skipped: Vec::new() }
+    }
+
+    /// Where the chain looked, in order, for the not-found notice.
+    fn looked_in(&self, aur: bool) -> Vec<&'static str> {
+        let mut v = vec!["the repositories"];
+        if aur { v.push("the AUR"); }
+        v.extend(self.looked.iter().copied());
+        v
+    }
+
+    fn skip(&mut self, line: String) {
+        if !self.skipped.contains(&line) { self.skipped.push(line); }
+    }
+
+    /// Is Flatpak usable — set up already, or set up now on a person's yes?
+    fn flatpak_usable(&mut self) -> bool {
+        if let Some(r) = self.flatpak_ready { return r; }
+        let ready = if !self.flatpak_on {
+            self.skip("Flatpak was not checked: it is deactivated (`nog activate flatpak` re-enables).".into());
+            false
+        } else if flatpak::is_available() {
+            if flatpak::has_remotes() { true } else {
+                self.skip("Flatpak is set up but has no app store configured (`flatpak remotes` is empty).".into());
+                false
+            }
+        } else if self.yes || !at_the_keyboard() {
+            self.skip("Flatpak is not set up on this computer; `nog install flatpak` sets it up (a person at the keyboard is offered it).".into());
+            false
+        } else {
+            println!();
+            println!("nog: The repositories and the AUR don't have it. Flatpak may — but Flatpak is not set up");
+            println!("     on this computer. Setting it up installs the flatpak package (extra), which comes");
+            println!("     with Flathub, its main app store. pacman asks before installing it.");
+            if !prompt_yes_no("nog: Set up Flatpak and look there? [y/N] ", false) {
+                self.skip("Flatpak is not set up on this computer (you chose not to set it up this time).".into());
+                false
+            } else {
+                let status = pacman::install(&["flatpak".to_string()], false);
+                if status.success() && flatpak::is_available() {
+                    println!("nog: Flatpak is set up. Looking there.");
+                    true
+                } else {
+                    self.skip("Flatpak could not be set up (pacman stopped: you answered no, or it hit a problem shown above).".into());
+                    false
+                }
+            }
+        };
+        self.flatpak_ready = Some(ready);
+        ready
+    }
+
+    fn flatpak(&mut self, name: &str) -> ChainAnswer {
+        if !self.flatpak_usable() { return ChainAnswer::NotFound; }
+        if !self.looked.contains(&"Flatpak") { self.looked.push("Flatpak"); }
+        match flatpak::search(name) {
+            Err(e) => {
+                self.skip(format!("Flatpak could not be checked: {}", e));
+                ChainAnswer::NotFound
+            }
+            Ok(apps) => match flatpak::find(name, &apps) {
+                flatpak::Found::One(app) => ChainAnswer::Found(InstallSource::Flatpak { app }),
+                flatpak::Found::Several(apps) => ChainAnswer::Ambiguous(apps),
+                flatpak::Found::None => ChainAnswer::NotFound,
+            },
+        }
+    }
+
+    /// Is Snap usable — snapd running already, or set up now on a person's yes?
+    fn snap_usable(&mut self) -> bool {
+        if let Some(r) = self.snap_ready { return r; }
+        let ready = if !self.snap_on {
+            self.skip("Snap was not checked: it is deactivated (`nog activate snap` re-enables).".into());
+            false
+        } else if snap::is_available() {
+            true
+        } else if self.helper.is_none() {
+            self.skip("Snap is not set up on this computer, and snapd comes from the AUR, which needs yay or paru.".into());
+            false
+        } else if self.yes || !at_the_keyboard() {
+            self.skip("Snap is not set up on this computer (a person at the keyboard is offered it).".into());
+            false
+        } else {
+            let h = self.helper.unwrap();
+            println!();
+            println!("nog: Flatpak doesn't have it either. Snap may — but Snap is not set up on this computer.");
+            println!("     Setting it up builds snapd from the AUR ({} shows the recipe and asks), starts its", h);
+            println!("     service, and links /snap so 'classic' snaps work. snapd then refreshes its snaps on");
+            println!("     its own schedule; nog places tier holds in it (`man nog`, SNAP SUPPORT).");
+            if !prompt_yes_no("nog: Set up Snap and look there? [y/N] ", false) {
+                self.skip("Snap is not set up on this computer (you chose not to set it up this time).".into());
+                false
+            } else if !set_up_snapd(h) {
+                self.skip("Snap could not be set up (a step stopped, shown above).".into());
+                false
+            } else {
+                println!("nog: Snap is set up. Looking there.");
+                true
+            }
+        };
+        self.snap_ready = Some(ready);
+        ready
+    }
+
+    fn snap(&mut self, name: &str) -> ChainAnswer {
+        if !self.snap_usable() { return ChainAnswer::NotFound; }
+        if !self.looked.contains(&"Snap") { self.looked.push("Snap"); }
+        match snap::info(name) {
+            Err(e) => {
+                self.skip(format!("Snap could not be checked: {}", e));
+                ChainAnswer::NotFound
+            }
+            Ok(Some(info)) => ChainAnswer::Found(InstallSource::Snap { info }),
+            Ok(None) => ChainAnswer::NotFound,
+        }
+    }
+}
+
+/// v1.9.0 (C3): snapd from the AUR, its socket started, `/snap` linked for
+/// classic snaps (the Arch wiki's three steps), then a wait for snapd's seed
+/// so the first `snap info` doesn't fail on a service still starting. Each
+/// step asks or shows its work; the first that stops ends it.
+fn set_up_snapd(helper: Helper) -> bool {
+    println!("nog: Handing off to {} for snapd.", helper);
+    if !aur::install(helper, &["snapd".to_string()]).success() {
+        return false;
+    }
+    println!("nog: Starting snapd's service (sudo systemctl enable --now snapd.socket).");
+    if !crate::machine::sudo().args(["systemctl", "enable", "--now", "snapd.socket"]).status()
+        .map(|s| s.success()).unwrap_or(false) {
+        return false;
+    }
+    if !std::path::Path::new("/snap").exists() {
+        println!("nog: Linking /snap to /var/lib/snapd/snap (classic snaps expect it).");
+        if !crate::machine::sudo().args(["ln", "-s", "/var/lib/snapd/snap", "/snap"]).status()
+            .map(|s| s.success()).unwrap_or(false) {
+            return false;
+        }
+    }
+    println!("nog: Waiting for snapd to be ready (snap wait system seed.loaded).");
+    let _ = std::process::Command::new("snap").args(["wait", "system", "seed.loaded"]).status();
+    snap::is_available()
+}
+
+/// v1.9.0 (#32): is a person at the keyboard to answer a question?
+fn at_the_keyboard() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+}
+
+/// v1.9.0 (#32): the words when nothing is at the keyboard and `--yes` was
+/// not given — before pacman reads end-of-input as "no".
+fn nobody_to_answer_lines(verb: &str) -> Vec<String> {
+    vec![
+        "Nothing is at the keyboard to answer the question asked before anything changes".to_string(),
+        "(pacman's, flatpak's, or nog's own for Snap), and with no answer it stops. Nothing was changed.".to_string(),
+        format!("Run this in a terminal, or add --yes: nog answers yes for you (`nog {} --yes …`).", verb),
+        "--yes covers repository packages, Flatpak and Snap; never the AUR's build review.".to_string(),
+    ]
+}
+
+/// A plain yes/no question of nog's own, with a default. End-of-input is the default.
+fn prompt_yes_no(question: &str, default_yes: bool) -> bool {
+    use std::io::{self, Write};
+    crate::events::ask(question.trim_start_matches("nog: ").trim());
+    print!("{}", question);
+    let _ = io::stdout().flush();
+    if !at_the_keyboard() {
+        println!();
+        return default_yes;
+    }
+    let mut buf = String::new();
+    match io::stdin().read_line(&mut buf) {
+        Ok(0) | Err(_) => default_yes,
+        Ok(_) => match buf.trim().to_lowercase().as_str() {
+            "" => default_yes,
+            "y" | "yes" => true,
+            _ => false,
+        },
+    }
+}
+
+/// v1.9.0 (C3): several Flatpak apps answer to one name — list them, never guess.
+fn ambiguous_flatpak_lines(name: &str, apps: &[flatpak::FlatpakApp]) -> Vec<String> {
+    let mut lines = vec![format!("{} Flatpak apps answer to '{}':", apps.len(), name)];
+    for a in apps {
+        lines.push(format!("    {}  ({}{})", a.app_id, a.name,
+            if a.version.is_empty() { String::new() } else { format!(", {}", a.version) }));
+    }
+    lines.push(format!("Name the one you want: nog install flatpak/{}", apps[0].app_id));
+    lines
+}
+
+/// v1.9.0 (C3): a later step of the chain stopped. Say what already went in.
+fn stopped_in_chain(done: &[String], failed: &[String], code: Option<i32>, tool: &str) -> ! {
+    let mut lines = vec![
+        format!("{} stopped (status {}): you answered no, or it hit a problem shown above.", tool, code.unwrap_or(-1)),
+    ];
+    if done.is_empty() {
+        lines.push("Nothing was changed by this install.".to_string());
+    } else {
+        lines.push(format!("Already installed before it stopped: {}.", done.join(" ")));
+    }
+    if tool == "snap" {
+        lines.push("A snap that needs 'classic' confinement says so above; nog passes --classic when the store says the snap is classic.".to_string());
+    }
+    enotice(C_PEACH, &format!("Not installed: {}", failed.join(" ")), &lines);
+    end(code.unwrap_or(1));
 }
 
 /// v1.8.0: where a package to install comes from, in pacman's own order.
@@ -221,6 +601,10 @@ enum InstallSource {
     Group,
     /// Built from the AUR by the helper.
     Aur { version: Option<String> },
+    /// v1.9.0 (C3): a Flatpak app from one of flatpak's remotes.
+    Flatpak { app: flatpak::FlatpakApp },
+    /// v1.9.0 (C3): a snap from the Snap store.
+    Snap { info: snap::SnapInfo },
     Nowhere,
 }
 
@@ -242,9 +626,13 @@ fn pacman_resolves(name: &str) -> bool {
 }
 
 /// v1.8.0: pacman's order — exact name, a provider, a group — then the AUR. Pure
-/// apart from the two lookups passed in.
+/// apart from the two lookups passed in. Since v1.9.0 a `flatpak/` or `snap/`
+/// name is left for the chain (`Nowhere` here means "not pacman's or the AUR's").
 fn resolve_install(name: &str, official: &HashMap<String, sync_db::PackageDesc>,
                    aur: &dyn Fn(&str) -> Option<String>, resolves: &dyn Fn(&str) -> bool) -> InstallSource {
+    if name.starts_with("flatpak/") || name.starts_with("snap/") {
+        return InstallSource::Nowhere;
+    }
     if let Some(n) = name.strip_prefix("aur/") {
         return match aur(n) { Some(v) => InstallSource::Aur { version: Some(v) }, None => InstallSource::Nowhere };
     }
@@ -277,7 +665,7 @@ fn resolve_install(name: &str, official: &HashMap<String, sync_db::PackageDesc>,
 fn install_rows(sources: &[(String, InstallSource)], tm: &TierManager, helper: &str) -> Vec<[String; 4]> {
     sources.iter().map(|(asked, src)| {
         let name = bare_name(asked).to_string();
-        let tier = format!("{}", tm.classify(&name));
+        let mut tier = format!("{}", tm.classify(&name));
         let (version, from) = match src {
             InstallSource::Repo { repo, version, providers } => {
                 let from = match providers.len() {
@@ -290,6 +678,26 @@ fn install_rows(sources: &[(String, InstallSource)], tm: &TierManager, helper: &
             InstallSource::Group => ("—".into(), "a group — pacman lists its members".into()),
             InstallSource::Aur { version } => (version.clone().unwrap_or_else(|| "—".into()),
                                                format!("AUR — built by {}", helper)),
+            // v1.9.0 (C3): the app ID is what Flatpak installs; said when it
+            // differs from what was typed. Tiers are kept by app ID (as in
+            // `nog update`), so a pin on the ID applies.
+            InstallSource::Flatpak { app } => {
+                tier = format!("{}", tm.classify(&app.app_id));
+                let from = if app.app_id.eq_ignore_ascii_case(&name) {
+                    format!("Flatpak — {}", app.remote)
+                } else {
+                    format!("Flatpak — {}, as {}", app.remote, app.app_id)
+                };
+                (if app.version.is_empty() { "—".into() } else { app.version.clone() }, from)
+            }
+            InstallSource::Snap { info } => {
+                let from = match info.confinement.as_str() {
+                    "classic" => "Snap — classic: may change anything on the system, like a package".to_string(),
+                    "strict" => "Snap — sandboxed".to_string(),
+                    _ => "Snap".to_string(),
+                };
+                (if info.version.is_empty() { "—".into() } else { info.version.clone() }, from)
+            }
             InstallSource::Nowhere => ("—".into(), "not found".into()),
         };
         [name, version, from, tier]
@@ -310,29 +718,33 @@ fn format_install_table(rows: &[[String; 4]]) -> String {
 }
 
 /// v1.8.0: who takes over, said before they do.
-fn handoff_line(aur: bool, helper: &str) -> String {
+fn handoff_line(aur: bool, helper: &str, yes: bool) -> String {
     if aur {
         format!("nog: Handing off to {}: it shows each build recipe to review, builds, then pacman asks once more before installing.", helper)
+    } else if yes {
+        "nog: Handing off to pacman with your yes (--yes): it shows what comes with it and installs without asking.".to_string()
     } else {
         "nog: Handing off to pacman: it shows what comes with it and asks before anything changes.".to_string()
     }
 }
 
-/// v1.8.0 (option A): nog's own question, only when the AUR is involved.
+/// v1.9.0 (C3): flatpak's turn, said before it takes it.
+fn flatpak_handoff_line(yes: bool) -> String {
+    if yes {
+        "nog: Handing off to flatpak with your yes (--yes): it shows what comes with it (the runtimes it needs) and installs without asking.".to_string()
+    } else {
+        "nog: Handing off to flatpak: it shows what comes with it (the runtimes it needs) and asks before anything changes.".to_string()
+    }
+}
+
+/// v1.8.0 (option A): nog's own question, only when the AUR (or, v1.9.0, Snap) is involved.
 fn prompt_install() -> bool {
-    use std::io::{self, IsTerminal, Write};
-    crate::events::ask("Install these? [Y/n]");
-    print!("nog: Install these? [Y/n] ");
-    let _ = io::stdout().flush();
-    if !io::stdin().is_terminal() {
-        println!();
+    if !at_the_keyboard() {
+        crate::events::ask("Install these? [Y/n]");
+        println!("nog: Install these? [Y/n] ");
         return false;
     }
-    let mut buf = String::new();
-    match io::stdin().read_line(&mut buf) {
-        Ok(0) | Err(_) => false,
-        Ok(_) => matches!(buf.trim().to_lowercase().as_str(), "" | "y" | "yes"),
-    }
+    prompt_yes_no("nog: Install these? [Y/n] ", true)
 }
 
 /// v1.7.0 (F-11): a name as typed, without its `repo/` (or `aur/`) in front.
@@ -362,14 +774,21 @@ fn exists_anywhere(name: &str, helper: Option<crate::aur::Helper>) -> bool {
     }
 }
 
-/// v1.6.1 (F-9, #43): the words for names found nowhere. Pure.
-fn not_found_lines(missing: &[String], aur: bool) -> Vec<String> {
+/// v1.6.1 (F-9, #43): the words for names found nowhere. Pure. `looked` is
+/// where the chain looked, in order ("the repositories", "the AUR", "Flatpak",
+/// "Snap"); `skipped` says why a source was not looked in (v1.9.0).
+fn not_found_lines(missing: &[String], looked: &[&str], skipped: &[String]) -> Vec<String> {
     let (what, verb) = if missing.len() == 1 { (missing[0].clone(), "was") } else { (missing.join(", "), "were") };
-    vec![
-        format!("{} {} not found in the repositories{}.", what, verb, if aur { " or the AUR" } else { "" }),
-        format!("Nothing was asked and nothing was changed. Check the spelling: `nog search {}` shows close matches.",
-            missing[0]),
-    ]
+    let places = match looked.len() {
+        0 => "anywhere".to_string(),
+        1 => looked[0].to_string(),
+        n => format!("{} or {}", looked[..n - 1].join(", "), looked[n - 1]),
+    };
+    let mut lines = vec![format!("{} {} not found in {}.", what, verb, places)];
+    lines.extend(skipped.iter().cloned());
+    lines.push(format!("Nothing was asked and nothing was changed. Check the spelling: `nog search {}` shows close matches.",
+        missing[0]));
+    lines
 }
 
 /// v1.5.8 (F-6 #38, F-7 #39): the install was declined or failed. pacman's
@@ -389,12 +808,6 @@ fn stopped_installing(what: &[String], code: Option<i32>, tool: &str) -> ! {
     }
     enotice(C_PEACH, &format!("Not installed: {}", what.join(" ")), &lines);
     end(code.unwrap_or(1));
-}
-
-/// v1.5.4 (#26): the names in an install request that would come from the
-/// AUR — every one not found in an enabled sync database. Pure.
-fn needs_the_keyboard<F: Fn(&str) -> bool>(packages: &[String], official: F) -> Vec<String> {
-    packages.iter().filter(|p| !official(p)).cloned().collect()
 }
 
 /// v1.5.6 (#30): package lists older than this may be why an install failed.
@@ -498,7 +911,7 @@ fn split_install_args(args: &[String], exists: impl Fn(&str) -> bool) -> Result<
 /// repository entry to look up. No signature gate: this is an explicit
 /// command, and like every `nog install` it does what was asked. pacman's
 /// own `LocalFileSigLevel` still applies exactly as it would without nog.
-fn install_files(files: &[String], tm: &TierManager) {
+fn install_files(files: &[String], tm: &TierManager, yes: bool) {
     // v1.5.8 (F-7, #39): one notice for the whole request, like a named install.
     let mut lines = Vec::new();
     let mut names = Vec::new();
@@ -516,31 +929,191 @@ fn install_files(files: &[String], tm: &TierManager) {
         }
     }
     notice(C_GREEN, &format!("Installing {}", names.join(" ")), &lines);
-    println!("{}", handoff_line(false, "pacman"));
+    println!("{}", handoff_line(false, "pacman", yes));
     let label = format!("Installing {}", names.join(" "));
     crate::events::steps(&[("install", label.clone())]);
     crate::events::start("install", &label);
-    let status = pacman::install_files(files);
+    let status = pacman::install_files(files, yes);
     crate::events::finished("install", &label, status.success(), "");
     if !status.success() {
         stopped_installing(&names, status.code(), "pacman");
     }
 }
 
-pub fn remove(packages: &[String]) {
+pub fn remove(packages: &[String], yes: bool) {
+    // v1.9.0 (C3): what nog installs, nog removes. A name that is not an
+    // installed package is looked for among the installed Flatpaks (by app
+    // ID, its last segment, or the app's name) and snaps, each removed by its
+    // own tool. A name found nowhere stops the whole request before anything.
+    let (pkgs, others) = crate::removal::split_installed(packages);
+    let state = sources::load(sources::DEFAULT_PATH);
+    let fp_installed = if state.flatpak && flatpak::is_available() { flatpak::installed_apps() } else { Vec::new() };
+    let snap_on = state.snap && snap::is_available();
+    let mut flatpaks: Vec<String> = Vec::new();
+    let mut snaps: Vec<String> = Vec::new();
+    let mut nowhere: Vec<String> = Vec::new();
+    for o in &others {
+        if let Some(id) = flatpak::installed_match(o, &fp_installed) {
+            flatpaks.push(id);
+        } else if snap_on && snap::is_installed(o) {
+            snaps.push(o.clone());
+        } else {
+            nowhere.push(o.clone());
+        }
+    }
+    if !nowhere.is_empty() {
+        let (what, verb) = if nowhere.len() == 1 { (nowhere[0].clone(), "is") } else { (nowhere.join(", "), "are") };
+        enotice(C_PEACH, &format!("Not removing: {}", packages.join(" ")), &[
+            format!("{} {} not installed on this computer: not a package, not a Flatpak, not a snap.", what, verb),
+            "Nothing was asked and nothing was changed. `nog list` shows what is installed.".to_string(),
+        ]);
+        end(1);
+    }
+    // v1.9.0 (#32): pacman and flatpak ask before removing; with nothing at
+    // the keyboard they read end-of-input as "no". Say so first.
+    if !yes && !at_the_keyboard() {
+        enotice(C_PEACH, &format!("Not removing: {}", packages.join(" ")), &nobody_to_answer_lines("remove"));
+        end(1);
+    }
+    let mut steps: Vec<(&str, String)> = Vec::new();
+    if !pkgs.is_empty() { steps.push(("remove", format!("Removing {}", pkgs.join(" ")))); }
+    if !flatpaks.is_empty() { steps.push(("flatpak", format!("Removing {} through Flatpak", flatpaks.join(" ")))); }
+    if !snaps.is_empty() { steps.push(("snap", format!("Removing {} through Snap", snaps.join(" ")))); }
+    crate::events::steps(&steps);
+
+    if !pkgs.is_empty() {
+        remove_packages(&pkgs, yes);
+    }
+    if !flatpaks.is_empty() {
+        notice(C_GREEN, &format!("Removing {}", flatpaks.join(" ")), &[
+            if yes { "Flatpak apps: flatpak shows what goes and, with your yes (--yes), removes it without asking.".to_string() }
+            else { "Flatpak apps: flatpak shows what goes and asks first.".to_string() }]);
+        let label = format!("Removing {} through Flatpak", flatpaks.join(" "));
+        crate::events::start("flatpak", &label);
+        let h = flatpak::uninstall(&flatpaks, yes);
+        crate::events::finished("flatpak", &label, h.status.success(), "");
+        if !h.status.success() {
+            enotice(C_PEACH, &format!("Not removed: {}", flatpaks.join(" ")), &[
+                format!("flatpak stopped (status {}): you answered no, or it hit a problem shown above.",
+                    h.status.code().unwrap_or(-1)),
+                "Nothing more was changed by this removal.".to_string(),
+            ]);
+            end(h.status.code().unwrap_or(1));
+        }
+    }
+    if !snaps.is_empty() {
+        notice(C_GREEN, &format!("Removing {}", snaps.join(" ")), &[
+            "Snaps: `snap remove` never asks, so nog asks here. Their data is kept by snapd for a while (snapd's own rule).".to_string()]);
+        if !yes && !prompt_yes_no(&format!("nog: Remove {}? [y/N] ", snaps.join(" ")), false) {
+            println!("nog: Cancelled — the snaps stay.");
+            end(1);
+        }
+        let label = format!("Removing {} through Snap", snaps.join(" "));
+        crate::events::start("snap", &label);
+        let h = snap::remove(&snaps);
+        crate::events::finished("snap", &label, h.status.success(), "");
+        if !h.status.success() {
+            enotice(C_PEACH, &format!("Not removed: {}", snaps.join(" ")), &[
+                format!("snap stopped (status {}): it hit a problem shown above.", h.status.code().unwrap_or(-1)),
+                "Nothing more was changed by this removal.".to_string(),
+            ]);
+            end(h.status.code().unwrap_or(1));
+        }
+    }
+}
+
+/// `nog remove` for installed packages: pacman's removal, with the F-13 check first.
+fn remove_packages(packages: &[String], yes: bool) {
+    // v1.9.0 (F-13, #49): before pacman, what the removal takes along, and
+    // who still uses it. pacman's own dry run lists the sweep; a package in
+    // it that another staying package lists as optional is said in plain
+    // words and offered a Keep (default yes): kept means marked "installed on
+    // purpose", so no removal takes it along — what `nog keep` does.
+    let sweep = match crate::removal::sweep(packages) {
+        Ok(s) => s,
+        Err(e) => {
+            enotice(C_PEACH, &format!("Not removing: {}", packages.join(" ")), &[
+                format!("pacman says: {}", e.replace('\n', " / ")),
+                "Nothing was asked and nothing was changed.".to_string(),
+            ]);
+            end(1);
+        }
+    };
+    let installed = crate::machine::load_installed(std::path::Path::new("/var/lib/pacman/local"));
+    let uses = crate::removal::optional_uses(&sweep, packages, &installed);
+    if !uses.is_empty() {
+        let mut lines = crate::removal::use_lines(&uses);
+        lines.push("Kept means marked as installed on purpose (what `nog keep` does), so no removal takes it along.".to_string());
+        notice(C_PEACH, "Going along, but still used", &lines);
+        let mut keep: Vec<String> = Vec::new();
+        for u in &uses {
+            let kept = if yes {
+                println!("nog: Keeping {} (--yes keeps what another app still uses).", u.package);
+                true
+            } else {
+                prompt_yes_no(&format!("nog: Keep {}? [Y/n] ", u.package), true)
+            };
+            if kept { keep.push(u.package.clone()); }
+        }
+        if !keep.is_empty() {
+            println!("nog: Marking {} as installed on purpose (sudo pacman -D --asexplicit).", keep.join(" "));
+            let status = crate::removal::mark_explicit(&keep);
+            if !status.success() {
+                enotice(C_PEACH, &format!("Not removing: {}", packages.join(" ")), &[
+                    format!("pacman could not mark {} (status {}): you cancelled the password, or it hit a problem shown above.",
+                        keep.join(" "), status.code().unwrap_or(-1)),
+                    "Nothing was removed.".to_string(),
+                ]);
+                end(status.code().unwrap_or(1));
+            }
+        }
+    }
     notice(C_GREEN, &format!("Removing {}", packages.join(" ")), &[
-        "With what only it needed; pacman shows the list and asks first.".to_string(),
+        if yes { "With what only it needed; pacman shows the list and, with your yes (--yes), removes without asking.".to_string() }
+        else { "With what only it needed; pacman shows the list and asks first.".to_string() },
     ]);
     let label = format!("Removing {}", packages.join(" "));
-    crate::events::steps(&[("remove", label.clone())]);
     crate::events::start("remove", &label);
-    let status = pacman::remove(packages);
+    let status = pacman::remove(packages, yes);
     crate::events::finished("remove", &label, status.success(), "");
     if !status.success() {
         enotice(C_PEACH, &format!("Not removed: {}", packages.join(" ")), &[
             format!("pacman stopped (status {}): you answered no, or it hit a problem shown above.",
                 status.code().unwrap_or(-1)),
             "Nothing was changed by this removal.".to_string(),
+        ]);
+        end(status.code().unwrap_or(1));
+    }
+}
+
+/// v1.9.0 (F-13, #49): `nog keep <package>…` — mark packages as installed on
+/// purpose, so removing something else never takes them along. pacman's
+/// "install reason" (`pacman -D --asexplicit`), without leaving nog for it.
+pub fn keep(packages: &[String]) {
+    let (installed, missing) = crate::removal::split_installed(packages);
+    if !missing.is_empty() {
+        let (what, verb) = if missing.len() == 1 { (missing[0].clone(), "is") } else { (missing.join(", "), "are") };
+        enotice(C_PEACH, &format!("Not keeping: {}", packages.join(" ")), &[
+            format!("{} {} not installed, so there is nothing to keep.", what, verb),
+            "Nothing was changed. `nog list` shows what is installed.".to_string(),
+        ]);
+        end(1);
+    }
+    notice(C_GREEN, &format!("Keeping {}", installed.join(" ")), &[
+        format!("Marked as installed on purpose, so removing another package never takes {} along.",
+            if installed.len() == 1 { "it" } else { "them" }),
+        "(pacman's own install reason: sudo pacman -D --asexplicit.)".to_string(),
+    ]);
+    let label = format!("Keeping {}", installed.join(" "));
+    crate::events::steps(&[("keep", label.clone())]);
+    crate::events::start("keep", &label);
+    let status = crate::removal::mark_explicit(&installed);
+    crate::events::finished("keep", &label, status.success(), "");
+    if !status.success() {
+        enotice(C_PEACH, &format!("Not kept: {}", installed.join(" ")), &[
+            format!("pacman stopped (status {}): you cancelled the password, or it hit a problem shown above.",
+                status.code().unwrap_or(-1)),
+            "Nothing was changed.".to_string(),
         ]);
         end(status.code().unwrap_or(1));
     }
@@ -3364,8 +3937,62 @@ mod output_tests {
         assert!(lines[0].trim_start().starts_with("Package"));
         assert!(lines[3].contains("AUR — built by yay"));
         assert_eq!(lines[2].find("extra"), lines[3].find("AUR"), "the Source column lines up");
-        assert!(handoff_line(true, "yay").starts_with("nog: Handing off to yay: it shows each build recipe"));
-        assert!(handoff_line(false, "yay").starts_with("nog: Handing off to pacman"));
+        assert!(handoff_line(true, "yay", false).starts_with("nog: Handing off to yay: it shows each build recipe"));
+        assert!(handoff_line(false, "yay", false).starts_with("nog: Handing off to pacman: it shows what comes with it and asks"));
+        // v1.9.0 (#32): with --yes pacman is told the answer, and the line says so
+        assert!(handoff_line(false, "yay", true).contains("--yes"));
+        assert!(handoff_line(false, "yay", true).contains("without asking"));
+        assert!(flatpak_handoff_line(false).contains("asks before anything changes"));
+        assert!(flatpak_handoff_line(true).contains("--yes"));
+    }
+
+    #[test]
+    fn the_install_table_says_what_flatpak_and_snap_install() {
+        // v1.9.0 (C3): the app ID differs from the name typed, so it is said; a
+        // classic snap says what classic means before nog asks.
+        let tm = TierManager::from_toml_for_tests(include_str!("../../config/tier-pins.toml"));
+        let sources = vec![
+            ("gimp".to_string(), InstallSource::Flatpak { app: flatpak::FlatpakApp {
+                app_id: "org.gimp.GIMP".into(), version: "3.2.6".into(), name: "GIMP".into(), remote: "flathub".into() } }),
+            ("flatpak/org.gimp.GIMP".to_string(), InstallSource::Flatpak { app: flatpak::FlatpakApp {
+                app_id: "org.gimp.GIMP".into(), version: "".into(), name: "GIMP".into(), remote: "flathub".into() } }),
+            ("hello-world".to_string(), InstallSource::Snap { info: snap::SnapInfo {
+                name: "hello-world".into(), version: "6.4".into(), publisher: "Canonical".into(), confinement: "strict".into() } }),
+            ("code".to_string(), InstallSource::Snap { info: snap::SnapInfo {
+                name: "code".into(), version: "1.0".into(), publisher: "vscode".into(), confinement: "classic".into() } }),
+        ];
+        let rows = install_rows(&sources, &tm, "yay");
+        assert_eq!(rows[0], ["gimp", "3.2.6", "Flatpak — flathub, as org.gimp.GIMP", "Tier 3"]);
+        assert_eq!(rows[1][1], "—");
+        assert_eq!(rows[1][2], "Flatpak — flathub");
+        assert_eq!(rows[2][2], "Snap — sandboxed");
+        assert!(rows[3][2].starts_with("Snap — classic: may change anything"));
+    }
+
+    #[test]
+    fn several_flatpaks_for_one_name_are_listed_and_the_way_out_named() {
+        let apps = vec![
+            flatpak::FlatpakApp { app_id: "org.one.Editor".into(), version: "1".into(), name: "Editor".into(), remote: "flathub".into() },
+            flatpak::FlatpakApp { app_id: "org.two.Editor".into(), version: "".into(), name: "Editor".into(), remote: "flathub".into() },
+        ];
+        let l = ambiguous_flatpak_lines("editor", &apps);
+        assert_eq!(l[0], "2 Flatpak apps answer to 'editor':");
+        assert_eq!(l[1].trim(), "org.one.Editor  (Editor, 1)");
+        assert_eq!(l[2].trim(), "org.two.Editor  (Editor)");
+        assert_eq!(l[3], "Name the one you want: nog install flatpak/org.one.Editor");
+    }
+
+    #[test]
+    fn nobody_at_the_keyboard_is_said_as_the_cause_not_as_a_no() {
+        // v1.9.0 (#32, seen 2026-10-07): three runs from a shell with no terminal
+        // were reported as "you answered no". Nobody answered anything.
+        let l = nobody_to_answer_lines("install");
+        assert!(l[0].starts_with("Nothing is at the keyboard"));
+        assert!(l[1].contains("flatpak's"), "a Flatpak install is asked by flatpak, not pacman");
+        assert!(l[2].contains("nog install --yes"));
+        assert!(l[3].contains("never the AUR"));
+        assert!(!l.join(" ").contains("answered no"));
+        assert!(nobody_to_answer_lines("remove")[2].contains("nog remove --yes"));
     }
 
     #[test]
@@ -3382,23 +4009,33 @@ mod output_tests {
         assert_eq!(bare_name("aur/neofetch"), "neofetch");
         assert_eq!(bare_name("extra/git"), "git");
         assert_eq!(bare_name("git"), "git");
-        let pk = vec!["aur/neofetch".to_string(), "extra/git".to_string(), "steam".to_string()];
-        let official = |p: &str| !p.starts_with("aur/") && ["neofetch", "git"].contains(&bare_name(p));
-        assert_eq!(needs_the_keyboard(&pk, official), vec!["aur/neofetch".to_string(), "steam".to_string()],
-            "aur/ is always the AUR, even when a repository provides the name");
+        // aur/ is always the AUR, even when a repository provides the name:
+        let official: HashMap<String, sync_db::PackageDesc> = [("neofetch".to_string(), desc("chaotic-aur", "7.1.0-2", &[]))].into();
+        let aur = |n: &str| (n == "neofetch").then(|| "7.1.0-2".to_string());
+        assert_eq!(resolve_install("aur/neofetch", &official, &aur, &|_| false),
+                   InstallSource::Aur { version: Some("7.1.0-2".into()) });
+        // v1.9.0 (C3): flatpak/ and snap/ are left for the chain, never pacman's
+        assert_eq!(resolve_install("flatpak/org.gimp.GIMP", &official, &aur, &|_| true), InstallSource::Nowhere);
+        assert_eq!(resolve_install("snap/hello", &official, &aur, &|_| true), InstallSource::Nowhere);
     }
 
     #[test]
     fn a_name_found_nowhere_is_said_plainly() {
         // v1.6.1 (F-9, #43, Javier 3 Oct 2026): "nogforge" wasn't on the AUR, and nog said
         // "pacman stopped: you answered no" — nobody was asked, and it wasn't pacman.
-        let l = not_found_lines(&["nogforge".to_string()], true);
+        let l = not_found_lines(&["nogforge".to_string()], &["the repositories", "the AUR"], &[]);
         assert_eq!(l[0], "nogforge was not found in the repositories or the AUR.");
         assert!(l[1].starts_with("Nothing was asked and nothing was changed."));
         assert!(l[1].contains("`nog search nogforge`"));
-        let l = not_found_lines(&["a".to_string(), "b".to_string()], false);
+        let l = not_found_lines(&["a".to_string(), "b".to_string()], &["the repositories"], &[]);
         assert_eq!(l[0], "a, b were not found in the repositories.", "no helper: no AUR named");
         assert!(!l.join(" ").contains("answered no"));
+        // v1.9.0 (C3): the whole chain named, and why a source was skipped
+        let l = not_found_lines(&["wonderpen".to_string()], &["the repositories", "the AUR", "Flatpak", "Snap"],
+            &["Snap was not checked: it is deactivated (`nog activate snap` re-enables).".to_string()]);
+        assert_eq!(l[0], "wonderpen was not found in the repositories, the AUR, Flatpak or Snap.");
+        assert_eq!(l[1], "Snap was not checked: it is deactivated (`nog activate snap` re-enables).");
+        assert!(l[2].starts_with("Nothing was asked"));
     }
 
     #[test]
@@ -3427,17 +4064,6 @@ mod output_tests {
                 "note does not lead with its countdown: {note:?}"
             );
         }
-    }
-
-    #[test]
-    fn only_aur_names_need_the_keyboard() {
-        // #26: official packages install fine without a terminal; AUR ones
-        // stop in the helper's review menu.
-        let official = |p: &str| p == "vim" || p == "git";
-        let req: Vec<String> = ["vim", "grubforge", "git", "walker-bin"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(needs_the_keyboard(&req, official), vec!["grubforge", "walker-bin"]);
-        let only_official: Vec<String> = vec!["vim".into()];
-        assert!(needs_the_keyboard(&only_official, official).is_empty());
     }
 
     #[test]
@@ -3794,7 +4420,7 @@ pub fn unlock(package: &str, promote: bool) {
     let pkgs = vec![package.to_string()];
     let status = match helper {
         Some(h) => aur::install(h, &pkgs),
-        None    => pacman::install(&pkgs),
+        None    => pacman::install(&pkgs, false),
     };
     if !status.success() {
         eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));

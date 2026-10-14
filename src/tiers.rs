@@ -110,6 +110,14 @@ impl TierManager {
         })
     }
 
+    /// A manager from pin text alone, for unit tests outside this module.
+    #[cfg(test)]
+    pub fn from_toml_for_tests(toml_src: &str) -> Self {
+        let pins: TierPins = toml::from_str(toml_src).expect("test toml parses");
+        let group_members = build_group_index(&pins.groups);
+        TierManager { pins, group_members, pkgbase_index: PkgbaseIndex::empty() }
+    }
+
     /// Attach a populated pkgbase coupling index. Used by callers that need
     /// split-PKGBUILD-aware classification (e.g., `nog update`, `nog search`).
     /// Without this, `classify()` falls back to direct + name-pattern + groups

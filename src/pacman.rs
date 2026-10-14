@@ -112,11 +112,13 @@ pub fn checkupdates_capture() -> Result<Vec<PendingUpdate>, CheckUpdatesError> {
     Ok(updates)
 }
 
-pub fn install(packages: &[String]) -> ExitStatus {
+pub fn install(packages: &[String], yes: bool) -> ExitStatus {
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
     // v1.5.8 (F-6, #38): no --noconfirm. Since v0.6.0 pacman answered its
     // own "Proceed?"; an install is something the person agrees to.
+    // v1.9.0 (#32): unless the person said so up front, `nog install --yes`.
     let mut args = vec!["-S"];
+    if yes { args.push("--noconfirm"); }
     args.extend_from_slice(&pkgs);
     run(&args)
 }
@@ -124,8 +126,10 @@ pub fn install(packages: &[String]) -> ExitStatus {
 /// Install locally built package files (`pacman -U`, issue #17). Paths are
 /// passed after `--` so a file whose name begins with a dash is never read
 /// as an option.
-pub fn install_files(paths: &[String]) -> ExitStatus {
-    let mut args = vec!["-U", "--"];
+pub fn install_files(paths: &[String], yes: bool) -> ExitStatus {
+    let mut args = vec!["-U"];
+    if yes { args.push("--noconfirm"); }
+    args.push("--");
     args.extend(paths.iter().map(|s| s.as_str()));
     run(&args)
 }
@@ -158,10 +162,12 @@ fn parse_identity(text: &str) -> Option<(String, String)> {
     Some((field("Name")?, field("Version")?))
 }
 
-pub fn remove(packages: &[String]) -> ExitStatus {
+pub fn remove(packages: &[String], yes: bool) -> ExitStatus {
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
     // v1.5.8 (F-6, #38): pacman asks, as it does for an install.
+    // v1.9.0 (#32): `--yes` answers it up front.
     let mut args = vec!["-Rs"];
+    if yes { args.push("--noconfirm"); }
     args.extend_from_slice(&pkgs);
     run(&args)
 }

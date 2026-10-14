@@ -318,6 +318,94 @@ pub fn to_pending(u: &SnapUpdate, installed: &HashMap<String, String>) -> Pendin
     }
 }
 
+// ── v1.9.0 (C3): the install chain ───────────────────────────────────────────
+
+/// What the store offers under an exact name, from `snap info --verbose`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapInfo {
+    pub name: String,
+    /// The version in latest/stable (empty when that channel is closed).
+    pub version: String,
+    pub publisher: String,
+    /// "classic" means the snap may change anything on the system, like a
+    /// normal package; "strict" means it is sandboxed. Said in the table.
+    pub confinement: String,
+}
+
+/// Is there a snap by exactly this name? `snap info` is the store's exact
+/// lookup: "no snap found" is `Ok(None)`; any other failure (snapd not
+/// running, no network) is `Err`, so the chain says "could not check" instead
+/// of "not found".
+pub fn info(name: &str) -> Result<Option<SnapInfo>, String> {
+    let output = Command::new("snap")
+        .args(["info", "--verbose", "--unicode=never", "--color=never", "--", name])
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to launch snap: {}", e))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        if stderr.contains("no snap found") {
+            return Ok(None);
+        }
+        return Err(if stderr.is_empty() {
+            format!("snap info exited with status {}", output.status)
+        } else {
+            stderr.trim_start_matches("error: ").to_string()
+        });
+    }
+    Ok(parse_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Pure. `snap info --verbose` is `key: value` lines plus the `channels:`
+/// block; the stable version comes from the `latest/stable:` line (the
+/// first token after the colon), empty when the channel is closed (`--`).
+pub fn parse_info(stdout: &str) -> Option<SnapInfo> {
+    // `snap info --verbose` indents some fields (confinement among them), so
+    // the key is matched trimmed; channel lines carry a '/' and never collide.
+    let field = |key: &str| stdout.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        (k.trim() == key).then(|| v.trim().to_string())
+    });
+    let name = field("name")?;
+    let version = stdout.lines().find_map(|l| {
+        let t = l.trim();
+        let rest = t.strip_prefix("latest/stable:")?;
+        let first = rest.split_whitespace().next().unwrap_or("");
+        Some(if first == "--" || first == "^" { String::new() } else { first.to_string() })
+    }).unwrap_or_default();
+    Some(SnapInfo {
+        name,
+        version,
+        publisher: field("publisher").unwrap_or_default().trim_end_matches(['*', '✓']).trim().to_string(),
+        confinement: field("confinement").unwrap_or_default(),
+    })
+}
+
+/// Install exactly the named snaps. `snap install` never asks, so nog asks
+/// its own question first (the AUR rule). A classic snap is installed as
+/// one, with `--classic`: the table said so before the question. Root is
+/// needed, as for every snap change.
+pub fn install(names: &[String], classic: bool) -> crate::handoff::Handoff {
+    let mut cmd = crate::machine::sudo();
+    cmd.args(["snap", "install"]);
+    if classic { cmd.arg("--classic"); }
+    cmd.args(names);
+    crate::handoff::run_on_screen(&mut cmd, "sudo snap install")
+}
+
+/// Remove the named snaps. `snap remove` never asks either; nog asked.
+pub fn remove(names: &[String]) -> crate::handoff::Handoff {
+    let mut cmd = crate::machine::sudo();
+    cmd.args(["snap", "remove"]).args(names);
+    crate::handoff::run_on_screen(&mut cmd, "sudo snap remove")
+}
+
+/// Is a snap by this name installed? (`snap list`, exact name)
+pub fn is_installed(name: &str) -> bool {
+    list_installed().iter().any(|(n, _, _)| n == name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +564,29 @@ mod tests {
         let p = to_pending(&u, &HashMap::new());
         assert_eq!(p.old_version, "?");
         assert_eq!(p.new_version, "?");
+    }
+
+    // ── v1.9.0 (C3): the install chain ─────────────────────────────────────
+
+    #[test]
+    fn snap_info_gives_name_stable_version_publisher_and_confinement() {
+        let out = "name:      hello\nsummary:   GNU Hello\npublisher: Canonical**\n\
+                   store-url: https://snapcraft.io/hello\nlicense:   unset\n\
+                   description: |\n  GNU hello prints a greeting.\n\
+                   snap-id:      mVyGrEwiqSi5PugCwyH7WgpoQLemtTd6\n  confinement:       strict\n\
+                   channels:\n  latest/stable:    2.10   2022-01-14 (42)  106kB -\n\
+                   latest/candidate: 2.10   2022-01-14 (42)  106kB -\n";
+        let got = parse_info(out).unwrap();
+        assert_eq!(got.name, "hello");
+        assert_eq!(got.version, "2.10");
+        assert_eq!(got.publisher, "Canonical");
+        assert_eq!(got.confinement, "strict");
+    }
+
+    #[test]
+    fn a_closed_stable_channel_leaves_the_version_empty() {
+        let out = "name: edgy\npublisher: Someone\nchannels:\n  latest/stable:    --\n  latest/edge:  0.1 2026-01-01 (3) 1MB -\n";
+        assert_eq!(parse_info(out).unwrap().version, "");
+        assert!(parse_info("error: no snap found\n").is_none());
     }
 }
