@@ -477,7 +477,8 @@ impl Chain {
                 self.skip("Snap could not be set up (a step stopped, shown above).".into());
                 false
             } else {
-                println!("nog: Snap is set up. Looking there.");
+                println!("nog: Snap is set up. Looking there. (Snap's commands land in /var/lib/snapd/snap/bin,");
+                println!("     on your PATH after you log in again; snap says so too after the first install.)");
                 true
             }
         };

@@ -2,7 +2,7 @@
 
 **Why:** Javier, 2026-10-14 morning: *"work on open issues first, then implement Flatpak and Snap … have ready a detailed test bench, to go step-by-step, test-by-test."* Three things in one version: the install chain whole (the repositories, then the AUR, then Flatpak, then Snap; what nog installs, nog removes), a removal that says what else goes and who still uses it with a Keep and `nog keep` (F-13), and `--yes` for scripts with "nothing is at the keyboard" said plainly (#32).
 **Where:** §2 this desktop, dry runs with the built program (`scripts/dry-run-190.sh`: every case stops before a password). §3 the KognogOS VM `kognog-hypeforge`, reset to `clean-install-3` (the previous state kept as snapshot `before-nog-190`), nothing set up: no yay, no flatpak, no snapd; rc1 installed with pacman; prompts answered by `scripts/vm-drive.py`. §4 **Javier, on this desktop**, with the rc1 package.
-**Who:** §1–§3 Claude (14 Oct, 07:44–). §4 Javier, when he is back.
+**Who:** §1–§3 Claude (14 Oct, 07:44–08:50; VM 08:09–08:45). §4 Javier, when he is back.
 
 ## §1 · Baseline sanity
 
@@ -14,7 +14,7 @@
 | 1.4 | `strings target/release/nog \| grep -i CARGO_MANIFEST_DIR` | empty | **PASS** | |
 | 1.5 | `man --warnings -l nog.1` | no warnings | **PASS** | |
 | 1.6 | Version sync | 1.9.0 in Cargo.toml, Cargo.lock, nog.conf, nog.1, README | **PASS** | |
-| 1.7 | rc1 package | built from the AUR recipe, tests in the build | **PASS** | `dist-rc/nog-1.9.0rc1-1-x86_64.pkg.tar.zst`, 258 tests in `check()` |
+| 1.7 | rc1 package | built from the AUR recipe, tests in the build | **PASS** | `dist-rc/nog-1.9.0rc2-1-x86_64.pkg.tar.zst`, 258 tests in `check()` |
 
 ## §2 · Claude, this desktop — dry runs (nothing changes; `logs/dry-run-190-latest.log`)
 
@@ -51,12 +51,12 @@ This desktop has flatpak (Flatseal, Termius), snapd (hello) and yay, so the whol
 | 3.1 | `nog install --yes cowsay` from a shell with no terminal (as javier) | pacman answered, cowsay in, exit 0, no question shown | **PASS** | V1; `logs/vm-190-V1.log` |
 | 3.2 | `nog install wonderpen` with **no flatpak installed** | "Set up Flatpak and look there? [y/N]" → y; pacman asks → y; "Flatpak is set up. Looking there."; table (Flatpak — flathub, as com.tominlab.wonderpen); the handoff line; flatpak's own questions → y; installed | **PASS** | V2: the offer, pacman's install of flatpak and the table in `logs/vm-190-V2a-offer.log`; the install itself in `vm-190-V2b.log` (flatpak asks twice: the runtime, then the changes) |
 | 3.3 | `nog remove wonderpen` | found as a Flatpak; flatpak asks → y; gone | **PASS** | V3; `flatpak list --app` empty after; `logs/vm-190-V3-V8-V6-V7.log` |
-| 3.4 | `nog install hello-world` with **no snapd installed** (yay present) | repos no, AUR no, Flatpak no → "Set up Snap and look there? [y/N]" → y; yay builds snapd; socket started; `/snap` linked; table (Snap — sandboxed); "Install these?" → y; installed; `hello-world` runs | | V4 — the longest: a Go build |
-| 3.5 | `nog remove hello-world` | nog asks → y; gone | | V5 |
+| 3.4 | `nog install hello-world` with **no snapd installed** (yay present) | repos no, AUR no, Flatpak no → "Set up Snap and look there? [y/N]" → y; yay builds snapd; socket started; `/snap` linked; table (Snap — sandboxed); "Install these?" → y; installed; `hello-world` runs | **PASS** | V4 (`logs/vm-190-V4.log`, 08:31–08:33): the offer; yay's menus (cleanBuild, diffs), pacman for 6 build deps, the build, "Remove make dependencies? [y/N]"; `snapd.socket` active; `/snap` → `/var/lib/snapd/snap`; "Snap is set up. Looking there."; the table; nog's question; `snap install` fetched snapd + core + hello-world; `snap list` shows hello-world 6.4. `hello-world` itself: *command not found* in that shell — snap's bin folder joins PATH at the next login, and snap prints exactly that warning; nog's set-up line now says it too. `/var/lib/snapd/snap/bin/hello-world` checked in V5 |
+| 3.5 | `nog remove hello-world` | nog asks → y; gone | **PASS** | V5 (`logs/vm-190-V5-V9.log`); `/var/lib/snapd/snap/bin/hello-world` ran first (exit 0); "hello-world removed (snap data snapshot saved)"; `snap list` without it |
 | 3.6 | `nog remove iwd` (bluez-utils installed) | "ell goes too, but bluez-utils uses it"; Keep → y; `pacman -Qi ell` says *Explicitly installed*; iwd gone, ell still there | **PASS** | V6 — F-13 end to end: *ell: install reason has been set to 'explicitly installed'*, then pacman's list showed iwd alone; `pacman -Qi ell` → Explicitly installed; `pacman -Q iwd` → not found |
 | 3.7 | `nog keep cowsay` then `nog remove --yes cowsay` | kept = explicit; the removal still removes cowsay itself (keep protects a package from going *along*, not from being named) | **PASS** | V7; no question under --yes; cowsay gone |
 | 3.8 | `nog install --yes aur/neofetch` | stops before anything: --yes does not answer the AUR | **PASS** | V8; the table shown (AUR — built by yay), then the stop, exit 1 |
-| 3.9 | `nog install cowsay flatpak/wonderpen snap/hello-world`, y to all | three transactions in the chain's order, each tool's own voice, all three in; then `nog remove` of all three | | V9 |
+| 3.9 | `nog install cowsay flatpak/wonderpen snap/hello-world`, y to all | three transactions in the chain's order, each tool's own voice, all three in; then `nog remove` of all three | **PASS** | V9: one table (extra · Flatpak — flathub, as com.tominlab.wonderpen · Snap — sandboxed); nog's question once; pacman's handoff + question; flatpak's permissions + question; snap's handoff; `pacman -Q`, `flatpak list`, `snap list` all show them. V9b `nog remove cowsay wonderpen hello-world`: pacman asks, flatpak asks, nog asks for the snap; all three gone |
 
 ## §4 · Javier, this desktop — step by step
 
@@ -64,7 +64,7 @@ Your desktop already has flatpak, snapd and yay, so no set-up offers here (those
 
 | # | Type | You should see | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-1.9.0rc1-1-x86_64.pkg.tar.zst` | the usual package-file install; only nog changes; then `nog --version` says **1.9.0** | | |
+| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-1.9.0rc2-1-x86_64.pkg.tar.zst` | the usual package-file install; only nog changes; then `nog --version` says **1.9.0** | | |
 | 4.2 | `nog install --help` | the options list has `--yes` with one sentence on what it answers (and that it never answers the AUR) | | |
 | 4.3 | `nog install zzz-nope` | **Not installing** — "zzz-nope was not found in the repositories, the AUR, Flatpak or Snap"; nothing asked | | the whole chain named |
 | 4.4 | `nog install calculator` | **Not installing** — "5 Flatpak apps answer to 'calculator'", the five listed, and the way out: `nog install flatpak/org.gnome.Calculator` | | nog lists, never guesses |
