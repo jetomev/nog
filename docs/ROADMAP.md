@@ -2,13 +2,14 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
-### v1.9.0 — Built 2026-10-14, waits on Javier's run (C3 complete: #7; F-13 #49; #32)
+### v1.9.0 — Built and run 2026-10-14, waits on Javier's rc3 check (C3 complete: #7; F-13 #49; #32; F-15 #51; F-16 #52)
 - [x] `nog install`: the repositories, then the AUR, then Flatpak, then Snap; the source in the table; `flatpak/x` and `snap/x`; a backend offered once when the chain reaches it (flatpak from extra; snapd from the AUR + socket + `/snap`)
 - [x] One transaction per source in the chain's order; nog's own question for Snap (it never asks) as for the AUR; classic snaps said and installed as such; a stopped step names what already went in
 - [x] `nog remove` for Flatpaks and snaps; F-13: what goes along and who still uses it, Keep per package (default yes); `nog keep <pkg>` (= `pacman -D --asexplicit`)
 - [x] `--yes` on install and remove (never the AUR); "nothing is at the keyboard" said as the cause
-- [x] Desktop dry runs (`scripts/dry-run-190.sh`), KognogOS VM from a clean install; 242 → 258 tests, warnings 6
-- [ ] Javier's run; tag, GitHub Release, AUR after it
+- [x] Desktop dry runs (`scripts/dry-run-190.sh`), KognogOS VM from a clean install; 242 → 259 tests, warnings 6
+- [x] Javier's run (14 Oct, 20 steps): F-15 #51 (several Flatpak answers are numbered and asked, a snap of that name on the list) and F-16 #52 (the snap removal question defaults to yes) fixed the same day → rc3
+- [ ] His rc3 check of those two steps; tag, GitHub Release, AUR after it
 
 ### v1.8.0 — Released (C3 part 1: #47)
 - [x] `nog install`: version, source (pacman's order, providers said plainly, then the AUR) and tier before anything is downloaded

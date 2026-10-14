@@ -182,8 +182,32 @@ pub fn install(packages: &[String], yes: bool) {
             match chain.flatpak(name) {
                 ChainAnswer::Found(s) => { *src = s; continue; }
                 ChainAnswer::Ambiguous(apps) => {
-                    enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &ambiguous_flatpak_lines(name, &apps));
-                    end(1);
+                    // v1.9.0 (F-15, #51): several answer to the name — say where
+                    // nog looked, number them, and ask which one. A snap with
+                    // that exact name goes on the same list (only when snapd is
+                    // already up: no set-up offer belongs in this question).
+                    // A script cannot pick a number, so without a keyboard, or
+                    // with --yes, the list is shown and nothing is installed.
+                    let mut options: Vec<InstallSource> = apps.into_iter()
+                        .map(|app| InstallSource::Flatpak { app }).collect();
+                    if !only_flatpak && chain.snap_on && snap::is_available() {
+                        if let ChainAnswer::Found(s) = chain.snap(name) { options.push(s); }
+                    }
+                    let lines = where_looked_lines(name, !only_flatpak, !only_flatpak && helper.is_some(), &options);
+                    if yes || !at_the_keyboard() {
+                        let mut lines = lines;
+                        lines.extend(nobody_to_pick_lines(&options));
+                        enotice(C_PEACH, &format!("Not installing: {}", packages.join(" ")), &lines);
+                        end(1);
+                    }
+                    notice(C_BLUE, &format!("Several answer to '{}'", name), &lines);
+                    match prompt_pick(&format!("nog: Which one? [1-{}, or n for none] ", options.len()), options.len()) {
+                        Some(i) => { *src = options.swap_remove(i); continue; }
+                        None => {
+                            println!("nog: Cancelled — nothing was changed.");
+                            end(1);
+                        }
+                    }
                 }
                 ChainAnswer::NotFound => {}
             }
@@ -564,15 +588,104 @@ fn prompt_yes_no(question: &str, default_yes: bool) -> bool {
     }
 }
 
-/// v1.9.0 (C3): several Flatpak apps answer to one name — list them, never guess.
-fn ambiguous_flatpak_lines(name: &str, apps: &[flatpak::FlatpakApp]) -> Vec<String> {
-    let mut lines = vec![format!("{} Flatpak apps answer to '{}':", apps.len(), name)];
-    for a in apps {
-        lines.push(format!("    {}  ({}{})", a.app_id, a.name,
-            if a.version.is_empty() { String::new() } else { format!(", {}", a.version) }));
+/// v1.9.0 (F-15, #51): several answer to one name. Where nog looked, in the
+/// chain's order, then the options numbered: the Flatpak apps, and a snap of
+/// that exact name when there is one. Pure.
+fn where_looked_lines(name: &str, repos: bool, aur: bool, options: &[InstallSource]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if repos { lines.push("Not in the repositories.".to_string()); }
+    if aur { lines.push("Not in the AUR.".to_string()); }
+    let flatpaks = options.iter().filter(|o| matches!(o, InstallSource::Flatpak { .. })).count();
+    lines.push(format!("Flatpak, {} apps answer to '{}':", flatpaks, name));
+    let width = options.iter().map(|o| option_name(o).len()).max().unwrap_or(0);
+    for (i, o) in options.iter().enumerate() {
+        if i == flatpaks { lines.push("Snap has one too:".to_string()); }
+        lines.push(format!("  {:>2}. {:<w$}  {}", i + 1, option_name(o), option_detail(o), w = width));
     }
-    lines.push(format!("Name the one you want: nog install flatpak/{}", apps[0].app_id));
     lines
+}
+
+/// The name a person picks by: the Flatpak app ID, or the snap's store name.
+fn option_name(o: &InstallSource) -> String {
+    match o {
+        InstallSource::Flatpak { app } => app.app_id.clone(),
+        InstallSource::Snap { info } => info.name.clone(),
+        _ => String::new(),
+    }
+}
+
+/// What tells the options apart: the app's human name, version and remote;
+/// the snap's confinement, version and publisher.
+fn option_detail(o: &InstallSource) -> String {
+    match o {
+        InstallSource::Flatpak { app } => {
+            let v = if app.version.is_empty() { String::new() } else { format!(", {}", app.version) };
+            format!("{}{} — {}", app.name, v, app.remote)
+        }
+        InstallSource::Snap { info } => {
+            let v = if info.version.is_empty() { String::new() } else { format!(", {}", info.version) };
+            let kind = if info.confinement == "classic" { "classic" } else { "sandboxed" };
+            format!("Snap — {}{}, by {}", kind, v, info.publisher)
+        }
+        _ => String::new(),
+    }
+}
+
+/// The two lines added when nobody can pick: a script's shell, or `--yes`.
+fn nobody_to_pick_lines(options: &[InstallSource]) -> Vec<String> {
+    let first = options.iter().find_map(|o| match o {
+        InstallSource::Flatpak { app } => Some(format!("nog install flatpak/{}", app.app_id)),
+        _ => None,
+    }).unwrap_or_default();
+    let snap = options.iter().find_map(|o| match o {
+        InstallSource::Snap { info } => Some(format!(", or nog install snap/{}", info.name)),
+        _ => None,
+    }).unwrap_or_default();
+    vec![
+        "Nothing is at the keyboard to pick one (or --yes was given), so nothing was installed.".to_string(),
+        format!("Name the one you want: {}{}", first, snap),
+    ]
+}
+
+/// What an answer to "Which one?" means. Pure.
+#[derive(Debug, PartialEq)]
+enum Pick {
+    /// The option's index (the number typed, minus one).
+    Chosen(usize),
+    /// Enter, n, no, q: none of them.
+    None,
+    /// Anything else: ask again.
+    Invalid,
+}
+
+fn parse_pick(answer: &str, count: usize) -> Pick {
+    match answer.trim().to_lowercase().as_str() {
+        "" | "n" | "no" | "q" | "none" => Pick::None,
+        a => match a.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= count => Pick::Chosen(n - 1),
+            _ => Pick::Invalid,
+        },
+    }
+}
+
+/// Ask which option, by number. Asks again on an answer that is not on the
+/// list; Enter, n or end-of-input mean none.
+fn prompt_pick(question: &str, count: usize) -> Option<usize> {
+    use std::io::{self, Write};
+    crate::events::ask(question.trim_start_matches("nog: ").trim());
+    loop {
+        print!("{}", question);
+        let _ = io::stdout().flush();
+        let mut buf = String::new();
+        match io::stdin().read_line(&mut buf) {
+            Ok(0) | Err(_) => { println!(); return None; }
+            Ok(_) => match parse_pick(&buf, count) {
+                Pick::Chosen(i) => return Some(i),
+                Pick::None => return None,
+                Pick::Invalid => println!("nog: Type a number from 1 to {}, or n for none.", count),
+            },
+        }
+    }
 }
 
 /// v1.9.0 (C3): a later step of the chain stopped. Say what already went in.
@@ -1005,7 +1118,9 @@ pub fn remove(packages: &[String], yes: bool) {
     if !snaps.is_empty() {
         notice(C_GREEN, &format!("Removing {}", snaps.join(" ")), &[
             "Snaps: `snap remove` never asks, so nog asks here. Their data is kept by snapd for a while (snapd's own rule).".to_string()]);
-        if !yes && !prompt_yes_no(&format!("nog: Remove {}? [y/N] ", snaps.join(" ")), false) {
+        // v1.9.0 (F-16, #52): Enter means yes here, as at pacman's and flatpak's
+        // question in the same removal — the person asked for it to go.
+        if !yes && !prompt_yes_no(&format!("nog: Remove {}? [Y/n] ", snaps.join(" ")), true) {
             println!("nog: Cancelled — the snaps stay.");
             end(1);
         }
@@ -3971,16 +4086,49 @@ mod output_tests {
     }
 
     #[test]
-    fn several_flatpaks_for_one_name_are_listed_and_the_way_out_named() {
-        let apps = vec![
-            flatpak::FlatpakApp { app_id: "org.one.Editor".into(), version: "1".into(), name: "Editor".into(), remote: "flathub".into() },
-            flatpak::FlatpakApp { app_id: "org.two.Editor".into(), version: "".into(), name: "Editor".into(), remote: "flathub".into() },
+    fn several_answers_say_where_nog_looked_and_number_the_options() {
+        // F-15 (#51), Javier 2026-10-14: "Package not available in the repositories.
+        // Package not available in the AUR. Flatpak options: 1. 2. 3. Which one?"
+        let options = vec![
+            InstallSource::Flatpak { app: flatpak::FlatpakApp { app_id: "org.one.Editor".into(), version: "1".into(), name: "Editor".into(), remote: "flathub".into() } },
+            InstallSource::Flatpak { app: flatpak::FlatpakApp { app_id: "org.two.Editor".into(), version: "".into(), name: "Editor".into(), remote: "flathub".into() } },
+            InstallSource::Snap { info: snap::SnapInfo { name: "editor".into(), version: "2.0".into(), publisher: "Someone".into(), confinement: "strict".into() } },
         ];
-        let l = ambiguous_flatpak_lines("editor", &apps);
-        assert_eq!(l[0], "2 Flatpak apps answer to 'editor':");
-        assert_eq!(l[1].trim(), "org.one.Editor  (Editor, 1)");
-        assert_eq!(l[2].trim(), "org.two.Editor  (Editor)");
-        assert_eq!(l[3], "Name the one you want: nog install flatpak/org.one.Editor");
+        let l = where_looked_lines("editor", true, true, &options);
+        assert_eq!(l[0], "Not in the repositories.");
+        assert_eq!(l[1], "Not in the AUR.");
+        assert_eq!(l[2], "Flatpak, 2 apps answer to 'editor':");
+        assert_eq!(l[3].trim(), "1. org.one.Editor  Editor, 1 — flathub");
+        assert_eq!(l[4].trim(), "2. org.two.Editor  Editor — flathub");
+        assert_eq!(l[5], "Snap has one too:");
+        assert_eq!(l[6].trim(), "3. editor          Snap — sandboxed, 2.0, by Someone");
+        // No helper: the AUR was not looked in, so it is not claimed.
+        let l = where_looked_lines("editor", true, false, &options[..2]);
+        assert_eq!(l[1], "Flatpak, 2 apps answer to 'editor':");
+        assert!(!l.iter().any(|x| x.contains("Snap")));
+        // `flatpak/editor`: only Flatpak was looked in, so nothing else is claimed.
+        let l = where_looked_lines("editor", false, false, &options[..2]);
+        assert_eq!(l[0], "Flatpak, 2 apps answer to 'editor':");
+        // A script's shell: the list stands, and the way out names both kinds.
+        let n = nobody_to_pick_lines(&options);
+        assert!(n[0].starts_with("Nothing is at the keyboard to pick one"));
+        assert_eq!(n[1], "Name the one you want: nog install flatpak/org.one.Editor, or nog install snap/editor");
+        assert_eq!(nobody_to_pick_lines(&options[..2])[1], "Name the one you want: nog install flatpak/org.one.Editor");
+    }
+
+    #[test]
+    fn the_pick_is_a_number_on_the_list_and_enter_or_n_is_none() {
+        assert_eq!(parse_pick("1\n", 5), Pick::Chosen(0));
+        assert_eq!(parse_pick(" 5 ", 5), Pick::Chosen(4));
+        assert_eq!(parse_pick("\n", 5), Pick::None);
+        assert_eq!(parse_pick("n\n", 5), Pick::None);
+        assert_eq!(parse_pick("N", 5), Pick::None);
+        assert_eq!(parse_pick("no", 5), Pick::None);
+        // Off the list, or not a number: ask again, never install option 0 or 6.
+        assert_eq!(parse_pick("0", 5), Pick::Invalid);
+        assert_eq!(parse_pick("6", 5), Pick::Invalid);
+        assert_eq!(parse_pick("y", 5), Pick::Invalid);
+        assert_eq!(parse_pick("org.one.Editor", 5), Pick::Invalid);
     }
 
     #[test]

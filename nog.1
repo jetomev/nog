@@ -63,7 +63,9 @@ which source answered before anything is downloaded or built. A Flatpak is
 matched exactly, never fuzzily: the full app ID (\fBorg.gimp.GIMP\fR), the ID's
 last word (\fBgimp\fR), or the app's name (\fBspotify\fR for
 \fBcom.spotify.Client\fR), case ignored; when several apps answer to one name
-nog lists them and stops, and \fBflatpak/\fIapp-id\fR names one. A snap is
+nog numbers them (a snap of that exact name too) and asks which one; with
+\fB--yes\fR or no terminal it lists them and stops. \fBflatpak/\fIapp-id\fR names one
+directly. A snap is
 matched by its exact store name. \fBflatpak/\fIname\fR and \fBsnap/\fIname\fR
 look in that source only; a source switched off with \fBnog deactivate\fR is
 skipped and the not-found notice says so.
@@ -172,7 +174,8 @@ leave it alone. With \fB--yes\fR every such package is kept without asking.
 A name that is not an installed package is looked for among the installed
 Flatpaks (by app ID, its last word, or the app's name) and snaps, and removed by
 its own tool: \fBflatpak uninstall\fR shows what goes and asks; \fBsudo snap
-remove\fR never asks, so nog asks \fBRemove \fIname\fB? [y/N]\fR first. A name
+remove\fR never asks, so nog asks \fBRemove \fIname\fB? [Y/n]\fR first (Enter means
+yes, as at pacman's and flatpak's question). A name
 installed nowhere stops the whole request before anything. \fB--yes\fR answers
 pacman's and flatpak's questions and nog's own; without it and with no terminal
 on standard input nog stops first, as for an install.

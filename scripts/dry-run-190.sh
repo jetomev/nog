@@ -45,6 +45,10 @@ case_ A3  'n\n'    install hello-world
 case_ A4  -        install gimp
 case_ A5  -        install flatpak/org.gimp.GIMP
 case_ A6  -        install calculator
+case_ A6b -        install --yes calculator
+case_ A6c 'n\n'    install calculator
+case_ A6d '9\nx\n\n' install calculator
+case_ A6e -        install flatpak/calculator
 case_ A7  'n\n'    install snap/hello
 case_ A8  -        install --yes aur/neofetch
 case_ A9  -        install --yes cowsay
@@ -56,6 +60,7 @@ case_ A13 -        install ./dist-rc/nog-1.8.0rc1-1-x86_64.pkg.tar.zst
 case_ B1  -        remove zzz-nope
 case_ B2  'n\n'    remove flatseal
 case_ B3  'n\n'    remove hello
+case_ B3b '\n'     remove hello
 case_ B4  'n\n'    remove iwd
 case_ B5  -        remove --yes iwd
 case_ B6  -        remove iwd
