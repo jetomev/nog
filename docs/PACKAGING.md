@@ -32,6 +32,10 @@ aren't listed.*
 | rust | cargo build --release --locked |
 | cargo | the same (Arch's rust provides it) |
 
+## Measured again for v1.9.0 (2026-10-14)
+
+No new program and no new library: the install chain, `nog remove` for Flatpaks and snaps and `nog keep` use `flatpak`, `snap`, `pacman` and `sudo`, already listed. The recipe's `optdepends` words change to say that Flatpak and Snap are installed *and removed* through nog.
+
 ## The AUR recipe
 
 AUR 1.8.0-1 lacks **sudo** (not in Arch's base: some use doas; nog would install and fail at the first change), **zstd** (linked directly), and the optional **flatpak** and **snapd**. A recipe-only change: 1.8.0-2.

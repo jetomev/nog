@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.8.0" "User Commands"
+.TH NOG 1 "October 2026" "nog v1.9.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -45,7 +45,7 @@ section below for the complete privilege model.
 .
 .SH COMMANDS
 .TP
-.B nog install \fIpackage\fR [\fIpackage\fR...] | \fIfile\fR.pkg.tar.* [\fIfile\fR...]
+.B nog install \fR[\fB--yes\fR] \fIpackage\fR [\fIpackage\fR...] | \fIfile\fR.pkg.tar.* [\fIfile\fR...]
 Install one or more packages. Tier classification is printed as informational
 output; installs are never blocked or gated — explicit user commands execute
 user intent. If an AUR helper is configured (see
@@ -55,6 +55,46 @@ without any pre-check. Tier protection applies to future updates, not to install
 Since v1.7.0 a name can carry its source: \fBaur/\fIname\fR is always built from
 the AUR (never swapped for a repository package that provides the same name), and
 \fIrepo\fB/\fIname\fR comes from that repository only. nogForge installs this way.
+.IP
+\fBThe install chain (v1.9.0, C3).\fR A name is looked for in this order:
+the repositories (chaotic-aur included), then the AUR, then Flatpak, then Snap
+\(em each source only when the one before does not have it. The table shows
+which source answered before anything is downloaded or built. A Flatpak is
+matched exactly, never fuzzily: the full app ID (\fBorg.gimp.GIMP\fR), the ID's
+last word (\fBgimp\fR), or the app's name (\fBspotify\fR for
+\fBcom.spotify.Client\fR), case ignored; when several apps answer to one name
+nog lists them and stops, and \fBflatpak/\fIapp-id\fR names one. A snap is
+matched by its exact store name. \fBflatpak/\fIname\fR and \fBsnap/\fIname\fR
+look in that source only; a source switched off with \fBnog deactivate\fR is
+skipped and the not-found notice says so.
+.IP
+Flatpak and snapd are never required (\fIdocs/v2-design.md\fR, ruling 1).
+When the chain reaches a backend that is not set up and a person is at the
+keyboard, nog offers to set it up, once, with the default \fBno\fR: Flatpak is
+the \fBflatpak\fR package from \fIextra\fR (it comes with Flathub); Snap is
+\fBsnapd\fR built from the AUR by the helper, \fBsnapd.socket\fR started, and
+\fB/snap\fR linked for classic snaps. Without a person, or with \fB--yes\fR, a
+missing backend is only named.
+.IP
+Each source makes its own transaction, in the chain's order: pacman (with the
+AUR through the helper), then \fBflatpak install\fR (it shows the runtimes an
+app needs and asks), then \fBsudo snap install\fR, which never asks \(em so
+nog asks \fBInstall these? [Y/n]\fR itself when a snap is involved, as it does
+for the AUR. A snap the store marks \fIclassic\fR (it may change anything on
+the system, like a package) is said so in the table and installed with
+\fB--classic\fR. A step that stops ends the run, and the notice says what had
+already gone in. Flatpaks and snaps are Tier 3 unless pinned, by app ID or snap
+name, as in \fBnog update\fR.
+.IP
+\fB--yes\fR (v1.9.0, issue #32) answers the install's question for you:
+\fBpacman --noconfirm\fR, \fBflatpak install -y\fR, and nog's own question
+for Snap; package files too. Never the AUR: the helper stops to let you review
+each build recipe, and that review is the AUR's one safety, so an AUR name with
+\fB--yes\fR stops before anything. With \fB--yes\fR repository packages go to
+pacman directly, not through the helper (there is nothing for it to ask).
+Without \fB--yes\fR and with no terminal on standard input, nog stops first and
+says that nothing is at the keyboard to answer \(em pacman would read
+end-of-input as "no", and the old message blamed you for it.
 .IP
 Since v1.5.8 pacman asks before installing (no \fB--noconfirm\fR), showing
 exactly what will be installed, dependencies included.
@@ -110,12 +150,40 @@ too. Versions are ordered exactly as pacman orders them. nog shows what it would
 remove, per tier, with sizes, and asks \fB[y/N]\fR; with no answer nothing is
 removed. It refuses while pacman's lock file exists.
 .TP
-.B nog remove \fIpackage\fR [\fIpackage\fR...]
+.B nog remove \fR[\fB--yes\fR] \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
 .BR pacman (8),
 with what only they needed (\fB-Rs\fR). Works uniformly for packages originally
 installed from official repos or AUR. Since v1.5.8 pacman shows the list and asks
 before removing anything.
+.IP
+\fBWhat goes along, and who still uses it (v1.9.0, F-13, issue #49).\fR
+\fBpacman -Rs\fR takes every dependency nothing else \fIrequires\fR \(em a
+package another installed app uses only \fIoptionally\fR counts as unneeded and
+goes too, silently (removing Elisa would have taken \fBvlc-plugin-ffmpeg\fR, and
+VLC most of its video formats). Before pacman runs, nog reads pacman's own dry
+run (\fB-Rsp\fR), finds every package in it that an installed package outside
+the removal lists as optional, says so in plain words with pacman's reason
+(\fIell goes too, but bluez-utils uses it (optional: for btpclient)\fR), and
+asks \fBKeep \fIpackage\fB? [Y/n]\fR for each, default yes. Kept means marked
+as installed on purpose (\fBnog keep\fR), so this removal and every later one
+leave it alone. With \fB--yes\fR every such package is kept without asking.
+.IP
+A name that is not an installed package is looked for among the installed
+Flatpaks (by app ID, its last word, or the app's name) and snaps, and removed by
+its own tool: \fBflatpak uninstall\fR shows what goes and asks; \fBsudo snap
+remove\fR never asks, so nog asks \fBRemove \fIname\fB? [y/N]\fR first. A name
+installed nowhere stops the whole request before anything. \fB--yes\fR answers
+pacman's and flatpak's questions and nog's own; without it and with no terminal
+on standard input nog stops first, as for an install.
+.TP
+.B nog keep \fIpackage\fR [\fIpackage\fR...]
+Mark installed packages as installed on purpose (v1.9.0, F-13) \(em pacman's
+own install reason, \fBpacman -D --asexplicit\fR, without leaving nog for it.
+A kept package is never taken along by the removal of something else. This is
+what \fBnog remove\fR offers for each package it would take along that another
+app still uses. A name that is not installed stops before anything; root is
+needed, so sudo asks once.
 .TP
 .B nog update
 Compute a tier-aware system upgrade plan and hand each source to the tool
@@ -375,6 +443,12 @@ aur, flatpak, snap; install, remove, clean), nog's own questions
 written never stops a run. nogForge reads it for its steps view.
 .
 .SH OPTIONS
+.TP
+.B \-\-yes
+On \fBnog install\fR and \fBnog remove\fR (v1.9.0): answer the question for
+you \(em pacman's, flatpak's, nog's own for Snap \(em and keep what another
+app still uses on a removal. Never the AUR's build review. For scripts and
+programs; see the commands.
 .TP
 .B \-h, \-\-help
 Print help information.
