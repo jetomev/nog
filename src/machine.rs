@@ -87,7 +87,46 @@ pub fn begin() {
 }
 
 /// Write the JSON document to the real stdout (or stdout, outside JSON mode).
+/// v2.0.0 (`nog status`): a command that wants the plan for itself, not on
+/// stdout. In capture mode `emit` keeps the document and `plan_mode()` is on,
+/// so `run_update` stops after the plan exactly as `--json` does.
+static CAPTURE: std::sync::Mutex<Option<Option<Value>>> = std::sync::Mutex::new(None);
+
+pub fn set_capture() {
+    if let Ok(mut c) = CAPTURE.lock() { *c = Some(None); }
+    let _ = PLAN.set(Vec::new());
+}
+
+/// What `emit` kept, once.
+pub fn captured() -> Option<Value> {
+    CAPTURE.lock().ok().and_then(|mut c| c.take()).flatten()
+}
+
+/// Run `f` with stdout sent to /dev/null (the engine's progress lines, when a
+/// command shows its own). Restored afterwards.
+pub fn quietly<T>(f: impl FnOnce() -> T) -> T {
+    let _ = std::io::stdout().flush();
+    let saved = unsafe { libc::dup(1) };
+    let devnull = std::fs::OpenOptions::new().write(true).open("/dev/null").ok();
+    if let (Some(d), true) = (&devnull, saved >= 0) {
+        use std::os::unix::io::AsRawFd;
+        unsafe { libc::dup2(d.as_raw_fd(), 1); }
+    }
+    let out = f();
+    let _ = std::io::stdout().flush();
+    if saved >= 0 {
+        unsafe { libc::dup2(saved, 1); libc::close(saved); }
+    }
+    out
+}
+
 pub fn emit(v: &Value) {
+    if let Ok(mut c) = CAPTURE.lock() {
+        if let Some(slot) = c.as_mut() {
+            *slot = Some(v.clone());
+            return;
+        }
+    }
     let text = format!("{}\n", serde_json::to_string(v).unwrap_or_else(|_| "{}".into()));
     let _ = std::io::stdout().flush();
     let fd = SAVED_STDOUT.load(Ordering::SeqCst);

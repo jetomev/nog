@@ -401,6 +401,115 @@ pub fn remove(names: &[String]) -> crate::handoff::Handoff {
     crate::handoff::run_on_screen(&mut cmd, "sudo snap remove")
 }
 
+/// v2.0.0 (C4): a store result from `snap find`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+    pub summary: String,
+    pub classic: bool,
+}
+
+/// `snap find <query>`: the store's search. "No matching snaps" is an empty
+/// list; a failure (snapd down, no network) is `Err`, said as "could not check".
+pub fn find(query: &str) -> Result<Vec<Found>, String> {
+    let output = Command::new("snap")
+        .args(["find", "--unicode=never", "--color=never", "--", query])
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to launch snap: {}", e))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        if stderr.contains("No matching snaps") || stderr.contains("no snaps found") {
+            return Ok(Vec::new());
+        }
+        return Err(if stderr.is_empty() { format!("snap find exited with status {}", output.status) }
+                   else { stderr.trim_start_matches("error: ").to_string() });
+    }
+    Ok(parse_find(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Pure. `snap find` prints `Name Version Publisher Notes Summary` in columns;
+/// the Summary may hold spaces, so the first four words are the fields and the
+/// rest is the summary. Notes is `-` or words like `classic`.
+pub fn parse_find(stdout: &str) -> Vec<Found> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let t = line.trim_end();
+        if t.is_empty() { continue; }
+        let mut parts = t.split_whitespace();
+        let (Some(name), Some(version), Some(publisher), Some(notes)) =
+            (parts.next(), parts.next(), parts.next(), parts.next()) else { continue };
+        if name == "Name" && version == "Version" { continue; }
+        let summary = parts.collect::<Vec<_>>().join(" ");
+        out.push(Found {
+            name: name.to_string(), version: version.to_string(),
+            publisher: publisher.trim_end_matches(['*', '✓']).to_string(),
+            summary, classic: notes.contains("classic"),
+        });
+    }
+    out
+}
+
+/// v2.0.0 (C4): every installed snap with its revision and notes, for
+/// `nog list` (the apps) and `nog clean` (the disabled revisions).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Installed {
+    pub name: String,
+    pub version: String,
+    pub revision: String,
+    pub tracking: String,
+    pub publisher: String,
+    pub notes: String,
+}
+
+impl Installed {
+    /// core*, snapd and bare are the system under the apps, not apps.
+    pub fn is_base(&self) -> bool {
+        self.name.starts_with("core") || self.name == "snapd" || self.name == "bare" || self.notes.contains("base")
+    }
+    pub fn disabled(&self) -> bool { self.notes.contains("disabled") }
+}
+
+/// `snap list --all`: the active revisions and the kept old ones.
+pub fn list_all() -> Vec<Installed> {
+    let output = match Command::new("snap").args(["list", "--all", "--unicode=never", "--color=never"]).env("LC_ALL", "C").output() {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    parse_list_all(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Pure. `Name Version Rev Tracking Publisher Notes`.
+pub fn parse_list_all(stdout: &str) -> Vec<Installed> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 5 || cols[0] == "Name" { continue; }
+        out.push(Installed {
+            name: cols[0].to_string(), version: cols[1].to_string(), revision: cols[2].to_string(),
+            tracking: cols[3].to_string(), publisher: cols[4].trim_end_matches(['*', '✓']).to_string(),
+            notes: cols.get(5).copied().unwrap_or("-").to_string(),
+        });
+    }
+    out
+}
+
+/// The size of a kept revision's file, `/var/lib/snapd/snaps/<name>_<rev>.snap`
+/// (readable by everyone). 0 when it cannot be read.
+pub fn revision_size(name: &str, revision: &str) -> u64 {
+    std::fs::metadata(format!("/var/lib/snapd/snaps/{}_{}.snap", name, revision)).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Remove one kept revision: `snap remove --revision=N name` (root).
+pub fn remove_revision(name: &str, revision: &str) -> crate::handoff::Handoff {
+    let mut cmd = crate::machine::sudo();
+    cmd.args(["snap", "remove", &format!("--revision={}", revision), name]);
+    crate::handoff::run_on_screen(&mut cmd, "sudo snap remove --revision")
+}
+
 /// Is a snap by this name installed? (`snap list`, exact name)
 pub fn is_installed(name: &str) -> bool {
     list_installed().iter().any(|(n, _, _)| n == name)
@@ -588,5 +697,34 @@ mod tests {
         let out = "name: edgy\npublisher: Someone\nchannels:\n  latest/stable:    --\n  latest/edge:  0.1 2026-01-01 (3) 1MB -\n";
         assert_eq!(parse_info(out).unwrap().version, "");
         assert!(parse_info("error: no snap found\n").is_none());
+    }
+
+    #[test]
+    fn snap_find_is_read_with_its_summary_and_classic_note() {
+        let text = "Name         Version  Publisher   Notes    Summary\nhello-world  6.4      canonical*  -        The 'hello-world' of snaps\ncode         1.95     vscode*     classic  Code editing. Redefined.\n";
+        let got = parse_find(text);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].summary, "The 'hello-world' of snaps");
+        assert_eq!(got[0].publisher, "canonical");
+        assert!(!got[0].classic);
+        assert!(got[1].classic);
+        assert!(parse_find("").is_empty());
+    }
+
+    #[test]
+    fn snap_list_all_tells_apps_from_bases_and_disabled_revisions() {
+        // This desktop, 2026-10-14.
+        let text = "Name    Version             Rev    Tracking       Publisher    Notes\n\
+                    core20  20260410            2866   latest/stable  canonical**  base,disabled\n\
+                    core20  20260901            2922   latest/stable  canonical**  base\n\
+                    hello   2.10.1              29     latest/stable  canonical**  disabled\n\
+                    hello   2.10                42     latest/stable  canonical**  -\n\
+                    snapd   2.77.1              28254  latest/stable  canonical**  snapd\n";
+        let all = parse_list_all(text);
+        assert_eq!(all.len(), 5);
+        let disabled: Vec<(&str, &str)> = all.iter().filter(|s| s.disabled()).map(|s| (s.name.as_str(), s.revision.as_str())).collect();
+        assert_eq!(disabled, vec![("core20", "2866"), ("hello", "29")]);
+        let apps: Vec<&str> = all.iter().filter(|s| !s.is_base() && !s.disabled()).map(|s| s.name.as_str()).collect();
+        assert_eq!(apps, vec!["hello"]);
     }
 }

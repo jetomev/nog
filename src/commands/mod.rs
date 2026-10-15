@@ -14,6 +14,11 @@ use crate::snap;
 use crate::sources;
 use crate::sync_db;
 
+pub mod surface;
+pub mod maintain;
+pub use surface::{search, list, info, reinstall, tier, lock, unlock, status, history};
+pub use maintain::clean;
+
 // Catppuccin Mocha palette — true-color ANSI. Centralized so every tier-colored
 // surface (currently `nog update`; eventually `nog search`) stays consistent.
 const C_RED: &str     = "\x1b[38;2;243;139;168m"; // #F38BA8 — Tier 1
@@ -1236,143 +1241,8 @@ pub fn keep(packages: &[String]) {
 }
 
 /// v1.6.0 (#7): installed packages, for people and for nogForge (`--json`).
-pub fn list(json: bool) {
-    let tm = load_tiers();
-    let repos: HashMap<String, String> = sync_db::load_packages().iter()
-        .filter_map(|(n, d)| d.repo.clone().map(|r| (n.clone(), r)))
-        .collect();
-    let v = crate::machine::list_json(&tm, std::path::Path::new("/var/lib/pacman/local"), &repos);
-    if json {
-        crate::machine::emit(&v);
-        return;
-    }
-    for p in v["packages"].as_array().into_iter().flatten().filter(|p| p["explicit"] == true) {
-        println!("{:<28} {:<20} Tier {}  {}", p["name"].as_str().unwrap_or(""), p["version"].as_str().unwrap_or(""),
-            p["tier"], p["source"].as_str().unwrap_or(""));
-    }
-}
-
 pub fn deactivate(source: &str) {
     set_source(source, false);
-}
-
-/// v1.5.5 (#15): `nog clean` — tier-aware retention for pacman's download
-/// cache. Report first, then ask; nothing is removed without a yes. The
-/// decisions are `cache::plan`'s; this is the reporting and the one root step.
-pub fn clean() {
-    use std::io::{self, Write};
-    let cfg = load_config();
-    let tm = load_tiers();
-
-    let Some(installed) = pacman::all_installed_versions() else {
-        eprintln!("nog: could not ask pacman what is installed — stopping, nothing removed.");
-        eprintln!("     (Without that list every cached file would look unused.)");
-        end(1);
-    };
-    let keep = |t: u8| -> usize {
-        (match t { 1 => cfg.clean.tier1_keep, 2 => cfg.clean.tier2_keep, _ => cfg.clean.tier3_keep }) as usize
-    };
-
-    let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
-    let mut stale: Vec<std::path::PathBuf> = Vec::new();
-    let mut rows: Vec<CleanRow> = Vec::new();
-    let mut total_files = 0usize;
-    let mut total_bytes = 0u64;
-    let mut kept_files = 0usize;
-    let mut kept_bytes = 0u64;
-
-    for dir in cache::cache_dirs(&cfg.paths.pacman_conf) {
-        let listing = cache::list_dir(&dir);
-        if listing.files.is_empty() && listing.stale_dirs.is_empty() {
-            continue;
-        }
-        total_files += listing.files.len();
-        total_bytes += listing.files.iter().map(|(_, b)| b).sum::<u64>();
-        let plan = cache::plan(
-            cache::read_listing(&listing.files),
-            &installed,
-            |n| tier_num(&tm.classify(n)),
-            keep,
-        );
-        for (f, reason) in &plan.remove {
-            let label = match reason {
-                cache::Reason::Older(t) => format!("Tier {} · older than the newest {}", t, keep(*t).max(1)),
-                cache::Reason::NotInstalled => "No longer installed".to_string(),
-            };
-            match rows.iter_mut().find(|r| r.what == label) {
-                Some(r) => { r.versions += 1; r.bytes += cache::Plan::bytes(f); }
-                None => rows.push(CleanRow { what: label, versions: 1, bytes: cache::Plan::bytes(f) }),
-            }
-            to_remove.push(dir.join(&f.file));
-            if let Some((sig, _)) = &f.sig {
-                to_remove.push(dir.join(sig));
-            }
-        }
-        for f in &plan.keep {
-            kept_files += 1;
-            kept_bytes += cache::Plan::bytes(f);
-        }
-        stale.extend(listing.stale_dirs.iter().map(|d| dir.join(d)));
-    }
-    rows.sort_by(|a, b| a.what.cmp(&b.what));
-
-    println!();
-    println!("nog: pacman's download cache — {} files, {}.", total_files, human_size(total_bytes));
-    println!();
-    print!("{}", format_clean_report(&rows, stale.len()));
-    println!();
-    println!("{}Kept: {} package versions ({}), including every installed version.{}",
-        C_SUBTEXT, kept_files, human_size(kept_bytes), C_RESET);
-
-    if to_remove.is_empty() && stale.is_empty() {
-        println!();
-        println!("nog: Nothing to clean.");
-        return;
-    }
-    if cache::pacman_is_running() {
-        eprintln!();
-        eprintln!("nog: pacman is running (its lock file exists) — stopping, nothing removed.");
-        end(1);
-    }
-
-    crate::events::steps(&[("clean", "Removing old downloads".to_string())]);
-    crate::events::ask("Remove them? [y/N]");
-    println!();
-    print!("nog: Remove them? [y/N] ");
-    let _ = io::stdout().flush();
-    let mut answer = String::new();
-    let got = io::stdin().read_line(&mut answer);
-    if !matches!(got, Ok(n) if n > 0) || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-        println!();
-        println!("nog: Nothing removed.");
-        return;
-    }
-
-    crate::events::start("clean", "Removing old downloads");
-    let mut failed = false;
-    for batch in to_remove.chunks(400) {
-        let status = crate::machine::sudo().args(["rm", "-f", "--"]).args(batch).status();
-        failed |= !matches!(status, Ok(s) if s.success());
-    }
-    for batch in stale.chunks(100) {
-        let status = crate::machine::sudo().args(["rm", "-rf", "--"]).args(batch).status();
-        failed |= !matches!(status, Ok(s) if s.success());
-    }
-
-    let after: u64 = cache::cache_dirs(&cfg.paths.pacman_conf).iter()
-        .map(|d| cache::list_dir(d).files.iter().map(|(_, b)| b).sum::<u64>())
-        .sum();
-    println!();
-    if failed {
-        eprintln!("nog: some files could not be removed (see above).");
-    }
-    println!("nog: Cache is now {} (was {}): {} freed.",
-        human_size(after), human_size(total_bytes), human_size(total_bytes.saturating_sub(after)));
-    crate::events::finished("clean", "Removing old downloads", !failed,
-        &format!("{} freed", human_size(total_bytes.saturating_sub(after))));
-    if failed {
-        end(1);
-    }
 }
 
 /// One line of the `nog clean` report.
@@ -1699,6 +1569,11 @@ enum HeldReason {
     /// v1.6.0 (#7): you kept it back (`--keep`, nogForge's unticked box). Its
     /// coupled partners then follow it through the same coupling rules.
     KeptBack,
+    /// v2.0.0 (C4): locked with `nog lock` — never updated until `nog unlock`.
+    Locked,
+    /// v2.0.0 (#5): built after a held linchpin's new series (glibc 2.45,
+    /// gcc-libs 16) and so probably linked against it; released with it.
+    BuiltAfter(String),
 }
 
 /// v1.5.6 (#31): the keyring packages. Holding them back is itself the
@@ -2180,6 +2055,54 @@ fn run_update(realign: bool) -> UpdateEnd {
         }
     }
 
+    // v2.0.0 (C4): a locked package is held, whatever its window says, and is
+    // never promoted. An unreadable lock file fails closed — nothing is treated
+    // as locked — and says so.
+    let locked_names: Vec<String> = match crate::locks::load(crate::locks::DEFAULT_PATH) {
+        Ok(l) => l,
+        Err(e) => { eprintln!("nog: warning — {} (no package is treated as locked this run)", e); Vec::new() }
+    };
+    if !locked_names.is_empty() {
+        let mut kept_ready = Vec::new();
+        for entry in ready.drain(..) {
+            if locked_names.contains(&entry.0.name) { held.push((entry.0.clone(), entry.1.clone(), 0, HeldReason::Locked)); } else { kept_ready.push(entry); }
+        }
+        ready = kept_ready;
+        let mut kept_unknown = Vec::new();
+        for entry in unknown.drain(..) {
+            if locked_names.contains(&entry.0.name) { held.push((entry.0.clone(), entry.1.clone(), 0, HeldReason::Locked)); } else { kept_unknown.push(entry); }
+        }
+        unknown = kept_unknown;
+        for h in held.iter_mut() {
+            if locked_names.contains(&h.0.name) && !matches!(h.3, HeldReason::Locked) { h.2 = 0; h.3 = HeldReason::Locked; }
+        }
+    }
+    // v2.0.0 (#5): the linchpin rule. While glibc or gcc-libs is held with a
+    // pending series change, repository packages built after that new build
+    // move to Held with it (they were probably linked against it). A same-series
+    // rebuild moves nothing. `--promote` on a package overrides, as everywhere.
+    {
+        let built = |u: &PendingUpdate, remaining: u64| holds::Built {
+            name: u.name.clone(), old_version: u.old_version.clone(), new_version: u.new_version.clone(),
+            built: packages.get(&u.name).map(|d| d.builddate).unwrap_or(0), remaining,
+        };
+        let r: Vec<holds::Built> = ready.iter().filter(|(u, _, _)| u.source == Source::Pacman).map(|(u, _, _)| built(u, 0)).collect();
+        let h: Vec<holds::Built> = held.iter().filter(|(u, _, _, _)| u.source == Source::Pacman).map(|(u, _, rem, _)| built(u, *rem)).collect();
+        let demotions = holds::linchpin_demotions(&r, &h);
+        if !demotions.is_empty() {
+            let promote = crate::machine::promote();
+            let mut kept = Vec::new();
+            for entry in ready.drain(..) {
+                match demotions.iter().find(|(n, _, _)| n == &entry.0.name) {
+                    Some((_, linchpin, rem)) if !promote.contains(&entry.0.name) =>
+                        held.push((entry.0.clone(), entry.1.clone(), *rem, HeldReason::BuiltAfter(linchpin.clone()))),
+                    _ => kept.push(entry),
+                }
+            }
+            ready = kept;
+        }
+    }
+
     // v1.6.0 (#7): what you chose to keep back is held before the coupling
     // rules run, so they decide what must stay back with it — the answer
     // nogForge shows under an unticked box. Keys are never kept back (#31).
@@ -2218,7 +2141,7 @@ fn run_update(realign: bool) -> UpdateEnd {
     let mut promoted: std::collections::HashSet<String> = std::collections::HashSet::new();
     if !promote.is_empty() {
         let (up, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut held).into_iter()
-            .partition(|(u, _, _, r)| promote.iter().any(|p| p == &u.name) && !matches!(r, HeldReason::KeptBack));
+            .partition(|(u, _, _, r)| promote.iter().any(|p| p == &u.name) && !matches!(r, HeldReason::KeptBack | HeldReason::Locked));
         held = rest;
         for (u, t, _, _) in up {
             promoted.insert(u.name.clone());
@@ -3283,12 +3206,13 @@ fn plan_json(
         v["note"] = json!(held_note(*rem, r));
         v["days_remaining"] = json!(rem);
         v["ready_on"] = match r {
-            HeldReason::ManualSignoff | HeldReason::KeptBack => json!(null),
+            HeldReason::ManualSignoff | HeldReason::KeptBack | HeldReason::Locked => json!(null),
             HeldReason::CoupledTo(_) if *rem == 0 => json!(null),
             _ => json!(now + rem * 86_400),
         };
         v["kept_back"] = json!(matches!(r, HeldReason::KeptBack));
-        v["coupled_to"] = match r { HeldReason::CoupledTo(p) => json!(p), _ => json!(null) };
+        v["coupled_to"] = match r { HeldReason::CoupledTo(p) | HeldReason::BuiltAfter(p) => json!(p), _ => json!(null) };
+        v["locked"] = json!(matches!(r, HeldReason::Locked));
         v
     }).collect();
     let unknown_rows: Vec<_> = unknown.iter().map(|(u, t)| row(u, t)).collect();
@@ -3344,6 +3268,12 @@ fn named_problems(only: &[String], pending: &[&str], held: &[(&str, String, Opti
 fn held_note(remaining: u64, reason: &HeldReason) -> String {
     match reason {
         HeldReason::KeptBack => "kept back by you".to_string(),
+        HeldReason::Locked => "locked by you — `nog unlock` releases it".to_string(),
+        HeldReason::BuiltAfter(l) => match remaining {
+            0 => format!("built after the new {} · moves with it", l),
+            1 => format!("1 day · built after the new {}, moves with it", l),
+            n => format!("{} days · built after the new {}, moves with it", n, l),
+        },
         HeldReason::ManualSignoff =>
             "manual sign-off required — run `nog unlock` to release".to_string(),
         // Countdown first, so the Note column stays scannable by its leading
@@ -4437,77 +4367,6 @@ mod output_tests {
     }
 }
 
-pub fn search(query: &str, json: bool) {
-    let cfg = load_config();
-    let tm = load_tiers();
-    let output = pacman::search_capture(query);
-    if json {
-        // v1.6.0 (#7): the repositories, then the AUR through the helper (if any
-        // and if the AUR source is on). Read-only: nothing needs root.
-        let repo = String::from_utf8_lossy(&output.stdout).to_string();
-        let aur = resolve_helper(&cfg).filter(|_| sources::load(sources::DEFAULT_PATH).aur).and_then(|h| {
-            std::process::Command::new(h.binary()).args(["-Ssa", query]).output().ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        });
-        crate::machine::emit(&crate::machine::search_json(&tm, query, &repo, aur.as_deref()));
-        return;
-    }
-
-    if output.stdout.is_empty() {
-        println!("nog: no results for '{}'", query);
-        return;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.lines().collect();
-    let mut i = 0;
-
-    while i < lines.len() {
-        let line = lines[i];
-
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            let pkg_name = line
-                .split('/')
-                .nth(1)
-                .unwrap_or("")
-                .split_whitespace()
-                .next()
-                .unwrap_or("");
-
-            let tier = tm.classify(pkg_name);
-            // All three tier labels now read their day count from the holds
-            // config, and Tier 1 flips to "manual sign-off" text only when
-            // expert mode is enabled. This keeps the search annotation in
-            // lockstep with the actual v1.0 behavior — the old hardcoded
-            // "manual sign-off" for Tier 1 and bespoke "fast-track" for
-            // Tier 3 both misrepresented the default experience.
-            let tier_tag = match tier {
-                Tier::One => {
-                    let body = if tm.is_manual_signoff(pkg_name) {
-                        "manual sign-off".to_string()
-                    } else {
-                        format!("{}d hold", cfg.holds.tier1_days)
-                    };
-                    format!(" \x1b[31m[Tier 1 — {}]\x1b[0m", body)
-                }
-                Tier::Two   => format!(" \x1b[33m[Tier 2 — {}d hold]\x1b[0m",
-                                    cfg.holds.tier2_days),
-                Tier::Three => format!(" \x1b[32m[Tier 3 — {}d hold]\x1b[0m",
-                                    cfg.holds.tier3_days),
-            };
-
-            println!("{}{}", line, tier_tag);
-
-            if i + 1 < lines.len() && (lines[i+1].starts_with(' ') || lines[i+1].starts_with('\t')) {
-                println!("{}", lines[i + 1]);
-                i += 2;
-                continue;
-            }
-        }
-        i += 1;
-    }
-}
-
 pub fn pin(package: &str, tier: u8) {
     let cfg = load_config();
     let current = load_tiers().classify(package);
@@ -4522,58 +4381,6 @@ pub fn pin(package: &str, tier: u8) {
             eprintln!("nog: failed to pin '{}': {}", package, e);
             end(1);
         }
-    }
-}
-
-pub fn unlock(package: &str, promote: bool) {
-    // `unlock --promote` force-upgrades a package immediately, bypassing the
-    // hold window regardless of tier.
-    //
-    // v1.0.4 relaxed the Tier 1 restriction. Pre-v1.0.4 unlock refused any
-    // non-Tier-1 package ("no unlock needed (only Tier 1 is ever held by
-    // policy)"), but Tier 2 packages CAN be held within their 15-day window —
-    // and the 2026-05-25 pipewire split-PKGBUILD incident showed that users
-    // need to release Tier 2 holds to break a tier-mismatched lockstep
-    // deadlock. The new rule: any held package can be promoted.
-    let tm = load_tiers();
-    let tier = tm.classify(package);
-    let signoff = tm.is_manual_signoff(package);
-
-    if !promote {
-        println!("nog: '{}' is {}.", package, tier);
-        match tier {
-            Tier::One if signoff => {
-                println!("     Tier 1 with `manual_signoff = true` — wholesale held until promote.");
-            }
-            Tier::One => {
-                println!("     Tier 1 (30-day hold by default).");
-            }
-            Tier::Two => {
-                println!("     Tier 2 (15-day hold by default).");
-            }
-            Tier::Three => {
-                println!("     Tier 3 (7-day hold by default).");
-            }
-        }
-        println!("     `nog unlock` by itself does nothing — it has no per-session state to toggle.");
-        println!("     To force-upgrade this package now, bypassing the hold, run:");
-        println!("         nog unlock {} --promote", package);
-        return;
-    }
-
-    let cfg = load_config();
-    let helper = resolve_helper(&cfg);
-    guard_not_sudo_with_helper(helper);
-
-    println!("nog: promoting '{}' (currently {}) — forcing an upgrade now.", package, tier);
-    let pkgs = vec![package.to_string()];
-    let status = match helper {
-        Some(h) => aur::install(h, &pkgs),
-        None    => pacman::install(&pkgs, false),
-    };
-    if !status.success() {
-        eprintln!("nog: upgrade exited with status {}", status.code().unwrap_or(-1));
-        end(status.code().unwrap_or(1));
     }
 }
 

@@ -7,6 +7,9 @@ mod commands;
 mod events;
 mod config;
 mod holds;
+mod locks;
+mod maint;
+mod history;
 mod elf;
 mod local_db;
 mod machine;
@@ -111,19 +114,79 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         promote: Vec<String>,
     },
-    /// Search pacman repos; results annotated by tier (red/yellow/green)
+    /// Search every source: the repositories, the AUR, Flatpak and Snap
+    ///
+    /// v2.0.0 (C4): results per source, each with its tier; a Flatpak row says
+    /// how to install exactly it (`flatpak/<app-id>`), a snap row `snap/<name>`.
+    /// A source that is off or not installed is skipped; one that cannot be
+    /// reached is said. `--json` for programs (nogForge's Install page).
     Search {
         query: String,
-        /// Results as JSON, with the AUR through the helper (v1.6.0)
         #[arg(long)]
         json: bool,
     },
-    /// List installed packages with their tier and where they came from
+    /// List installed packages, Flatpak apps and snaps with their tier and source
     ///
     /// `--json` adds what needs each one and whether it is protected from
     /// removal (Tier 1, the base set, or needed by another package) — what
-    /// nogForge's Home shows (v1.6.0).
+    /// nogForge's Home shows (v1.6.0). Flatpak apps and snaps since v2.0.0.
     List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Everything nog knows about one package: source, tier and why, hold, details
+    ///
+    /// v2.0.0 (C4). Installed first (pacman's database, an installed Flatpak or
+    /// snap), then the repositories, the AUR, Flatpak, Snap. `--json` for programs.
+    Info {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put back the files of installed packages, each through its own tool
+    ///
+    /// v2.0.0 (C4): pacman reinstalls the same version, the AUR helper rebuilds,
+    /// `flatpak install --reinstall` for a Flatpak app. A snap cannot be
+    /// reinstalled in place (snapd has no such step), and a name that is not
+    /// installed stops before anything.
+    Reinstall {
+        #[arg(required = true)]
+        packages: Vec<String>,
+        /// Answer the tools' questions for you (never the AUR's build review)
+        #[arg(long)]
+        yes: bool,
+    },
+    /// A package's tier and where it comes from; --set moves it (what `nog pin` does)
+    Tier {
+        package: String,
+        /// Move the package to this tier (1, 2 or 3); written to tier-pins.toml
+        #[arg(long)]
+        set: Option<u8>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Lock packages at their installed version: never updated until unlocked
+    ///
+    /// v2.0.0 (C4). `nog update` lists a locked package as held, "locked by
+    /// you", and pacman is told to ignore it. Alone, lists the locks.
+    /// Written to /etc/nog/locks.toml, so every user and nogForge see them.
+    Lock {
+        packages: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The dashboard: what is installed from where, what is ready or held, locks, last runs
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// What nog has done: every run, every update decision, every reboot advice
+    ///
+    /// v2.0.0 (C4). Read from nog's own logs (~/.local/share/nog/logs, kept 90
+    /// days), newest first. `--days N` (default 30).
+    History {
+        #[arg(long, default_value = "30")]
+        days: u32,
         #[arg(long)]
         json: bool,
     },
@@ -137,14 +200,14 @@ enum Commands {
         #[arg(long, default_value = "1")]
         tier: u8,
     },
-    /// Force-upgrade a held Tier 1 package via --promote; otherwise informational
+    /// Remove a lock; with --promote, also upgrade the package now, past its hold
     ///
-    /// With `--promote`: bypass the hold window and any sign-off policy,
-    /// upgrading the package immediately via pacman or the configured helper.
-    /// Without `--promote`: just prints the held status (there is no per-session
-    /// unlock state to toggle).
+    /// v2.0.0: `nog unlock <pkg>` undoes `nog lock`. `--promote` keeps its
+    /// v1.0.4 meaning: bypass the hold window and any sign-off policy and
+    /// upgrade the package immediately via pacman or the configured helper.
     Unlock {
-        package: String,
+        #[arg(required = true)]
+        packages: Vec<String>,
         #[arg(long)]
         promote: bool,
     },
@@ -158,13 +221,22 @@ enum Commands {
         /// Source to deactivate: "aur", "chaotic-aur", "flatpak", or "snap"
         source: String,
     },
-    /// Clear old package downloads from pacman's cache, keeping more of what matters
+    /// Clean up what every source leaves behind: old downloads, orphans, build trees, unused runtimes, old snap revisions
     ///
-    /// Tier 1 keeps 3 versions, Tier 2 keeps 2, Tier 3 keeps 1 (set under
-    /// [clean] in nog.conf). The installed version is never removed, a newer
-    /// download is kept, and packages no longer installed are cleared. Shows
-    /// what it would remove and asks first; nothing is removed without a yes.
-    Clean,
+    /// v2.0.0 (C5). One report, each category picked on its own, each removed
+    /// by the tool that owns it (pacman asks, flatpak asks, nog says). pacman's
+    /// cache keeps 3/2/1 versions per tier (v1.5.5; `[clean]` in nog.conf) and
+    /// never the installed one. `--json` is the report alone; `--only a,b`
+    /// picks categories (cache, orphans, aur, flatpak, snap); `--yes` answers
+    /// the questions.
+    Clean {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+    },
     /// Reactivate a package source previously disabled with `nog deactivate`
     Activate {
         /// Source to activate: "aur", "chaotic-aur", "flatpak", or "snap"
@@ -189,7 +261,9 @@ fn main() {
     // 2 Oct 2026). The hidden _debug commands are internal and stay bare.
     let internal = matches!(cli.command, Commands::DebugDates { .. } | Commands::DebugHold { .. });
     let json = matches!(&cli.command,
-        Commands::Update { json: true, .. } | Commands::Search { json: true, .. } | Commands::List { json: true });
+        Commands::Update { json: true, .. } | Commands::Search { json: true, .. } | Commands::List { json: true }
+        | Commands::Info { json: true, .. } | Commands::Tier { json: true, .. } | Commands::Lock { json: true, .. }
+        | Commands::Status { json: true } | Commands::History { json: true, .. } | Commands::Clean { json: true, .. });
     if json {
         machine::begin();
     }
@@ -221,10 +295,16 @@ fn main() {
         Commands::Search { query, json } => commands::search(&query, json),
         Commands::List { json } => commands::list(json),
         Commands::Pin { package, tier } => commands::pin(&package, tier),
-        Commands::Unlock { package, promote } => commands::unlock(&package, promote),
+        Commands::Unlock { packages, promote } => commands::unlock(&packages, promote),
+        Commands::Info { name, json } => commands::info(&name, json),
+        Commands::Reinstall { packages, yes } => commands::reinstall(&packages, yes),
+        Commands::Tier { package, set, json } => commands::tier(&package, set, json),
+        Commands::Lock { packages, json } => commands::lock(&packages, json),
+        Commands::Status { json } => commands::status(json),
+        Commands::History { days, json } => commands::history(days, json),
         Commands::Deactivate { source } => commands::deactivate(&source),
         Commands::Activate { source } => commands::activate(&source),
-        Commands::Clean => commands::clean(),
+        Commands::Clean { json, yes, only } => commands::clean(json, yes, &only),
         Commands::DebugDates { package } => debug_dates(&package),
         Commands::DebugHold { package } => debug_hold(&package),
     }

@@ -239,6 +239,51 @@ impl TierManager {
             .unwrap_or(false)
     }
 
+    /// v2.0.0 (C4, `nog tier`): the tier and, in words, where it comes from.
+    /// Pure. The order is `classify`'s: pinned by name, a `-headers` of a
+    /// pinned package, `lib32-` of one, a split-package sibling, a group
+    /// member; otherwise the default.
+    pub fn explain(&self, package: &str) -> (Tier, String) {
+        if self.in_tier1(package) { return (Tier::One, "pinned to Tier 1 in tier-pins.toml".into()); }
+        if self.in_tier2(package) { return (Tier::Two, "pinned to Tier 2 in tier-pins.toml".into()); }
+        if let Some(base) = package.strip_suffix("-headers") {
+            if self.in_tier1(base) { return (Tier::One, format!("the headers of {}, which is pinned to Tier 1", base)); }
+        }
+        if let Some(base) = package.strip_prefix("lib32-") {
+            let t = self.classify_direct(base);
+            if t != Tier::Three { return (t.clone(), format!("the 32-bit half of {}, which is {}", base, t)); }
+        }
+        if let Some(pkgbase) = self.pkgbase_index.pkgbase_of.get(package) {
+            if let Some(siblings) = self.pkgbase_index.siblings_of.get(pkgbase) {
+                let mut best: Option<(&String, Tier)> = None;
+                for sibling in siblings {
+                    if sibling == package { continue; }
+                    let t = self.classify_direct(sibling);
+                    if t != Tier::Three && best.as_ref().map_or(true, |(_, b)| t.rank() < b.rank()) {
+                        best = Some((sibling, t));
+                    }
+                }
+                if let Some((sib, t)) = best {
+                    return (t.clone(), format!("built from the same recipe as {} ({}), so it moves with it", sib, t));
+                }
+            }
+        }
+        if let Some(members) = self.group_members.get(package) {
+            let mut best: Option<(&String, Tier)> = None;
+            for m in members {
+                if m == package { continue; }
+                let t = self.classify_no_groups(m);
+                if t != Tier::Three && best.as_ref().map_or(true, |(_, b)| t.rank() < b.rank()) {
+                    best = Some((m, t));
+                }
+            }
+            if let Some((m, t)) = best {
+                return (t.clone(), format!("in a group with {} ({}) in tier-pins.toml", m, t));
+            }
+        }
+        (Tier::Three, "not pinned: the default".into())
+    }
+
     pub fn is_manual_signoff(&self, package: &str) -> bool {
         self.classify(package) == Tier::One && self.pins.tier1.manual_signoff
     }
@@ -593,5 +638,18 @@ browser-bundle = ["firefox", "firefox-extension-mailvelope"]
         // The interesting case: lib32-libpipewire couples to its lib32-pipewire
         // sibling via pkgbase, which itself classifies Tier 2 via the lib32 rule.
         assert_eq!(tm.classify("lib32-libpipewire"), Tier::Two);
+    }
+
+    #[test]
+    fn the_tier_is_explained_in_words() {
+        let tm = TierManager::from_toml_for_tests(
+            "[tier1]\nmanual_signoff = false\npackages = [\"linux\", \"glibc\"]\n[tier2]\nmanual_signoff = false\npackages = [\"firefox\"]\n[tier3]\nmanual_signoff = false\npackages = []\n[groups]\nkde = [\"dolphin\", \"firefox\"]\n");
+        assert_eq!(tm.explain("linux"), (Tier::One, "pinned to Tier 1 in tier-pins.toml".into()));
+        assert_eq!(tm.explain("linux-headers"), (Tier::One, "the headers of linux, which is pinned to Tier 1".into()));
+        assert_eq!(tm.explain("lib32-glibc"), (Tier::One, "the 32-bit half of glibc, which is Tier 1".into()));
+        assert_eq!(tm.explain("dolphin"), (Tier::Two, "in a group with firefox (Tier 2) in tier-pins.toml".into()));
+        assert_eq!(tm.explain("cowsay"), (Tier::Three, "not pinned: the default".into()));
+        assert_eq!(tm.explain("cowsay").0, tm.classify("cowsay"));
+        assert_eq!(tm.explain("dolphin").0, tm.classify("dolphin"));
     }
 }

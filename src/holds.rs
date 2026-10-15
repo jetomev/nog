@@ -625,6 +625,59 @@ pub fn coupling_demotions(
 
 /// Convert seconds to days, rounding **up**. 0s -> 0d, 1s -> 1d, 86400s -> 1d,
 /// 86401s -> 2d. Matches the spec's "4.x is 5 automatically" rule.
+/// v2.0.0 (#5): the linchpins — the foundation packages a fast-lane package is
+/// compiled against. When one of them has a pending update that changes its
+/// **series** (glibc 2.44 → 2.45: new `GLIBC_2.45` symbol versions; gcc-libs
+/// 15 → 16: new `GLIBCXX_3.4.xx` ones), anything built after that new build
+/// was probably linked against it and would fail at runtime with
+/// `GLIBC_2.45 not found` if it landed while the linchpin is still held — the
+/// 2026-08-04 spectacle breakage. The number is how many leading version
+/// components make the series.
+pub const LINCHPINS: [(&str, usize); 2] = [("glibc", 2), ("gcc-libs", 1)];
+
+/// Pure. The series of a pacman version: the first `depth` dotted components
+/// of its pkgver, epoch and pkgrel dropped — `2.44+r24+g16be…-1` → `2.44`,
+/// `15.2.1+r22-1` with depth 1 → `15`.
+pub fn series(version: &str, depth: usize) -> String {
+    let v = pkgver(version);
+    let numeric: String = v.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    numeric.split('.').filter(|s| !s.is_empty()).take(depth.max(1)).collect::<Vec<_>>().join(".")
+}
+
+/// A pending update as the linchpin rule sees it: its name, the versions, when
+/// the candidate was built, and (held ones) the days left on its hold.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Built {
+    pub name: String,
+    pub old_version: String,
+    pub new_version: String,
+    pub built: u64,
+    pub remaining: u64,
+}
+
+/// Pure. The Ready packages to hold back with a held linchpin, each with the
+/// linchpin's name and its countdown. Fires only when the linchpin's pending
+/// update changes its series — a same-series rebuild (2.44 → 2.44, most
+/// months) cannot add a symbol version, so nothing moves — and only for
+/// candidates built **after** the new linchpin existed. Measured on the test
+/// desktop on 2026-10-14: 0 of 160 pending packages would have moved (glibc
+/// was a same-series rebuild), which is right.
+pub fn linchpin_demotions(ready: &[Built], held: &[Built]) -> Vec<(String, String, u64)> {
+    let mut out = Vec::new();
+    for (name, depth) in LINCHPINS {
+        let Some(l) = held.iter().find(|h| h.name == name) else { continue };
+        if series(&l.old_version, depth) == series(&l.new_version, depth) {
+            continue;
+        }
+        for r in ready {
+            if r.built > l.built && !out.iter().any(|(n, _, _): &(String, String, u64)| n == &r.name) {
+                out.push((r.name.clone(), l.name.clone(), l.remaining));
+            }
+        }
+    }
+    out
+}
+
 fn days_ceil(seconds: u64) -> u64 {
     if seconds == 0 {
         0
@@ -1464,5 +1517,60 @@ mod tests {
         assert_eq!(demoted_names(ready.iter().map(|p| (p.name.clone(), String::new())).collect()),
                    vec!["unrelated"], "only the unrelated package still releases");
         assert_eq!(held.len(), 4, "the whole qt6 cohort moved together");
+    }
+
+    fn built(name: &str, old: &str, new: &str, built: u64, remaining: u64) -> Built {
+        Built { name: name.into(), old_version: old.into(), new_version: new.into(), built, remaining }
+    }
+
+    #[test]
+    fn a_series_is_the_leading_components_of_the_pkgver() {
+        assert_eq!(series("2.44+r24+g16be1518495f-1", 2), "2.44");
+        assert_eq!(series("2.45-1", 2), "2.45");
+        assert_eq!(series("15.2.1+r22+gabc-1", 1), "15");
+        assert_eq!(series("1:2.44-3", 2), "2.44", "the epoch is not part of it");
+        assert_eq!(series("16-1", 1), "16");
+    }
+
+    #[test]
+    fn a_same_series_rebuild_of_glibc_holds_nothing() {
+        // The 2026-10-14 measurement: glibc 2.44 → 2.44 (a point rebuild), built after everything.
+        let held = vec![built("glibc", "2.44+r24-1", "2.44+r50-1", 1_000, 13)];
+        let ready = vec![built("ffmpeg", "7-1", "8-1", 2_000, 0), built("gcc-libs", "15.1-1", "15.2-1", 3_000, 0)];
+        assert!(linchpin_demotions(&ready, &held).is_empty());
+    }
+
+    #[test]
+    fn a_glibc_series_change_holds_what_was_built_after_it() {
+        // The 2026-08-04 spectacle case: ffmpeg and gcc-libs built against the new glibc.
+        let held = vec![built("glibc", "2.43-1", "2.44-1", 1_000, 22)];
+        let ready = vec![
+            built("ffmpeg", "7-1", "8-1", 2_000, 0),
+            built("gcc-libs", "15.1-1", "15.2-1", 3_000, 0),
+            built("cowsay", "3.8.3-1", "3.8.4-1", 500, 0),   // built BEFORE the new glibc: untouched
+        ];
+        let got = linchpin_demotions(&ready, &held);
+        assert_eq!(got, vec![
+            ("ffmpeg".to_string(), "glibc".to_string(), 22),
+            ("gcc-libs".to_string(), "glibc".to_string(), 22),
+        ]);
+    }
+
+    #[test]
+    fn gcc_libs_is_a_linchpin_by_its_major_and_a_package_is_claimed_once() {
+        let held = vec![built("glibc", "2.43-1", "2.44-1", 1_000, 22), built("gcc-libs", "15.2-1", "16.1-1", 1_500, 9)];
+        let ready = vec![built("spectacle", "1-1", "2-1", 2_000, 0)];
+        let got = linchpin_demotions(&ready, &held);
+        assert_eq!(got.len(), 1, "claimed by the first linchpin only");
+        assert_eq!(got[0], ("spectacle".to_string(), "glibc".to_string(), 22));
+        let held = vec![built("gcc-libs", "15.2-1", "16.1-1", 1_500, 9)];
+        assert_eq!(linchpin_demotions(&ready, &held), vec![("spectacle".to_string(), "gcc-libs".to_string(), 9)]);
+    }
+
+    #[test]
+    fn a_promoted_or_ready_linchpin_holds_nothing() {
+        // glibc is not in Held (promoted, or its window is over): the rule has no anchor.
+        let ready = vec![built("glibc", "2.43-1", "2.44-1", 1_000, 0), built("ffmpeg", "7-1", "8-1", 2_000, 0)];
+        assert!(linchpin_demotions(&ready, &[]).is_empty());
     }
 }
