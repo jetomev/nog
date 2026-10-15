@@ -739,7 +739,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [x] `nog remove` for Flatpaks and snaps; what goes along and who still uses it, with a Keep (F-13); `nog keep`
 - [x] `--yes` on install and remove; "nothing is at the keyboard" said as the cause
 - [x] Dry runs on the desktop; the KognogOS VM from a clean install (Flatpak set up on the offer, snapd from the AUR on the offer, the removal that keeps `ell`)
-- [ ] Javier's own run, step by step ([testing/](testing/20261014%20-%20Test%20Matrix%20for%20nog%20v1-9-0.md)): 20 steps on 14 Oct, two findings fixed the same day (F-15 #51: several Flatpak answers are numbered and asked; F-16 #52: the snap removal question defaults to yes); his check of those two on rc3, then the AUR
+- [x] Javier's own run, step by step ([testing/](testing/20261014%20-%20Test%20Matrix%20for%20nog%20v1-9-0.md)): 20 steps on 14 Oct, 57 checks, two findings fixed the same day (F-15 #51: several Flatpak answers are numbered and asked; F-16 #52: the snap removal question defaults to yes) and both passed on his rerun of rc3 the same evening
 
 **Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
 
