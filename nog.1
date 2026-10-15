@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v1.9.0" "User Commands"
+.TH NOG 1 "October 2026" "nog v2.0.0" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -31,6 +31,13 @@ if they prefer to eyeball every kernel upgrade personally. See
 .B TIER SYSTEM
 for the full model.
 .PP
+Since v2.0.0 (the v2 arc complete), one command set covers every source \(em
+the repositories, the AUR, Flatpak and Snap: \fBinstall\fR, \fBremove\fR,
+\fBreinstall\fR, \fBsearch\fR, \fBlist\fR, \fBinfo\fR, \fBtier\fR,
+\fBlock\fR/\fBunlock\fR, \fBstatus\fR, \fBhistory\fR, \fBclean\fR \(em and
+every query command answers in JSON with \fB\-\-json\fR, for programs such as
+nogForge.
+.PP
 .B nog
 should always be run as your regular user. It escalates to root only where
 genuinely required — by invoking
@@ -38,7 +45,9 @@ genuinely required — by invoking
 for package transactions and
 .B sudo tee
 for writing
-.IR /etc/nog/tier-pins.toml .
+.IR /etc/nog/tier-pins.toml
+and
+.IR /etc/nog/locks.toml .
 See the
 .B PRIVILEGES AND SUDO
 section below for the complete privilege model.
@@ -137,20 +146,31 @@ refuses before handing off and says why: the helper stops to let you review the
 build recipe, and nothing is at the keyboard to answer. Answering for you would
 skip that review, so nog does not.
 .TP
-.B nog clean
-Clear old package downloads from pacman's cache (every \fBCacheDir\fR in
-.IR pacman.conf ).
-Since v1.5.5. Retention follows the tier: Tier 1 keeps 3 versions of each
-package, Tier 2 keeps 2, Tier 3 keeps 1 (\fBtier1_keep\fR, \fBtier2_keep\fR,
-\fBtier3_keep\fR under \fB[clean]\fR in
-.IR nog.conf ).
-The installed version always counts as one and is never removed; a version
-newer than the installed one (downloaded, not yet installed) is kept; every file
-of a package that is no longer installed is removed; a \fB.sig\fR goes with its
-package. Leftover \fBdownload-XXXXXX\fR folders older than a day are removed
-too. Versions are ordered exactly as pacman orders them. nog shows what it would
-remove, per tier, with sizes, and asks \fB[y/N]\fR; with no answer nothing is
-removed. It refuses while pacman's lock file exists.
+.B nog clean \fR[\fB\-\-json\fR] [\fB\-\-yes\fR] [\fB\-\-only\fR \fIa\fR,\fIb\fR]
+Clean up what every source leaves behind (v2.0.0, C5). One report, a numbered
+row per category with its size: \fBcache\fR \(em old downloads in pacman's
+cache (every \fBCacheDir\fR in
+.IR pacman.conf ;
+since v1.5.5, keeping 3 versions of each Tier 1 package, 2 of Tier 2, 1 of
+Tier 3 \(em \fBtier1_keep\fR, \fBtier2_keep\fR, \fBtier3_keep\fR under
+\fB[clean]\fR in
+.IR nog.conf
+\(em never the installed version, never a newer download, plus every file of a
+package no longer installed and leftover \fBdownload-XXXXXX\fR folders);
+\fBorphans\fR \(em packages installed as dependencies that nothing needs any
+more (\fBpacman -Qtdq\fR); \fBaur\fR \(em the AUR helper's build trees
+(\fI~/.cache/yay/<pkg>\fR or \fI~/.cache/paru/clone/<pkg>\fR); \fBflatpak\fR
+\(em runtimes no installed app uses (nog's estimate; flatpak decides the exact
+list); \fBsnap\fR \(em the old revisions snapd keeps after updates. Then
+\fB"Clean up which? [all, numbers like 1 3, or n for none]"\fR; nothing is
+removed without an answer. Each category is removed by the tool that owns it,
+in its own voice: nog removes the cache files (root) and the build trees (your
+own files, no password); \fBpacman -Rns\fR shows the orphans and asks;
+\fBflatpak uninstall --unused\fR shows its list and asks; \fBsnap remove
+--revision\fR takes each old revision (root). \fB\-\-only\fR picks categories
+and still asks \fB[y/N]\fR; \fB\-\-yes\fR answers that and the tools'
+questions; \fB\-\-json\fR is the report alone, for nogForge. It refuses while
+pacman's lock file exists.
 .TP
 .B nog remove \fR[\fB--yes\fR] \fIpackage\fR [\fIpackage\fR...]
 Remove one or more packages via
@@ -187,6 +207,39 @@ A kept package is never taken along by the removal of something else. This is
 what \fBnog remove\fR offers for each package it would take along that another
 app still uses. A name that is not installed stops before anything; root is
 needed, so sudo asks once.
+.TP
+.B nog info \fIname\fR [\fB\-\-json\fR]
+Everything nog knows about one package (v2.0.0): where it comes from, its
+version, whether it is installed, its tier and why, how long its updates wait
+(or that it is locked), the age of the repository's build, its description and
+the details its source gives (pacman's fields, \fBflatpak info\fR, \fBsnap
+info\fR). What is installed wins: pacman's database, then an installed Flatpak
+(by app ID, its last word or its name) or snap; then the repositories, the
+AUR, Flatpak, Snap. A name known nowhere stops with the way to search.
+.TP
+.B nog reinstall \fR[\fB\-\-yes\fR] \fIpackage\fR [\fIpackage\fR...]
+Put back the files of installed packages, each through its own tool (v2.0.0):
+pacman reinstalls the same version and asks; the AUR helper rebuilds (never
+under \fB\-\-yes\fR: the recipe review needs a person); \fBflatpak install
+--reinstall\fR for a Flatpak app. A snap cannot be reinstalled in place \(em
+snapd has no such step \(em so nog stops and says the remove-and-install way,
+with what it costs (snapd drops the data after a while). A name that is not
+installed stops before anything; \fBnog install\fR is for something new.
+.TP
+.B nog status \fR[\fB\-\-json\fR]
+The dashboard (v2.0.0): what is installed and from where (packages, the ones
+you chose, foreign ones, Flatpak apps, snaps), which sources are on, the update
+plan's buckets \(em ready now, held by their tier, to be asked about \(em with
+what is released next, the locks, the last run, the last update and the last
+reboot advice. The plan comes from the same code as \fBnog update --json\fR,
+stopped before any question or change.
+.TP
+.B nog history \fR[\fB\-\-days\fR \fIN\fR] [\fB\-\-json\fR]
+What nog has done (v2.0.0), newest first, from its own logs under
+.IR ~/.local/share/nog/logs/
+(kept 90 days): every run with its outcome, every package an update decided
+on (source, bucket, old and new version, what happened), and every reboot
+advice. Default 30 days.
 .TP
 .B nog update
 Compute a tier-aware system upgrade plan and hand each source to the tool
@@ -320,13 +373,15 @@ printed and
 .B nog update
 proceeds with the standard plan.
 .TP
-.B nog search \fIquery\fR
-Search for packages matching
-.IR query
-via
-.BR pacman (8).
-Each result is annotated by tier using the Catppuccin Mocha palette
-(red Tier 1, yellow Tier 2, green Tier 3).
+.B nog search \fIquery\fR [\fB\-\-json\fR]
+Search every source (v2.0.0): the repositories in pacman's order, the AUR
+through the helper when that source is on, then Flatpak (\fBflatpak search\fR)
+and Snap (\fBsnap find\fR) when they are on and installed. Results come per
+source, each with its tier (red Tier 1, yellow Tier 2, green Tier 3); a
+Flatpak row says the exact way to install it (\fBflatpak/\fIapp-id\fR), a
+snap row \fBsnap/\fIname\fR and whether it is classic. A long list is cut at
+30 per source on screen (\fB\-\-json\fR has them all); a source that could
+not be reached is said, never shown as nothing.
 .TP
 .B nog pin \fIpackage\fR \fB--tier=\fR\fI<1|2|3>\fR
 Pin a package to a specific tier. The change is written to
@@ -335,21 +390,37 @@ via
 .B sudo tee
 and survives reboots. Pinning to Tier 3 removes any existing Tier 1 or Tier 2
 entry for that package (Tier 3 is the implicit default for anything not listed).
+Since v2.0.0, \fBnog tier \fIpackage\fB --set \fIN\fR does the same and says
+what changes.
 .TP
-.B nog unlock \fIpackage\fR [\fB--promote\fR]
-Without
+.B nog tier \fIpackage\fR [\fB\-\-set\fR \fI1|2|3\fR] [\fB\-\-json\fR]
+A package's tier and where it comes from, in words (v2.0.0): pinned in
+.IR tier-pins.toml ,
+the headers of a pinned kernel, the 32-bit half of a pinned package, built from
+the same recipe as a pinned sibling, a member of a \fB[groups]\fR entry, or the
+default. With the days its updates wait, and whether it needs a sign-off.
+\fB\-\-set\fR moves it (root: \fBsudo tee\fR); already there means nothing
+changes.
+.TP
+.B nog lock \fR[\fIpackage\fR...] [\fB\-\-json\fR]
+Lock installed packages at their installed version (v2.0.0): a locked package
+is never updated until it is unlocked. \fBnog update\fR lists it as held,
+\fB"locked by you"\fR, passes it to pacman as \fB--ignore\fR, and
+\fB\-\-promote\fR never pulls it in. Written to
+.IR /etc/nog/locks.toml
+(root: \fBsudo tee\fR), so every user of the computer and nogForge see the
+same locks; a name that is not installed stops before anything. Alone,
+\fBnog lock\fR lists the locks.
+.TP
+.B nog unlock \fIpackage\fR [\fIpackage\fR...] [\fB--promote\fR]
+Remove a lock set with \fBnog lock\fR (v2.0.0): the package is offered again
+by \fBnog update\fR by its tier's rules. A package that is not locked is said
+so, with its tier and why, and nothing changes. With
 .BR --promote ,
-this command is informational only. Tier 1 packages under
-.B manual_signoff = true
-are held wholesale; there is no per-session unlock state to toggle, so this
-mode simply prints the held status and points at
-.BR --promote .
-With
-.BR --promote ,
-force-upgrade the package immediately via
+also force-upgrade the package immediately via
 .BR pacman (8)
-or the configured helper, bypassing the hold window and any sign-off policy.
-This is the escape hatch for a held Tier 1 package.
+or the configured helper, bypassing the hold window and any sign-off policy
+(its meaning since v1.0.4). This is the escape hatch for a held Tier 1 package.
 .TP
 .B nog deactivate \fIsource\fR
 Source kill switch (v1.0.9; \fBflatpak\fR v1.1.0, \fBsnap\fR v1.2.0). Valid
@@ -404,7 +475,45 @@ whether each was chosen or pulled in, what needs it, and why it may not be
 removed (Tier 1, the \fBbase\fR set, or needed by another package).
 .TP
 .B nog search \-\-json \fIquery\fR
-The repositories, and the AUR through the helper when the AUR source is on.
+Every source (v2.0.0): the repositories, the AUR through the helper when that
+source is on, Flatpak and Snap when on and installed. A Flatpak or snap row
+carries \fBinstall_as\fR (\fBflatpak/\fIapp-id\fR, \fBsnap/\fIname\fR), the
+exact name to give \fBnog install\fR; \fBsources\fR says what was checked and
+any problem.
+.TP
+.B nog list \-\-json
+Since v2.0.0 the installed Flatpak apps (\fBsource\fR \fBflatpak\fR, with
+\fBremote\fR and \fBruntime\fR) and snaps (\fBsource\fR \fBsnap\fR, with
+\fBrevision\fR, \fBtracking\fR, \fBpublisher\fR, \fBbase\fR) are rows too, each
+with \fBremove_as\fR, the name \fBnog remove\fR takes.
+.TP
+.B nog info \fIname\fR \-\-json
+One package: \fBfound\fR, \fBsource\fR, \fBinstalled\fR, \fBversion\fR,
+\fBdescription\fR, \fBtier\fR and \fBtier_reason\fR, \fBhold\fR in words,
+\fBlocked\fR, \fBbuilt_days_ago\fR, and \fBfields\fR (key/value pairs from the
+source's own tool).
+.TP
+.B nog tier \fIname\fR \-\-json
+\fBtier\fR, \fBreason\fR, \fBhold_days\fR, \fBmanual_signoff\fR.
+.TP
+.B nog lock \-\-json
+\fBlocked\fR: the lock list. (A locked package also shows in the plan's held
+rows with \fBlocked\fR true and no \fBready_on\fR.)
+.TP
+.B nog status \-\-json
+\fBinstalled\fR counts, \fBsources\fR, the \fBplan\fR (as \fBnog update
+--json\fR gives it), \fBcounts\fR, \fBlocked\fR, \fBlast_run\fR,
+\fBlast_update\fR, \fBlast_reboot_advice\fR.
+.TP
+.B nog history \-\-json \fR[\fB\-\-days\fR \fIN\fR]
+\fBruns\fR, \fBupdates\fR and \fBreboots\fR: the CSV rows as objects, newest
+first.
+.TP
+.B nog clean \-\-json
+The maintenance report alone, nothing removed: \fBcategories\fR (\fBid\fR,
+\fBwhat\fR, \fBitems\fR, \fBbytes\fR, \fBnames\fR, \fBhow\fR), \fBtotal_bytes\fR
+and the cache's totals. A program then runs \fBnog clean --only \fIa\fB,\fIb\fR
+(nog and the tools ask in its window) or adds \fB\-\-yes\fR.
 .TP
 .B nog update \-\-json \fR[\fB\-\-keep\fR \fIa\fR,\fIb\fR]
 The update plan, computed by the same code as a real update and stopped before
@@ -599,6 +708,14 @@ under
 controls whether Tier 1 auto-releases (default) or stays wholesale held
 (expert mode).
 .TP
+.I /etc/nog/locks.toml
+The locks (v2.0.0): \fB[locked] packages = [...]\fR, written by
+.B nog lock
+and
+.B nog unlock
+via \fBsudo tee\fR. A missing file is no locks; an unreadable one is said by
+\fBnog update\fR and treated as none (nothing is quietly held or released).
+.TP
 .I /var/lib/pacman/sync/*.db
 Pacman sync databases. Read-only by nog, for build-date lookup during
 .BR "nog update" .
@@ -741,6 +858,23 @@ pattern is classified as Tier 1 when
 is Tier 1. This is hardcoded behavior, not configurable. The Arch naming
 convention is universal and the failure mode (broken DKMS module, unbound
 GPU after reboot) is severe enough that opting out is not supported.
+.SS Linchpins: glibc and gcc-libs (v2.0.0, issue #5)
+A fast-lane package is compiled against the foundation of the moment. When
+.B glibc
+or
+.B gcc-libs
+has a pending update that changes its \fIseries\fR (glibc 2.44 \(-> 2.45,
+which brings new \fBGLIBC_2.45\fR symbol versions; gcc-libs 15 \(-> 16,
+new \fBGLIBCXX\fR ones) and that update is held by its Tier 1 window, every
+repository package in the Ready bucket that was \fIbuilt after\fR the new
+linchpin's build moves to Held with it \(em \fB"12 days \(bu built after the new
+glibc, moves with it"\fR \(em because it was probably linked against it and
+would fail at runtime (\fBGLIBC_2.45 not found\fR; the 2026-08-04 spectacle
+breakage). A same-series rebuild (2.44 \(-> 2.44, most months) cannot add a
+symbol version and moves nothing: measured on the test desktop on 2026-10-14,
+0 of 160 pending packages. The way out is the one nog already offers: promote
+the linchpin (\fBnog update --promote glibc,lib32-glibc\fR), never downgrade
+the fast lane.
 .SS Groups (advanced)
 The optional
 .B [groups]
@@ -783,6 +917,19 @@ Pin a package to Tier 2:
 .TP
 Force-upgrade a held Tier 1 package:
 .B nog unlock linux-zen --promote
+.TP
+Keep a package where it is, whatever updates come:
+.B nog lock electron39
+.TP
+Everything about one package, from whichever source has it:
+.B nog info spotify
+.TP
+The dashboard, and what nog has done:
+.B nog status
+.B nog history --days 7
+.TP
+Clean up every source, picking the categories:
+.B nog clean
 .
 .SH PRIVILEGES AND SUDO
 .B nog

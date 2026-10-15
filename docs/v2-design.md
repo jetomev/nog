@@ -41,10 +41,13 @@ whole chain works.
 
 ## The cycles
 
-> **The versions below are as locked on 2026-08-10 and are no longer current.**
-> Hotfix and tooling releases have moved every cycle since; as of v1.5.0, C3 is
-> v1.6.0, C4 v1.7.0 and C5 v1.8.0. The live numbering is in the
-> [README roadmap](../README.md#roadmap). The content of each cycle stands.
+> **The arc is complete (2026-10-15, nog v2.0.0).** The versions below are as
+> locked on 2026-08-10; the real ones ran ahead: C1 and C2 inside the early
+> releases, C3 in v1.8.0 → v1.9.0 (2026-10-04 → 10-14), C4 + C5 + C7 together
+> in v2.0.0, C6 as nogForge 1.0 → 1.4 (its Flatpak/snap rows and Maintenance
+> page follow nog 2.0.0). The content of each cycle stands, and shipped as
+> written, with one addition: a `lock`/`unlock` pair and the linchpin rule (#5).
+> History: the [README roadmap](../README.md#roadmap) and [ROADMAP.md](ROADMAP.md).
 
 | Cycle | Ships | Content |
 |---|---|---|

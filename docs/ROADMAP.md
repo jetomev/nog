@@ -2,14 +2,24 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
-### v1.9.0 — Built and run 2026-10-14, waits on Javier's rc3 check (C3 complete: #7; F-13 #49; #32; F-15 #51; F-16 #52)
+### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — built 2026-10-15, waits on Javier's run
+
+- [x] `nog search` across every source (Flatpak and Snap rows, `--json` with `install_as`)
+- [x] `nog list` with the installed Flatpak apps and snaps beside the packages (`remove_as`)
+- [x] `info`, `reinstall`, `tier`, `lock`/`unlock`, `status`, `history`, each with `--json`
+- [x] `nog clean` across every source: pacman's cache and orphans, the helper's build trees, unused Flatpak runtimes, old snap revisions; each category picked on its own; `--json`, `--only`, `--yes`
+- [x] Tier ABI skew ([#5](https://github.com/jetomev/nog/issues/5)): the linchpin rule, keyed on a glibc or gcc-libs series change
+- [x] Desktop dry runs (`scripts/dry-run-200.sh`, 41 cases), the KognogOS VM (`scripts/vm-run-200.sh`, `vm-run-200b.sh`); 259 → 284 tests, warnings 6
+- [ ] Javier's run ([testing/](testing/20261015%20-%20Test%20Matrix%20for%20nog%20v2-0-0.md)); tag, GitHub Release, AUR after it
+
+### v1.9.0 — Released 2026-10-14 (C3 complete: #7; F-13 #49; #32; F-15 #51; F-16 #52)
 - [x] `nog install`: the repositories, then the AUR, then Flatpak, then Snap; the source in the table; `flatpak/x` and `snap/x`; a backend offered once when the chain reaches it (flatpak from extra; snapd from the AUR + socket + `/snap`)
 - [x] One transaction per source in the chain's order; nog's own question for Snap (it never asks) as for the AUR; classic snaps said and installed as such; a stopped step names what already went in
 - [x] `nog remove` for Flatpaks and snaps; F-13: what goes along and who still uses it, Keep per package (default yes); `nog keep <pkg>` (= `pacman -D --asexplicit`)
 - [x] `--yes` on install and remove (never the AUR); "nothing is at the keyboard" said as the cause
 - [x] Desktop dry runs (`scripts/dry-run-190.sh`), KognogOS VM from a clean install; 242 → 259 tests, warnings 6
 - [x] Javier's run (14 Oct, 20 steps): F-15 #51 (several Flatpak answers are numbered and asked, a snap of that name on the list) and F-16 #52 (the snap removal question defaults to yes) fixed the same day → rc3
-- [ ] His rc3 check of those two steps; tag, GitHub Release, AUR after it
+- [x] His rc3 check of those two steps (21:19–21:49); tag `v1.9.0` signed, GitHub Release, AUR 1.9.0-1 the same night
 
 ### v1.8.0 — Released (C3 part 1: #47)
 - [x] `nog install`: version, source (pacman's order, providers said plainly, then the AUR) and tier before anything is downloaded
