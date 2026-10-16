@@ -80,6 +80,14 @@ pub fn with_removed(current: &[String], names: &[String]) -> (Vec<String>, Vec<S
     (current.iter().filter(|c| !names.contains(c)).cloned().collect(), not_locked)
 }
 
+/// F-17 (v2.0.0 rc2): the locked packages with nothing pending. A lock only
+/// shows in the update tables when an update for it exists; these are the
+/// rest, so `nog update` can say they are locked and up to date instead of
+/// saying nothing.
+pub fn idle(locked: &[String], in_plan: &[String]) -> Vec<String> {
+    locked.iter().filter(|n| !in_plan.contains(n)).cloned().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +101,15 @@ mod tests {
         assert_eq!(parse("").unwrap(), Vec::<String>::new());
         assert_eq!(parse("[locked]\npackages = [\"a\", \"a\"]\n").unwrap(), v(&["a"]), "each name once");
         assert_eq!(load("/nonexistent/nog-locks-test.toml").unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_lock_with_nothing_pending_is_idle_and_one_in_the_plan_is_not() {
+        // F-17: cowsay was locked and up to date; the update screen said nothing.
+        let locked = v(&["cowsay", "7zip"]);
+        assert_eq!(idle(&locked, &v(&["7zip", "mesa"])), v(&["cowsay"]));
+        assert_eq!(idle(&locked, &v(&["cowsay", "7zip"])), Vec::<String>::new());
+        assert_eq!(idle(&[], &v(&["mesa"])), Vec::<String>::new());
     }
 
     #[test]

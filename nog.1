@@ -166,7 +166,8 @@ list); \fBsnap\fR \(em the old revisions snapd keeps after updates. Then
 removed without an answer. Each category is removed by the tool that owns it,
 in its own voice: nog removes the cache files (root) and the build trees (your
 own files, no password); \fBpacman -Rns\fR shows the orphans and asks;
-\fBflatpak uninstall --unused\fR shows its list and asks; \fBsnap remove
+\fBflatpak uninstall --unused\fR works out the exact list, shows it and removes
+it (flatpak does not ask here; your pick at nog's question is the yes); \fBsnap remove
 --revision\fR takes each old revision (root). \fB\-\-only\fR picks categories
 and still asks \fB[y/N]\fR; \fB\-\-yes\fR answers that and the tools'
 questions; \fB\-\-json\fR is the report alone, for nogForge. It refuses while

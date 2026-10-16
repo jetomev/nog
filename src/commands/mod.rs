@@ -2077,6 +2077,14 @@ fn run_update(realign: bool) -> UpdateEnd {
             if locked_names.contains(&h.0.name) && !matches!(h.3, HeldReason::Locked) { h.2 = 0; h.3 = HeldReason::Locked; }
         }
     }
+    // F-17 (rc2): a lock with nothing pending is not in any table; name it
+    // below the tables so a lock never goes invisible.
+    let idle_locks: Vec<String> = {
+        let in_plan: Vec<String> = ready.iter().map(|e| e.0.name.clone())
+            .chain(held.iter().map(|h| h.0.name.clone()))
+            .chain(unknown.iter().map(|e| e.0.name.clone())).collect();
+        crate::locks::idle(&locked_names, &in_plan)
+    };
     // v2.0.0 (#5): the linchpin rule. While glibc or gcc-libs is held with a
     // pending series change, repository packages built after that new build
     // move to Held with it (they were probably linked against it). A same-series
@@ -2600,6 +2608,15 @@ fn run_update(realign: bool) -> UpdateEnd {
             }
             ignore.extend(fence);
         }
+    }
+
+    // F-17 (rc2): locked packages that have no update right now.
+    if !idle_locks.is_empty() && !named {
+        println!();
+        println!(
+            "{}nog: locked by you, nothing pending — {} (up to date; `nog unlock` releases {}).{}",
+            C_SUBTEXT, idle_locks.join(", "), if idle_locks.len() == 1 { "it" } else { "them" }, C_RESET
+        );
     }
 
     // v1.7.0: the plan is ready — say so, and which steps will run

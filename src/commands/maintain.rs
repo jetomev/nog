@@ -107,7 +107,7 @@ fn build_report(cfg: &NogConfig, tm: &TierManager) -> Option<Report> {
             items: unused.len(),
             bytes: unused.iter().map(|r| r.size).sum(),
             names: unused.iter().map(|r| r.reference.clone()).collect(),
-            how: "flatpak uninstall --unused: flatpak shows its list and asks first".to_string(),
+            how: "flatpak uninstall --unused: flatpak works out the exact list, shows it and removes it (your pick here is the yes)".to_string(),
         });
     }
     let mut snap_revisions = Vec::new();
@@ -256,7 +256,9 @@ pub fn clean(json: bool, yes: bool, only: &[String]) {
     let steps: Vec<(&str, String)> = chosen.iter().map(|i| (cats[*i].id, format!("Cleaning: {}", cats[*i].id))).collect();
     crate::events::steps(&steps);
     let mut failed = false;
+    let mut kept: Vec<&str> = Vec::new();
     let before: u64 = chosen.iter().map(|i| cats[*i].bytes).sum();
+    let n_chosen = chosen.len();
     for i in chosen {
         let c = &cats[i];
         let label = format!("Cleaning: {}", c.id);
@@ -278,7 +280,13 @@ pub fn clean(json: bool, yes: bool, only: &[String]) {
                     if yes { "pacman shows the list and, with your yes (--yes), removes them without asking.".to_string() }
                     else { "pacman shows the list and asks first; n keeps them.".to_string() }]);
                 let st = pacman::remove(&c.names, yes);
-                st.success()
+                if st.success() { true } else {
+                    // F-19: pacman exits 1 both for "n" at its question and for a
+                    // real error. Count what is left: all still there = the person
+                    // kept them, which is a choice, not a failure.
+                    let left = maint::orphans(&|_| 0).len();
+                    if left >= c.items { kept.push(c.id); true } else { false }
+                }
             }
             "aur" => {
                 let dir = report.helper_dir.clone().unwrap_or_default();
@@ -295,7 +303,8 @@ pub fn clean(json: bool, yes: bool, only: &[String]) {
             "flatpak" => {
                 notice(C_BLUE, "Removing unused Flatpak runtimes", &[
                     if yes { "flatpak works out the exact list and, with your yes (--yes), removes it without asking.".to_string() }
-                    else { "flatpak works out the exact list, shows it and asks first.".to_string() }]);
+                    // F-18: flatpak 1.18 does not ask for --unused; the pick at nog's question was the yes.
+                    else { "flatpak works out the exact list, shows it and removes it; your pick above was the yes.".to_string() }]);
                 flatpak::uninstall_unused(yes).status.success()
             }
             "snap" => {
@@ -308,7 +317,12 @@ pub fn clean(json: bool, yes: bool, only: &[String]) {
             }
             _ => true,
         };
-        crate::events::finished(c.id, &label, ok, "");
+        let was_kept = kept.last() == Some(&c.id);
+        crate::events::finished(c.id, &label, ok, if was_kept { "kept" } else { "" });
+        if was_kept {
+            println!();
+            println!("{}nog: {} kept — you answered n at pacman's question.{}", C_SUBTEXT, c.id, C_RESET);
+        }
         if !ok {
             failed = true;
             eprintln!();
@@ -316,8 +330,14 @@ pub fn clean(json: bool, yes: bool, only: &[String]) {
         }
     }
     println!();
-    notice(if failed { C_PEACH } else { C_GREEN }, if failed { "Cleaned, with problems" } else { "Cleaned" }, &[
-        format!("About {} was in the categories you picked (the tools' own output above is what really went).", human_size(before))]);
+    if kept.len() == n_chosen {
+        // F-19: everything picked was kept at the tool's question — nothing went, nothing failed.
+        println!("nog: Nothing removed.");
+        return;
+    }
+    let mut lines = vec![format!("About {} was in the categories you picked (the tools' own output above is what really went).", human_size(before))];
+    if !kept.is_empty() { lines.push(format!("Kept at your n: {}.", kept.join(", "))); }
+    notice(if failed { C_PEACH } else { C_GREEN }, if failed { "Cleaned, with problems" } else { "Cleaned" }, &lines);
     if failed { end(1); }
 }
 

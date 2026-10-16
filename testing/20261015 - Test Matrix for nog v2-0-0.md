@@ -61,26 +61,33 @@ From snapshot `nog-190-tested` (flatpak and snapd set up, yay present, the state
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-2.0.0rc1-1-x86_64.pkg.tar.zst` | the package-file install; `nog --version` says **2.0.0** | | |
-| 4.2 | `nog --help` | the new commands listed: info, reinstall, tier, lock, status, history; clean's new words | | |
-| 4.3 | `nog status` | "This computer", "Updates: …", "Recently" — the dashboard in plain words; ~10 s | | |
-| 4.4 | `nog history --days 2` | yesterday's bench runs, newest first; the update decisions; the reboot advice | | |
-| 4.5 | `nog search calculator` | four groups with tiers; the Flatpak rows say `flatpak/<id>`; the snap rows the publisher | | |
-| 4.6 | `nog info flatseal` | "From Flatpak · installed", Tier 3 and why, the hold in words, flatpak's fields (Ref, Origin, Runtime, Commit) | | |
-| 4.7 | `nog info glibc` | "From the core repository · installed", Tier 1 — Pinned, 30 days, Required By cut to 12 names "… and N more" | | |
-| 4.8 | `nog tier lib32-glibc` | "lib32-glibc is Tier 1 — The 32-bit half of glibc, which is Tier 1" | | |
-| 4.9 | `nog lock cowsay` (install cowsay first: `nog install cowsay`) | sudo's window; "Locking cowsay … stays at 3.8.4-1"; then `nog lock` lists it; `nog update` shows it Held, "locked by you" (answer n to the handoff) | | |
-| 4.10 | `nog unlock cowsay` | sudo's window; "Unlocking cowsay"; `nog lock` → "No packages are locked" | | |
-| 4.11 | `nog tier cowsay --set 2` → `nog tier cowsay` → `--set 3` | moved to Tier 2 (sudo's window), said so, moved back | | |
-| 4.12 | `nog reinstall cowsay` | pacman's "Proceed?" → y → "reinstalling cowsay", Done | | |
-| 4.13 | `nog reinstall hello` (the snap on this desktop) | the refusal with the way out; nothing changed | | |
-| 4.14 | `nog clean` → look, then `n` | the report: cache ~4.6 GB, 27 orphans (~900 MB), yay's trees (~1.3 GB), 7 unused runtimes (~3.4 GB), 3 old snap revisions; nothing removed | | |
-| 4.15 | `nog clean` → pick the categories you want (e.g. `1 3 5`: cache, yay's trees, snap revisions) | each removed by its tool: sudo's window for the cache files and snap; "Cleaned" | Javier's call which | |
-| 4.16 | `nog clean --only orphans` → look at pacman's list → y or n | pacman -Rns asks with the full list; your answer decides | Javier's call | |
-| 4.17 | `nog remove cowsay` | as before (1.9.0): nothing in this release changes remove | | sanity |
-| 4.18 | `nog update` | as before; a locked package would show "locked by you" (none now); answer n | | sanity |
-| 4.19 | `nogforge` → Search cowsay → Install → Uninstall | nogForge 1.4.0 on nog 2.0.0: unchanged (its Flatpak/snap rows and Maintenance page come with nogForge 1.5.0) | | sanity |
+| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-2.0.0rc1-1-x86_64.pkg.tar.zst` | the package-file install; `nog --version` says **2.0.0** | PASS | |
+| 4.2 | `nog --help` | the new commands listed: info, reinstall, tier, lock, status, history; clean's new words | PASS | |
+| 4.3 | `nog status` | "This computer", "Updates: …", "Recently" — the dashboard in plain words; ~10 s | PASS | |
+| 4.4 | `nog history --days 2` | yesterday's bench runs, newest first; the update decisions; the reboot advice | PASS | |
+| 4.5 | `nog search calculator` | four groups with tiers; the Flatpak rows say `flatpak/<id>`; the snap rows the publisher | PASS | |
+| 4.6 | `nog info flatseal` | "From Flatpak · installed", Tier 3 and why, the hold in words, flatpak's fields (Ref, Origin, Runtime, Commit) | PASS | |
+| 4.7 | `nog info glibc` | "From the core repository · installed", Tier 1 — Pinned, 30 days, Required By cut to 12 names "… and N more" | PASS | |
+| 4.8 | `nog tier lib32-glibc` | "lib32-glibc is Tier 1 — The 32-bit half of glibc, which is Tier 1" | PASS | |
+| 4.9 | `nog lock cowsay` (install cowsay first: `nog install cowsay`) | sudo's window; "Locking cowsay … stays at 3.8.4-1"; then `nog lock` lists it; `nog update` shows it Held, "locked by you" (answer n to the handoff) | PASS | lock + list as expected; `nog update` showed nothing for cowsay because cowsay has no pending update (3.8.4-1 is current) — the matrix expectation was wrong, not nog; see F-17 |
+| 4.10 | `nog unlock cowsay` | sudo's window; "Unlocking cowsay"; `nog lock` → "No packages are locked" | PASS | |
+| 4.11 | `nog tier cowsay --set 2` → `nog tier cowsay` → `--set 3` | moved to Tier 2 (sudo's window), said so, moved back | PASS | Claude handed all three commands in one step; only `--set 2` ran at first (cowsay stayed Tier 2); `--set 3` run on its own afterwards, verified Tier 3 and the pin gone |
+| 4.12 | `nog reinstall cowsay` | pacman's "Proceed?" → y → "reinstalling cowsay", Done | PASS | |
+| 4.13 | `nog reinstall hello` (the snap on this desktop) | the refusal with the way out; nothing changed | PASS | |
+| 4.14 | `nog clean` → look, then `n` | the report: cache ~4.6 GB, 27 orphans (~900 MB), yay's trees (~1.3 GB), 7 unused runtimes (~3.4 GB), 3 old snap revisions; nothing removed | PASS | cache 4.6 GB, 27 orphans 918 MB, 22 yay trees 1.2 GB, 7 runtimes 3.4 GB, 3 snap revisions 114 MB; total 10.3 GB |
+| 4.15 | `nog clean` → pick the categories you want (e.g. `1 3 5`: cache, yay's trees, snap revisions) | each removed by its tool: sudo's window for the cache files and snap; "Cleaned" | PASS | Javier picked 1 3 4 5; cache, 22 yay trees, 9 Flatpak refs, 3 snap revisions removed; "About 9.4 GB". flatpak 1.18.4 did NOT ask (nog said it would) — F-18 |
+| 4.16 | `nog clean --only orphans` → look at pacman's list → y or n | pacman -Rns asks with the full list; your answer decides | PASS | Javier answered n at pacman; all 27 kept. nog wrongly called it a failure (status 1) — F-19 |
+| 4.17 | `nog remove cowsay` | as before (1.9.0): nothing in this release changes remove | PASS | sanity |
+| 4.18 | `nog update` | as before; a locked package would show "locked by you" (none now); answer n | PASS | sanity — run as part of 4.9 (10 ready, 239 held, n at the handoff, Cancelled) |
+| 4.19 | `nogforge` → Search cowsay → Install → Uninstall | nogForge 1.4.0 on nog 2.0.0: unchanged (its Flatpak/snap rows and Maintenance page come with nogForge 1.5.0) | PASS | sanity — nogForge 1.4.0-2 on nog 2.0.0rc1 |
+| 4.20 | `nog install ~/Programs/nog/dist-rc/nog-2.0.0rc2-1-x86_64.pkg.tar.zst` | rc2 (F-17, F-18, F-19 fixed); `nog --version` 2.0.0 | | rc2 |
+| 4.21 | `nog lock jq` → `nog update` (n) → `nog unlock jq` | jq is up to date, so no table shows it; below the tables: "nog: locked by you, nothing pending — jq (up to date; `nog unlock` releases it)." | | F-17 |
+| 4.22 | `nog clean --only orphans` → y → **n** at pacman | pacman's list, n; then "nog: orphans kept — you answered n at pacman's question." and "Nothing removed." — green Done, no "Stopped", no "with problems". The legend's flatpak line says flatpak removes its list, the pick is the yes | | F-18, F-19 |
 
 ## Findings
 
-*(none yet — Javier's run adds them here as F-17, F-18, …)*
+| # | Step | What happened | Severity | Decision |
+|---|---|---|---|---|
+| F-17 | 4.9 | A locked package with no pending update is invisible in `nog update`: cowsay was locked, up to date, and the update screen said nothing about it. Correct (there is nothing to hold) but a lock should stay visible — a line like "Locked by you: cowsay (nothing pending)" in the summary. | low | fixed in rc2: `nog update` prints "locked by you, nothing pending — <names>" below the tables (`locks::idle`, +1 test); re-test 4.21 |
+| F-18 | 4.15 | nog says "flatpak shows its list and asks first", but flatpak 1.18.4 does not ask for `uninstall --unused`: it printed 9 refs and removed them straight away (terminal attached, no `-y`). The outcome is right (picking 4 at nog's question is the consent) but the promise is false. Fix: the legend, the notice and nog.1 say flatpak works out the list and removes it, your pick at nog's question being the yes. | low | fixed in rc2: legend, notice and nog.1 say flatpak removes its list and the pick is the yes; re-test 4.22 (legend) |
+| F-19 | 4.16 | Answering **n** at pacman's "Do you want to remove these packages?" made nog say "orphans did not finish cleanly", "Cleaned, with problems", and exit with status 1. The 27 orphans were all still installed, so the person's no worked; nog mistook a choice for a failure (pacman exits 1 for both). Fix: re-count orphans after pacman — all still there = "kept: you answered n" (status 0), none = cleaned, some = a real problem. | medium | fixed in rc2: orphans re-counted after pacman; all left = "orphans kept — you answered n", "Nothing removed", status 0; re-test 4.22 |
