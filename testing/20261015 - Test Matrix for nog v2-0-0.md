@@ -80,9 +80,9 @@ From snapshot `nog-190-tested` (flatpak and snapd set up, yay present, the state
 | 4.17 | `nog remove cowsay` | as before (1.9.0): nothing in this release changes remove | PASS | sanity |
 | 4.18 | `nog update` | as before; a locked package would show "locked by you" (none now); answer n | PASS | sanity — run as part of 4.9 (10 ready, 239 held, n at the handoff, Cancelled) |
 | 4.19 | `nogforge` → Search cowsay → Install → Uninstall | nogForge 1.4.0 on nog 2.0.0: unchanged (its Flatpak/snap rows and Maintenance page come with nogForge 1.5.0) | PASS | sanity — nogForge 1.4.0-2 on nog 2.0.0rc1 |
-| 4.20 | `nog install ~/Programs/nog/dist-rc/nog-2.0.0rc2-1-x86_64.pkg.tar.zst` | rc2 (F-17, F-18, F-19 fixed); `nog --version` 2.0.0 | | rc2 |
-| 4.21 | `nog lock jq` → `nog update` (n) → `nog unlock jq` | jq is up to date, so no table shows it; below the tables: "nog: locked by you, nothing pending — jq (up to date; `nog unlock` releases it)." | | F-17 |
-| 4.22 | `nog clean --only orphans` → y → **n** at pacman | pacman's list, n; then "nog: orphans kept — you answered n at pacman's question." and "Nothing removed." — green Done, no "Stopped", no "with problems". The legend's flatpak line says flatpak removes its list, the pick is the yes | | F-18, F-19 |
+| 4.20 | `nog install ~/Programs/nog/dist-rc/nog-2.0.0rc2-1-x86_64.pkg.tar.zst` | rc2 (F-17, F-18, F-19 fixed); `nog --version` 2.0.0 | PASS | rc2 |
+| 4.21 | `nog lock jq` → `nog update` (n) → `nog unlock jq` | jq is up to date, so no table shows it; below the tables: "nog: locked by you, nothing pending — jq (up to date; `nog unlock` releases it)." | PASS | F-17 proven: the line showed below the fence note; unlocked after |
+| 4.22 | `nog clean --only orphans` → y → **n** at pacman | pacman's list, n; then "nog: orphans kept — you answered n at pacman's question." and "Nothing removed." — green Done, no "Stopped", no "with problems". The legend's flatpak line says flatpak removes its list, the pick is the yes | PASS | F-18 (legend) and F-19 (n at pacman → "orphans kept", "Nothing removed", green Done) proven on 10-16 |
 
 ## Findings
 
