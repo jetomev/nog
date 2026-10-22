@@ -21,6 +21,14 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **v1.6.0 for nogForge — built 3 Oct (09:00–09:25), as 1.6.0-rc.1, NOT released, NOT committed (GPG passphrase expired; commit when Javier unlocks it)**: `nog list --json` (protection in words: Tier 1 / base set / needed by), `nog search --json` (repos + AUR via helper), `nog update --json` (same code as a real update, stops before any question; stdout = one JSON document, the rest to stderr; no banner, no run-history line), `--keep a,b` (held before the coupling rules — checked: ldb takes libwbclient + smbclient with it), `NOG_ASKPASS=1` → every sudo gets -A, helper gets `--sudoflags -A`. Tests 229 → 234, warnings 6 → 6. `scripts/make-rc-package.sh` → `dist-rc/nog-1.6.0rc1-1-x86_64.pkg.tar.zst` (package check ran every test). Next: Javier's run (nogForge matrix §6.1), then the release: README + man page for the new options, version 1.6.0 everywhere, CHANGELOG, tag, GitHub, AUR, close/advance #7.
 
 - [ ] **To watch (3 Oct, not a bug yet):** #27's fix works — linux-lts (first seen Jul 28) and mkinitcpio (Aug 12) are past their 30-day window and wait only on the 7-day safety rule (newest builds Oct 1 → ready Oct 8). But if new builds keep arriving less than 7 days apart, the safety wait could slip again (a small cousin of #27). Check after Oct 8 whether both went in at the next update.
+## Found 2026-10-22 — the CLAUDE.md review
+*Spotted while writing this project's CLAUDE.md; Javier asked for them on the board.*
+- [ ] **nog's own tier list still pins desktop apps**: its built-in `tier-pins.toml` puts plasma-meta, sddm, dolphin, konsole, kate, grubforge and alacrittyforge in Tier 2. Distro choices belong in KognogOS's list; trim nog's to generic ones (the tests and the man page's TIER SYSTEM section read it too). Javier's call
+- [ ] **`testing/RELEASE-CHECKLIST.md` is out of date**: still `makepkg -si`, a `sudo pacman -R nog` / `yay -S nog` reinstall, and no "Javier installs the local build before the AUR push" step
+- [ ] **README**: "Why nog?" and "Features" appear twice; the Roadmap still says v2.0.0 "waits on Javier's run" (it shipped 10-16)
+- [ ] **The test VM's password is written in the public repo** (`scripts/vm-run-200*.sh`). Test-only, but take it out of the repo (read it from a local file)
+- [ ] **The dry-run scripts set `SUDO_ASKPASS=/bin/false`** to make sudo refuse at once; the working rule says never set SUDO_ASKPASS. Refuse another way (e.g. `sudo -n`)
+
 ## 2026-10-19 · Open
 - [ ] **F-20 #56** · `nog update` has no `--yes`: an unattended update (a VM bench, a script, nogForge) can only be driven by `yes | nog update`, which also says yes to the Unknown-package prompts. Found in the VM during mindForge 0.1.9-1's clean-chroot build. Shape in the issue: same contract as `install --yes`, Unknown packages kept back and listed, never auto-promoted.
 
