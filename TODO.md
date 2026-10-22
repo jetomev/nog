@@ -91,7 +91,7 @@ v1.5.0 on GitHub (Latest, signed) and the AUR, installed on this desktop through
 
 ## Next up — in this order
 
-- [ ] **F-13 #49 (found 2026-10-08):** `nog remove` (-Rs) quietly takes along a dependency another installed app uses *optionally* (Elisa → `vlc-plugin-ffmpeg`, VLC would have lost most formats); no way to keep it. Fix: warn in plain words + ask Keep, and a `nog keep <pkg>` command (= `pacman -D --asexplicit`); test in the failing direction. Follow-up in nogForge #27
+- [x] **F-13 #49 (found 2026-10-08):** `nog remove` (-Rs) quietly takes along a dependency another installed app uses *optionally* (Elisa → `vlc-plugin-ffmpeg`, VLC would have lost most formats); no way to keep it. Fix: warn in plain words + ask Keep, and a `nog keep <pkg>` command (= `pacman -D --asexplicit`); test in the failing direction. Follow-up in nogForge #27 — **done**: shipped in v1.9.0, #49 closed (ticked 2026-10-22 by the KognogOS link check)
 - [x] (1.8.0) AUR recipe: `options=('!debug')` — makepkg tries a debug package for nog and prints "No debugging symbols" (seen in Javier's yay build of 1.7.0, 4 Oct); harmless noise
 
 ### 00 · Found in the KognogOS VM, 30 Sep — v1.5.6, released for the VM test
@@ -140,9 +140,9 @@ One change to the log file fixes all four, so they ship together.
 - [ ] **#7 · priority-3** · nog manages Flatpak and Snap as well as pacman, gains a JSON output mode, and gets its own app (nogForge).
 
 ### 7 · Later
-- [ ] **#32 · found 2026-10-01 (forgeKit session):** `nog install` has no way to answer the AUR helper's "Proceed?" for **repository** packages when run from a script (a piped `y` was needed for python-pyte). Proposal: `nog install --yes`, passed through to the helper; AUR builds keep refusing without a person (that refusal worked correctly the same day)
+- [x] **#32 · found 2026-10-01 (forgeKit session):** `nog install` has no way to answer the AUR helper's "Proceed?" for **repository** packages when run from a script (a piped `y` was needed for python-pyte). Proposal: `nog install --yes`, passed through to the helper; AUR builds keep refusing without a person (that refusal worked correctly the same day) — **done**: shipped in v1.9.0, #32 closed (ticked 2026-10-22 by the KognogOS link check)
   - **Seen again 2026-10-07 (nog 1.8.0):** three runs from Claude's terminal-less shell (`install` ×2 of repository packages, `remove monique`) stopped at pacman's / yay's [Y/n], reported as "you answered no"; same line in a terminal worked. `remove` has the same gap; `nog install --help` shows no options. #48 filed then closed as a duplicate of #32
-- [ ] **#5 · priority-4** · A rare mismatch: a newer app built against a newer system library than the one nog is still holding back.
+- [x] **#5 · priority-4** · A rare mismatch: a newer app built against a newer system library than the one nog is still holding back. — **done**: built in v2.0.0 as the linchpin rule, #5 closed (ticked 2026-10-22 by the KognogOS link check)
 
 ---
 
