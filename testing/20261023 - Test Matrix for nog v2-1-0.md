@@ -54,7 +54,7 @@ From `nog-210-before`, a real `nog update --keep proton-ge-custom-bin` at a keyb
 | 3b.2 | run 2 · S2: rc2 (`--sudoloop`), sudo forgetting after 1 minute, yay's menus on | the AUR step runs | FAIL | **F-27**: yay's keep-awake `sudo -v` asked for the password in the middle of yay's cleanBuild menu; answers crossed, sudo timed out, a dozen prompts; fixed (nog asks `sudo -v` itself right before the helper) |
 | 3b.3 | run 3 · S1 control (2.0.0) and S2 (rc2 + F-27), sudo forgetting after 1 minute | both update, build snapd and nogforge, exit 0 | PASS | both: 2 prompts (pacman's, and one at the install after the builds). **This does not prove `--sudoloop`**: yay's loop refreshes about every 5 minutes, matched to Arch's 5-minute default, so a 1-minute setting outruns it; and snapd built in 45 s. See 3b.5 |
 | 3b.4 | run 3 · S2: the computer-wide record (pkg-140) | `/var/lib/nog/last-update` owned by root, dated the update; no per-user record | PASS | `-rw-r--r-- 1 root root 0 Oct 23 18:45 /var/lib/nog/last-update`; `~/.local/share/nog/last-update` absent |
-| 3b.5 | run 4 · S3: rc2, sudo at its normal memory, a watcher on the processes | yay started with `--sudoloop`; its `sudo -v` keep-awake calls seen | | |
+| 3b.5 | run 4 · S3: rc2, sudo at its normal memory (5 min), a watcher on the processes | yay started with `--sudoloop`; the whole update asks once | PASS | the watcher: `yay --sudoloop -S snapd nogforge --ignore proton-ge-custom-bin,…`; **1 password prompt** for pacman, the make dependencies, both builds and both installs (18:49 → 18:54:56). Not seen: the loop's own `sudo -v` calls (too brief for a 1-second watcher), nor a build longer than 5 minutes (snapd builds in 45 s in the VM) |
 
 ## §4 · Javier, this desktop — step by step
 
