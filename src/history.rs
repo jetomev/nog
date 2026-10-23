@@ -71,11 +71,25 @@ pub fn load(dir: &str, since: &str) -> (Vec<Row>, Vec<Row>, Vec<Row>) {
     let (mut runs, mut updates, mut reboots) = (Vec::new(), Vec::new(), Vec::new());
     for (kind, _, path) in files {
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let mut rows = parse_csv(&text);
-        rows.reverse(); // newest first within the day
+        let rows = newest_first(parse_csv(&text));
         match kind { Kind::Runs => runs.extend(rows), Kind::Updates => updates.extend(rows), Kind::Reboots => reboots.extend(rows) }
     }
     (runs, updates, reboots)
+}
+
+/// Pure. One file's rows, newest run first (F-26): the rows one run wrote together (same date, time
+/// and user) keep the order they were written in. Reversing row by row printed a six-line reboot
+/// advice upside down, and `nog status` took its last line for the headline.
+pub fn newest_first(rows: Vec<Row>) -> Vec<Row> {
+    let key = |r: &Row| (r.get("date").cloned(), r.get("time").cloned(), r.get("user").cloned());
+    let mut runs: Vec<Vec<Row>> = Vec::new();
+    for r in rows {
+        match runs.last_mut() {
+            Some(run) if key(&run[0]) == key(&r) => run.push(r),
+            _ => runs.push(vec![r]),
+        }
+    }
+    runs.into_iter().rev().flatten().collect()
 }
 
 /// Pure. `YYYYMMDD` for `days` days before `today` (`YYYYMMDD`), by the
@@ -133,6 +147,23 @@ mod tests {
         assert_eq!(classify("20261013 nog-reboot.csv"), Some((Kind::Reboots, "20261013".into())));
         assert_eq!(classify("20261014-171609 keep vlc.log"), None);
         assert_eq!(classify("holds.tsv"), None);
+    }
+
+    #[test]
+    fn a_runs_lines_stay_in_order_newest_run_first() {
+        let text = "date,time,user,level,advice\n\
+            10/21/2026,09:00 AM,jetomev,NOTE,NOTE: an older run.\n\
+            10/22/2026,05:00 PM,jetomev,IMPORTANT,IMPORTANT: It is highly recommended to reboot the system!\n\
+            10/22/2026,05:00 PM,jetomev,IMPORTANT,grub and lib32-mesa were updated this run.\n\
+            10/22/2026,05:00 PM,jetomev,NOTE,mesa was updated this run.\n";
+        let rows = newest_first(parse_csv(text));
+        let advice: Vec<&str> = rows.iter().map(|r| r["advice"].as_str()).collect();
+        assert_eq!(advice, vec![
+            "IMPORTANT: It is highly recommended to reboot the system!",
+            "grub and lib32-mesa were updated this run.",
+            "mesa was updated this run.",
+            "NOTE: an older run.",
+        ]);
     }
 
     #[test]
