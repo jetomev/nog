@@ -50,7 +50,7 @@ The VM ran the binary from before F-24 (message text only; covered by its test a
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst` | the package-file install; `nog --version` says **2.1.0** | | |
+| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst` | the package-file install; `nog --version` says **2.1.0** | PASS | 10-23 14:34; 2.0.0-1 → 2.1.0rc1-1 (the banner said v2.0.0: the installed nog ran the install, as expected) |
 | 4.2 | `nog update --help` | a `--yes` line: Ready goes in, Unknown kept back, the AUR's review waits for a person | | |
 | 4.3 | `nog update </dev/null` | the tables, then "Not updating — Nothing is at the keyboard …", `--yes` offered; "Stopped"; nothing changed | | |
 | 4.4 | `sudo -K` | nothing printed: sudo forgets the password it remembered from 4.1 (it keeps it ~5 minutes; without this, 4.5 would really update) | | |
