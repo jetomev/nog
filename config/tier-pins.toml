@@ -19,22 +19,13 @@ packages = [
 
 [tier2]
 manual_signoff = false
+# Generic plumbing any Arch desktop runs on. Desktops and apps are a distribution's
+# choice: KognogOS ships its own, fuller list (v2.1.0 trimmed this one).
 packages = [
-    "plasma-meta",
-    "plasma-desktop",
-    "sddm",
     "pipewire",
     "pipewire-pulse",
     "wireplumber",
     "networkmanager",
-    "firefox",
-    "dolphin",
-    "konsole",
-    "kate",
-    "grubforge",
-    "alacritty",
-    "fish",
-    "alacrittyforge",
 ]
 
 [tier3]

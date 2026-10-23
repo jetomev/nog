@@ -2,7 +2,7 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
-### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60)) — built 2026-10-22/23, waits on Javier's run
+### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62)) — built 2026-10-22/23, waits on Javier's run
 
 - [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
 - [x] Nobody at the keyboard and no `--yes`: the cause said before anything changes (was "Cancelled")
@@ -10,8 +10,11 @@
 - [x] An update that leaves a step incomplete exits **3** and its runs line says **incomplete** (F-22 #58); the man page gains EXIT STATUS
 - [x] `--yes` with nobody at the keyboard asks sudo up front, and says how to set it up if a password would be needed (F-23 #59)
 - [x] Error messages say the exit status once (F-24 [#60](https://github.com/jetomev/nog/issues/60)): "exited with status 1", not "exited with status exit status: 1"
-- [x] 285 → 294 tests (each new one seen failing), warnings 6; the KognogOS VM: `scripts/vm-run-210.sh` 4/4 PASS on 2026-10-23 (Y1 nobody at the keyboard → Not updating, 147 pending unchanged; Y2 sudo would ask → Not updating, unchanged; Y3 a pacman-only sudo rule → 41 updated, the AUR kept back with a hint, exit 0; Y4 a failing flatpak step → "no (--yes takes the default)", exit 3, runs line incomplete); the desktop: `scripts/dry-run-210.sh` OK
-- [ ] Javier's run ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md)); tag, GitHub Release, AUR after it
+- [x] 285 → 303 tests (each new one seen failing, but one written with its code: the folder reader, proven on the live machine instead), warnings 6; the KognogOS VM: `scripts/vm-run-210.sh` 4/4 PASS on 2026-10-23 (Y1 nobody at the keyboard → Not updating, 147 pending unchanged; Y2 sudo would ask → Not updating, unchanged; Y3 a pacman-only sudo rule → 41 updated, the AUR kept back with a hint, exit 0; Y4 a failing flatpak step → "no (--yes takes the default)", exit 3, runs line incomplete); the desktop: `scripts/dry-run-210.sh` OK
+- [x] **From Javier's run of rc1** (2026-10-23, 25/25): perl moved to a new version while apparmor and subversion, rebuilt for it, were still held — **interpreters now wait for the packages using their old module folder** (F-25 [#61](https://github.com/jetomev/nog/issues/61)); `nog history` printed a run's reboot advice upside down (F-26 [#62](https://github.com/jetomev/nog/issues/62))
+- [x] Javier's answers: the record of the last completed update is **one for the whole computer** (`/var/lib/nog/last-update`); nog's own tier list **trimmed to generic packages** (PipeWire, WirePlumber, NetworkManager), the desktop and its apps being a distribution's choice
+- [x] Javier's run of rc1: 25/25 ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md))
+- [ ] Javier's re-run on rc2 (§5 of the matrix); tag, GitHub Release, AUR after it
 
 ### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — released 2026-10-16 (GitHub + AUR, after Javier's bench: 54/54)
 

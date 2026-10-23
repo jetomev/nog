@@ -136,9 +136,9 @@ Since v1.6.0 \fBnog install\fR installs only what was asked, like
 \fBpacman -S\fR: it never updates the system first (v1.5.6 to v1.5.8 did, when
 the package lists were more than a day old). It never refreshes the lists on
 their own either, which would be a partial upgrade. If an install fails and the
-lists are old (nog's record of its last completed update,
-\fI~/.local/share/nog/last-update\fR, is missing, over a day old, or older than
-the lists), nog says so: \fBnog update\fR, then try again.
+lists are old (nog's record of the computer's last completed update,
+\fI/var/lib/nog/last-update\fR since v2.1.0, is missing, over a day old, or older
+than the lists), nog says so: \fBnog update\fR, then try again.
 .IP
 Since v1.5.4, when standard input is not a terminal and a requested name is not
 in any enabled repository (so the helper would build it from the AUR), nog
@@ -749,6 +749,15 @@ and
 via \fBsudo tee\fR. A missing file is no locks; an unreadable one is said by
 \fBnog update\fR and treated as none (nothing is quietly held or released).
 .TP
+.I /var/lib/nog/last-update
+The record of the computer's last completed update (v2.1.0; before, one per
+user): written by
+.B nog update
+right after pacman's step completes, through \fBsudo -n install\fR while sudo
+still remembers the password, so it never asks. Where sudo may run pacman only,
+nog writes \fI~/.local/share/nog/last-update\fR instead; the newer of the two
+counts. Read when an install fails, to say whether the package lists are old.
+.TP
 .I /var/lib/pacman/sync/*.db
 Pacman sync databases. Read-only by nog, for build-date lookup during
 .BR "nog update" .
@@ -858,13 +867,13 @@ Default Tier 1 packages:
 .BR systemd-libs ", " glibc ", " grub ", " efibootmgr ", " mkinitcpio ", "
 .BR pacman ", " mesa .
 .SS Tier 2 \(em 15-day hold
-Key desktop applications and system services. Held for 15 days after upstream
+Key system services, and whatever you pin there. Held for 15 days after upstream
 publish \(em enough time for major regressions to surface without falling far behind.
 .PP
 Default Tier 2 packages:
-.BR plasma-meta ", " plasma-desktop ", " sddm ", " pipewire ", " pipewire-pulse ", "
-.BR wireplumber ", " networkmanager ", " firefox ", " dolphin ", " konsole ", "
-.BR kate ", " grubforge ", " alacritty ", " fish ", " alacrittyforge .
+.BR pipewire ", " pipewire-pulse ", " wireplumber ", " networkmanager :
+generic plumbing (trimmed in v2.1.0). A desktop and its applications are a
+distribution's or the user's choice to pin; KognogOS ships its own, fuller list.
 .SS Tier 3 \(em 7-day hold
 Everything else. A short 7-day safety buffer without meaningful delay. Anything
 not listed in Tier 1 or Tier 2 falls into Tier 3 automatically.
@@ -908,6 +917,27 @@ symbol version and moves nothing: measured on the test desktop on 2026-10-14,
 0 of 160 pending packages. The way out is the one nog already offers: promote
 the linchpin (\fBnog update --promote glibc,lib32-glibc\fR), never downgrade
 the fast lane.
+.SS Interpreters and their module folders (v2.1.0, F-25, issue #61)
+.B perl
+and
+.B python
+install their compiled modules into a folder named for the interpreter's
+version series:
+.I /usr/lib/perl5/5.42/
+and
+.IR /usr/lib/python3.14/ .
+When one of them has a Ready update that changes its series (perl 5.42
+\(-> 5.44), every installed package with files under the old folder must move
+with it, or its modules sit where the new interpreter never looks. Arch states
+this nowhere but in the paths (no versioned dependency, no ABI provide), so nog
+reads the installed packages' file lists, only when such a move is pending. A
+package that is held lends its countdown (\fB"1 day \(bu coupled to
+apparmor"\fR); one with no update at all (not rebuilt yet, or from the AUR)
+reads \fBblocked by <package>\fR. A same-series update (5.44.0 \(-> 5.44.1)
+moves nothing. Found on 2026-10-23: perl went 5.42 \(-> 5.44 while apparmor
+and subversion, already rebuilt for it, were held one more day. The way
+through is \fBnog update --promote perl\fR, which brings the held partners
+along.
 .SS Groups (advanced)
 The optional
 .B [groups]

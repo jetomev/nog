@@ -2379,6 +2379,23 @@ fn run_update(realign: bool) -> UpdateEnd {
                 data.linked_by = linkage.linked_by;
                 data.file_providers = linkage.file_providers;
             }
+
+            // v2.1.0 (F-25, #61): an interpreter changing series (perl 5.42 → 5.44)
+            // leaves its module folder behind; who still has files there is read
+            // from the file lists, only when such a move is pending.
+            let versions: Vec<(&str, &str, &str)> = ready
+                .iter()
+                .map(|(u, _, _)| (u.name.as_str(), u.old_version.as_str(), u.new_version.as_str()))
+                .chain(held.iter().map(|(u, _, _, _)| (u.name.as_str(), u.old_version.as_str(), u.new_version.as_str())))
+                .collect();
+            let moves = holds::interpreter_moves(&versions);
+            if !moves.is_empty() && !data.installed_provides.is_empty() {
+                let dirs: Vec<String> = moves.iter().map(|(_, d)| d.clone()).collect();
+                let by_dir = local_db::owners_of_dirs(&dirs);
+                for (interp, dir) in moves {
+                    data.module_dir_owners.insert(interp, by_dir.get(&dir).cloned().unwrap_or_default());
+                }
+            }
             data
         };
 
@@ -4178,6 +4195,21 @@ mod output_tests {
         assert!(handoff_line(false, "yay", true).contains("without asking"));
         assert!(flatpak_handoff_line(false).contains("asks before anything changes"));
         assert!(flatpak_handoff_line(true).contains("--yes"));
+    }
+
+    #[test]
+    fn nogs_own_tier_list_carries_no_distro_choices() {
+        // Javier, 2026-10-23: trim nog's default to generic packages; the desktop
+        // and its apps belong in KognogOS's own, fuller list.
+        let tm = TierManager::from_toml_for_tests(include_str!("../../config/tier-pins.toml"));
+        for app in ["plasma-meta", "plasma-desktop", "sddm", "firefox", "dolphin", "konsole", "kate",
+                    "grubforge", "alacritty", "fish", "alacrittyforge"] {
+            assert_eq!(tm.classify(app), Tier::Three, "{} is a distro's choice", app);
+        }
+        for generic in ["pipewire", "pipewire-pulse", "wireplumber", "networkmanager"] {
+            assert_eq!(tm.classify(generic), Tier::Two, "{}", generic);
+        }
+        assert_eq!(tm.classify("glibc"), Tier::One);
     }
 
     #[test]

@@ -294,6 +294,32 @@ fn parse_files(contents: &str) -> Vec<String> {
     out
 }
 
+/// v2.1.0 (F-25, #61): for each folder, the installed packages with files in it
+/// (`usr/lib/perl5/5.42/` → apparmor, subversion). Reads every file list, so the
+/// caller asks only when an interpreter is changing series. Soft-fails to empty
+/// like the rest of this module: the rule then stays off, never guesses.
+pub fn owners_of_dirs(dirs: &[String]) -> HashMap<String, Vec<String>> {
+    if dirs.is_empty() {
+        return HashMap::new();
+    }
+    owners_from(&load_file_lists(), dirs)
+}
+
+/// Pure. The decision half of `owners_of_dirs`. A package listing only the
+/// folder itself (a directory entry, ending in `/`) owns nothing in it.
+fn owners_from(lists: &HashMap<String, Vec<String>>, dirs: &[String]) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for dir in dirs {
+        let mut owners: Vec<String> = lists.iter()
+            .filter(|(_, files)| files.iter().any(|f| f.starts_with(dir.as_str()) && !f.ends_with('/')))
+            .map(|(p, _)| p.clone())
+            .collect();
+        owners.sort();
+        out.insert(dir.clone(), owners);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,4 +481,27 @@ libbluray.so=3-64
         }
         println!("libbluray.so=4-64 linkers: {:?}", l.linked_by.get("libbluray.so=4-64"));
     }
+
+    #[test]
+    fn a_folder_is_owned_by_the_packages_with_files_in_it() {
+        let mut lists = HashMap::new();
+        lists.insert("apparmor".to_string(), vec!["usr/lib/perl5/5.42/".into(), "usr/lib/perl5/5.42/vendor_perl/LibAppArmor.pm".into()]);
+        lists.insert("subversion".to_string(), vec!["usr/lib/perl5/5.42/vendor_perl/SVN/Base.pm".into()]);
+        lists.insert("only-the-folder".to_string(), vec!["usr/lib/perl5/5.42/".into()]);
+        lists.insert("perl".to_string(), vec!["usr/lib/perl5/5.44/core_perl/Config.pm".into()]);
+        let o = owners_from(&lists, &["usr/lib/perl5/5.42/".to_string()]);
+        assert_eq!(o["usr/lib/perl5/5.42/"], vec!["apparmor".to_string(), "subversion".to_string()]);
+    }
+
+
+    /// Reads the live machine (the rule for such tests: ignored, changes nothing).
+    /// On the test desktop after 2026-10-23's update: perl is 5.44 and only
+    /// apparmor and subversion (their rebuilds held) still have files under 5.42.
+    #[test]
+    #[ignore]
+    fn live_perl_542_folder_owners() {
+        let o = owners_of_dirs(&["usr/lib/perl5/5.42/".to_string()]);
+        eprintln!("owners of usr/lib/perl5/5.42/: {:?}", o.get("usr/lib/perl5/5.42/"));
+    }
+
 }

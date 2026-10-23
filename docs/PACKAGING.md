@@ -36,6 +36,10 @@ aren't listed.*
 
 No new program and no new library: the install chain, `nog remove` for Flatpaks and snaps and `nog keep` use `flatpak`, `snap`, `pacman` and `sudo`, already listed. The recipe's `optdepends` words change to say that Flatpak and Snap are installed *and removed* through nog.
 
+## Measured again for v2.1.0 (2026-10-23)
+
+One more program: `install` (coreutils, in Arch's `base`), run as `sudo -n install -D` to write `/var/lib/nog/last-update`. Nothing to add to the recipe. The helper gets `--sudoloop`, a flag of yay and paru alike, not a new program.
+
 ## The AUR recipe
 
 AUR 1.8.0-1 lacks **sudo** (not in Arch's base: some use doas; nog would install and fail at the first change), **zstd** (linked directly), and the optional **flatpak** and **snapd**. A recipe-only change: 1.8.0-2.

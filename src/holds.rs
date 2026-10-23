@@ -423,6 +423,10 @@ pub struct SonameData {
     /// soname -> installed packages shipping the library file on the loader
     /// path, declared or not (issue #16).
     pub file_providers: HashMap<String, Vec<String>>,
+    /// v2.1.0 (F-25, #61): interpreter -> installed packages with files under its
+    /// CURRENT series' module folder (`usr/lib/perl5/5.42/`). Filled only when a
+    /// pending update moves that interpreter to a new series; see `interpreter_moves`.
+    pub module_dir_owners: HashMap<String, Vec<String>>,
 }
 
 /// Every soname some pending candidate would stop providing.
@@ -600,6 +604,72 @@ pub fn soname_coupling_demotions(
     out
 }
 
+/// v2.1.0 (F-25, #61): the interpreters whose compiled modules install into a
+/// folder named for the interpreter's version series — `usr/lib/perl5/5.42/`,
+/// `usr/lib/python3.14/` — with how many version components make the series.
+pub const INTERPRETERS: [(&str, &str, usize); 2] = [("perl", "usr/lib/perl5/", 2), ("python", "usr/lib/python", 2)];
+
+/// Pure. The module folder an interpreter at `version` reads (`usr/lib/perl5/5.42/`), or
+/// `None` when `name` is not one of `INTERPRETERS`.
+pub fn module_dir(name: &str, version: &str) -> Option<String> {
+    INTERPRETERS.iter().find(|(n, _, _)| *n == name)
+        .map(|(_, prefix, depth)| format!("{}{}/", prefix, series(version, *depth)))
+}
+
+/// Pure. Of the pending updates `(name, old, new)`, the interpreters that change
+/// series, each with the folder it leaves behind. Empty on most runs, so the file
+/// lists are read only when this is not.
+pub fn interpreter_moves(pending: &[(&str, &str, &str)]) -> Vec<(String, String)> {
+    pending.iter().filter_map(|(n, old, new)| {
+        let (from, to) = (module_dir(n, old)?, module_dir(n, new)?);
+        (from != to).then(|| (n.to_string(), from))
+    }).collect()
+}
+
+/// Couple an interpreter that changes series to the installed packages still
+/// using its old module folder (F-25, #61).
+///
+/// Seen on 2026-10-23: perl went 5.42 → 5.44 when its hold ended, while
+/// apparmor and subversion, already rebuilt for 5.44, were held a day longer
+/// (built after perl, so their windows end later). perl's own hook said
+/// `'/usr/lib/perl5/5.42' contains data from at least 2 packages which will NOT
+/// be used`. Arch states this link nowhere but in the paths: no versioned
+/// dependency, no ABI provide. python has the same shape, far larger.
+///
+/// The soname rule's direction: a Ready interpreter that leaves its folder
+/// behind waits for every installed package with files there that is not
+/// moving with it. A held one lends its countdown; one with no update at all
+/// (not rebuilt yet, or foreign) reads `blocked by`. `--promote` is the door.
+pub fn module_dir_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    data: &SonameData,
+) -> Vec<(String, String)> {
+    let moving: HashSet<&str> = ready.iter().map(|p| p.name.as_str()).collect();
+    let mut out = Vec::new();
+    for cand in ready {
+        let (Some(from), Some(to)) = (module_dir(&cand.name, &cand.old_version), module_dir(&cand.name, &cand.new_version)) else { continue };
+        if from == to {
+            continue;
+        }
+        let mut left: Vec<&str> = data.module_dir_owners.get(&cand.name).into_iter().flatten()
+            .map(|s| s.as_str())
+            .filter(|o| *o != cand.name && !moving.contains(o))
+            .collect();
+        if left.is_empty() {
+            continue;
+        }
+        left.sort_unstable();
+        left.dedup();
+        // The same partner choice as the soname rule: a held one, so both rows
+        // share a countdown; otherwise the first by name (`blocked by`).
+        let held_match: Vec<&CouplingPkg> = held.iter().filter(|h| left.contains(&h.name.as_str())).collect();
+        let partner = longest_held(&held_match).map(|h| h.name.clone()).unwrap_or_else(|| left[0].to_string());
+        out.push((cand.name.clone(), partner));
+    }
+    out
+}
+
 pub fn coupling_demotions(
     ready: &[CouplingPkg],
     held: &[CouplingPkg],
@@ -615,6 +685,7 @@ pub fn coupling_demotions(
         .chain(pkgbase_coupling_demotions(ready, held))
         .chain(cohort_coupling_demotions(ready, held))
         .chain(soname_coupling_demotions(ready, held, soname))
+        .chain(module_dir_coupling_demotions(ready, held, soname))
     {
         if claimed.insert(name.clone()) {
             out.push((name, partner));
@@ -1573,4 +1644,67 @@ mod tests {
         let ready = vec![built("glibc", "2.43-1", "2.44-1", 1_000, 0), built("ffmpeg", "7-1", "8-1", 2_000, 0)];
         assert!(linchpin_demotions(&ready, &[]).is_empty());
     }
+
+    // ---- F-25 (#61): interpreters and their module folders ----------------
+    // Real data from 2026-10-23: perl 5.42.3-1 → 5.44.0-1 Ready, apparmor
+    // 4.1.8-2 and subversion 1.14.5-6 (rebuilt for 5.44) held 1 day.
+
+    fn cp(name: &str, old: &str, new: &str, remaining: u64) -> CouplingPkg {
+        CouplingPkg { name: name.into(), old_version: old.into(), new_version: new.into(), pkgbase: None, remaining }
+    }
+
+    fn owners(interp: &str, pkgs: &[&str]) -> SonameData {
+        let mut d = SonameData::default();
+        d.module_dir_owners.insert(interp.into(), pkgs.iter().map(|s| s.to_string()).collect());
+        d
+    }
+
+    #[test]
+    fn interpreters_name_the_folder_they_leave() {
+        assert_eq!(module_dir("perl", "5.42.3-1").as_deref(), Some("usr/lib/perl5/5.42/"));
+        assert_eq!(module_dir("python", "3.14.2-1").as_deref(), Some("usr/lib/python3.14/"));
+        assert_eq!(module_dir("bash", "5.3.3-1"), None);
+        assert_eq!(interpreter_moves(&[("perl", "5.42.3-1", "5.44.0-1"), ("perl-foo", "1-1", "2-1")]),
+            vec![("perl".to_string(), "usr/lib/perl5/5.42/".to_string())]);
+        assert!(interpreter_moves(&[("perl", "5.44.0-1", "5.44.1-1")]).is_empty(), "same series: nothing moves");
+        assert!(interpreter_moves(&[("python", "3.14.2-1", "3.14.3-1")]).is_empty());
+    }
+
+    #[test]
+    fn perl_waits_for_the_packages_rebuilt_for_it() {
+        let ready = [cp("perl", "5.42.3-1", "5.44.0-1", 0)];
+        let held = [cp("apparmor", "4.1.7-1", "4.1.8-2", 1), cp("subversion", "1.14.5-5", "1.14.5-6", 1)];
+        let d = owners("perl", &["apparmor", "subversion"]);
+        assert_eq!(module_dir_coupling_demotions(&ready, &held, &d), vec![("perl".to_string(), "apparmor".to_string())]);
+        // and through the whole chain
+        assert_eq!(coupling_demotions(&ready, &held, &d), vec![("perl".to_string(), "apparmor".to_string())]);
+    }
+
+    #[test]
+    fn perl_moves_when_its_partners_move_too() {
+        let ready = [cp("perl", "5.42.3-1", "5.44.0-1", 0), cp("apparmor", "4.1.7-1", "4.1.8-2", 0),
+                     cp("subversion", "1.14.5-5", "1.14.5-6", 0)];
+        let d = owners("perl", &["apparmor", "subversion"]);
+        assert!(module_dir_coupling_demotions(&ready, &[], &d).is_empty());
+    }
+
+    #[test]
+    fn a_module_with_no_rebuild_blocks_the_interpreter() {
+        // a foreign perl module built for 5.42, nothing pending for it
+        let ready = [cp("perl", "5.42.3-1", "5.44.0-1", 0)];
+        let d = owners("perl", &["perl-foo-aur"]);
+        assert_eq!(module_dir_coupling_demotions(&ready, &[], &d), vec![("perl".to_string(), "perl-foo-aur".to_string())]);
+    }
+
+    #[test]
+    fn a_same_series_interpreter_update_moves_nothing() {
+        let ready = [cp("perl", "5.44.0-1", "5.44.1-1", 0)];
+        let d = owners("perl", &["apparmor"]);
+        assert!(module_dir_coupling_demotions(&ready, &[], &d).is_empty());
+        let ready = [cp("python", "3.14.2-1", "3.15.0-1", 0)];
+        let held = [cp("python-requests", "2.32.5-1", "2.32.5-2", 3)];
+        let d = owners("python", &["python-requests", "python"]);
+        assert_eq!(module_dir_coupling_demotions(&ready, &held, &d), vec![("python".to_string(), "python-requests".to_string())]);
+    }
+
 }

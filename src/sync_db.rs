@@ -221,9 +221,37 @@ fn update_stamp_path() -> Option<std::path::PathBuf> {
     Some(Path::new(&home).join(".local/share/nog/last-update"))
 }
 
+/// v2.1.0 (pkg-140): the record for the whole computer (Javier, 2026-10-23: "whole
+/// computer, yes"). An update by any user, or by nogForge, vouches for the lists
+/// every user sees. The per-user file stays as the fallback where sudo may run
+/// pacman only (a timer's rule).
+const SYSTEM_STAMP: &str = "/var/lib/nog/last-update";
+
+/// Pure. Of two record ages, the newer (smaller); either may be missing.
+pub fn newest_age(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, y) => x.or(y),
+    }
+}
+
 /// Write the stamp. Best effort: a missing stamp only costs one extra safe
 /// update before the next install.
 pub fn mark_update_done() {
+    // Right after pacman's step sudo still remembers the password, so `-n` never
+    // asks; `install -D` creates /var/lib/nog the first time. Where sudo allows
+    // pacman only, this fails quietly and the per-user record below is written.
+    let system = std::process::Command::new("sudo")
+        .args(["-n", "install", "-D", "-m", "644", "/dev/null", SYSTEM_STAMP])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if system {
+        return;
+    }
     if let Some(p) = update_stamp_path() {
         if let Some(dir) = p.parent() {
             let _ = fs::create_dir_all(dir);
@@ -235,8 +263,12 @@ pub fn mark_update_done() {
 /// Seconds since the stamp was written (change time, like the lists), or
 /// `None` when nog has no record of a completed update.
 pub fn update_stamp_age_secs() -> Option<u64> {
+    newest_age(age_of(Path::new(SYSTEM_STAMP)), update_stamp_path().and_then(|p| age_of(&p)))
+}
+
+fn age_of(path: &Path) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
-    let meta = fs::metadata(update_stamp_path()?).ok()?;
+    let meta = fs::metadata(path).ok()?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
     Some(now.saturating_sub(meta.ctime()).max(0) as u64)
@@ -447,6 +479,15 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_newest_record_wins_whoever_wrote_it() {
+        assert_eq!(newest_age(Some(7200), Some(60)), Some(60), "a user's newer record wins over an older system one");
+        assert_eq!(newest_age(Some(60), Some(7200)), Some(60));
+        assert_eq!(newest_age(None, Some(300)), Some(300), "no system record yet: the user's");
+        assert_eq!(newest_age(Some(300), None), Some(300));
+        assert_eq!(newest_age(None, None), None);
+    }
 
     const DESC: &str = "\
 %NAME%
