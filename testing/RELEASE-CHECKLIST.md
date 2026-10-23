@@ -102,21 +102,22 @@ Every release artifact carries the dual credit line:
    - `RELEASE-CHECKLIST.md` updated if new gates surfaced
 6. Phase N implementation commit + docs/version-bump commit land on `main`
 7. Annotated tag `vX.Y.Z` on the docs commit (or rolled forward if deeper docs follow)
-8. **GitHub push (before AUR — PKGBUILD `source=()` pulls the tag tarball):**
-   - `git push origin main`
-   - `git push origin vX.Y.Z`
-   - `gh release create vX.Y.Z --title "..." --notes-file <body>`
-9. **AUR pipeline:**
-   - Bump `~/Programs/aur-nog-remote/PKGBUILD` `pkgver` (reset `pkgrel=1`)
-   - `cd ~/Programs/aur-nog-remote && updpkgsums && makepkg --printsrcinfo > .SRCINFO`
-   - Mirror the same `PKGBUILD` into `~/Programs/aur-nog/` for the local smoke test
-   - In `~/Programs/aur-nog/`: `makepkg -si` (sudo handoff to user — copy-paste, paste result back)
-   - In `~/Programs/aur-nog-remote/`: `git add PKGBUILD .SRCINFO && git commit -m "vX.Y.Z" && git push`
-10. **Fresh install verification:**
-    - `sudo pacman -R nog` (handoff)
-    - `yay -S nog` (handoff)
-    - `nog --version` matches the tag
-    - Section 1 (Baseline sanity) of the current Test Matrix passes
+8. **GitHub first (the AUR recipe downloads the release's files):**
+   - `git push origin main vX.Y.Z` (the tag signed: `git tag -s`)
+   - The release files, reproducible (2026-10-22, the Forge Suite's recipe): every file dated the tag's commit time —
+     `git archive --mtime="$(git log -1 --format=%cI vX.Y.Z)" --format=tar --prefix=nog-X.Y.Z/ vX.Y.Z | gzip -n -9 > nog-X.Y.Z.tar.gz`,
+     then `sha256sum nog-X.Y.Z.tar.gz > SHA256SUMS` and `gpg --armor --detach-sign` both. Two builds must give the same checksum.
+   - `gh release create vX.Y.Z --title "..." --notes-file <body>` with the four files (`nog-X.Y.Z.tar.gz`, `.asc`, `SHA256SUMS`, `.asc`)
+9. **The AUR recipe, built locally, not pushed:**
+   - In `~/Programs/aur-nog-remote/`: `pkgver`, `pkgrel=1`, `sha256sums` from the release's SHA256SUMS
+   - Pre-flight, all read-only: the sha256 against the downloaded tarball · `gpg --verify` the `.asc` · `makepkg --printsrcinfo | diff - .SRCINFO`
+   - `makepkg -f` (downloads the published files, runs `check()`); never `-si`
+   - The commit carries `PKGBUILD` + `.SRCINFO` only (the AUR checks every commit in a push)
+10. **Javier's local test, then the AUR push (one push per proven version):**
+    - He installs the locally built package: `nog install ./nog-X.Y.Z-1-x86_64.pkg.tar.zst` (no `.sig` beside it)
+    - `nog --version` matches the tag; section 1 (Baseline sanity) of the current Test Matrix passes
+    - **Only on his pass:** `git push` in `~/Programs/aur-nog-remote/` (the ssh agent per `~/.claude/rules/aur.md`); a fix found during his test goes into the same unpublished version
+    - Verify: the AUR package page shows the version (its RPC index can lag a few minutes)
 11. **GitHub surface review** per [[github-surface-completeness]]:
     - About — description, topics, website URL all current
     - Releases — v1.0.X marked Latest, body matches the prepared notes, prior releases unaltered

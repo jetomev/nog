@@ -3,7 +3,7 @@
 # locks on THIS desktop, with the freshly built binary (target/release/nog).
 # Every case stops before anything changes: a read-only command, a name found
 # nowhere, nobody at the keyboard, "n" to the question, or sudo's password
-# window refused (SUDO_ASKPASS=/bin/false). Nothing is installed, removed,
+# window refused (a stand-in sudo that refuses). Nothing is installed, removed,
 # locked or cleaned. The 1.9.0 chain cases live in dry-run-190.sh.
 #
 #   scripts/dry-run-200.sh
@@ -19,7 +19,13 @@ exec > >(tee "$log") 2>&1
 NOG="$PWD/target/release/nog"
 REAL_HOME="$HOME"
 export HOME="$(mktemp -d)"          # nog's own records stay out of the real home
-export NOG_ASKPASS=1 SUDO_ASKPASS=/bin/false
+export NOG_ASKPASS=1
+# sudo refused at once by a stand-in first on PATH (2026-10-22: the working rule says never set
+# SUDO_ASKPASS). nog and the AUR helper both call `sudo` by name, so both meet it.
+mkdir -p "$HOME/stub"
+printf '#!/bin/sh\necho "sudo: refused (a dry run: nothing may change)" >&2\nexit 1\n' > "$HOME/stub/sudo"
+chmod 755 "$HOME/stub/sudo"
+export PATH="$HOME/stub:$PATH"
 export NOG_EVENTS="$HOME/events.jsonl"
 trap 'rm -rf --one-file-system "$HOME"' EXIT
 

@@ -18,6 +18,9 @@ log="logs/vm-run-200-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$(basename "$log")" logs/vm-run-200-latest.log
 exec > >(tee "$log") 2>&1
 VM=kognog-hypeforge
+# The VM's password (test-only) lives outside the repository (2026-10-22): a private file.
+VMPW="$(cat "${NOG_VM_PASSWORD_FILE:-$HOME/.config/nog/vm-password}" 2>/dev/null)"
+[ -n "$VMPW" ] || { echo "no VM password: put it in ~/.config/nog/vm-password (or NOG_VM_PASSWORD_FILE)"; exit 1; }
 X() { scripts/vm-exec.py --timeout "${T:-900}" -- "$@"; }
 J() { scripts/vm-exec.py --timeout "${T:-900}" -- "runuser -u javier -- bash -lc '$1'"; }
 # D <case> '<nog command>' [REGEX ANSWER ...]: drive a nog run as javier, log it
@@ -29,7 +32,7 @@ D() {
   # vm-drive adds the newline itself; sudo's prompt is matched exactly (nog's
   # own words say "no password" and must not answer anything); HOME is set
   # because `runuser -u` keeps root's (the run logs must land in javier's).
-  scripts/vm-exec.py --timeout 900 -- "runuser -u javier -- env HOME=/home/javier vm-drive --timeout 800 'cd ~ && $cmd' '\\[sudo\\] password for' 'vmtest' $rules" | tee "logs/vm-200-$id.log" | tail -25
+  scripts/vm-exec.py --timeout 900 -- "runuser -u javier -- env HOME=/home/javier vm-drive --timeout 800 'cd ~ && $cmd' '\\[sudo\\] password for' '$VMPW' $rules" | tee "logs/vm-200-$id.log" | tail -25
 }
 
 echo "== VM: revert to nog-190-tested and start"

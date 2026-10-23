@@ -12,6 +12,9 @@ log="logs/vm-run-200b-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$(basename "$log")" logs/vm-run-200b-latest.log
 exec > >(tee "$log") 2>&1
 VM=kognog-hypeforge
+# The VM's password (test-only) lives outside the repository (2026-10-22): a private file.
+VMPW="$(cat "${NOG_VM_PASSWORD_FILE:-$HOME/.config/nog/vm-password}" 2>/dev/null)"
+[ -n "$VMPW" ] || { echo "no VM password: put it in ~/.config/nog/vm-password (or NOG_VM_PASSWORD_FILE)"; exit 1; }
 X() { scripts/vm-exec.py --timeout "${T:-900}" -- "$@"; }
 J() { scripts/vm-exec.py --timeout "${T:-900}" -- "runuser -u javier -- bash -lc '$1'"; }
 D() {
@@ -19,7 +22,7 @@ D() {
   local rules=""
   for r in "$@"; do rules="$rules '$r'"; done
   echo; echo "################ $id: $cmd"
-  scripts/vm-exec.py --timeout 900 -- "runuser -u javier -- env HOME=/home/javier vm-drive --timeout 800 'cd ~ && $cmd' '\\[sudo\\] password for' 'vmtest' $rules" | tee "logs/vm-200b-$id.log" | tail -30
+  scripts/vm-exec.py --timeout 900 -- "runuser -u javier -- env HOME=/home/javier vm-drive --timeout 800 'cd ~ && $cmd' '\\[sudo\\] password for' '$VMPW' $rules" | tee "logs/vm-200b-$id.log" | tail -30
 }
 echo "== VM: start as it is (no revert)"
 virsh -c qemu:///system start "$VM" >/dev/null 2>&1 || true
