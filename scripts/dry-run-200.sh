@@ -55,7 +55,10 @@ if "sources" in d: print("  sources:", d["sources"])
 }
 
 "$NOG" --version
-echo "home: $HOME (logs read from $REAL_HOME for history/status)"
+# history and status read a COPY of the real logs: run in the real home they wrote their own
+# lines into the maintainer's runs log (found 2026-10-23 in `nog history`).
+mkdir -p "$HOME/.local/share/nog" && cp -r "$REAL_HOME/.local/share/nog/logs" "$HOME/.local/share/nog/" 2>/dev/null
+echo "home: $HOME (history/status read a copy of $REAL_HOME's logs)"
 
 # ── search, list, info, tier: read-only ─────────────────────────────────────
 case_ S1  -        search calc
@@ -89,10 +92,10 @@ case_ R3  -        reinstall bash               # nobody at the keyboard
 case_ R4  'y\n'    reinstall bash               # sudo refused → pacman stopped
 case_ R5  -        reinstall --yes bash         # sudo refused → pacman stopped
 # ── status / history ────────────────────────────────────────────────────────
-HOME="$REAL_HOME" case_ H1 - history --days 2
-HOME="$REAL_HOME" json_ H1j history --days 2 --json
-HOME="$REAL_HOME" case_ H2 - status
-HOME="$REAL_HOME" json_ H2j status --json
+case_ H1 - history --days 2
+json_ H1j history --days 2 --json
+case_ H2 - status
+json_ H2j status --json
 # ── clean (C5): the report, every refusal, every answer that changes nothing ─
 json_ C1j          clean --json
 case_ C1  -        clean                        # nobody to pick

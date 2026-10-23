@@ -77,8 +77,8 @@ From `nog-210-before`, a real `nog update --keep proton-ge-custom-bin` at a keyb
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 5.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc2-1-x86_64.pkg.tar.zst` | `nog --version` says 2.1.0; pacman says `/etc/nog/tier-pins.toml installed as /etc/nog/tier-pins.toml.pacnew` (this desktop runs KognogOS's list since 10-22, and pacman keeps an edited file: the trimmed default lands beside it, unused) | | |
-| 5.2 | `nog history --days 1` | the reboot advice reads top to bottom: "IMPORTANT: It is highly recommended to reboot the system!" first (F-26) | | |
+| 5.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc2-1-x86_64.pkg.tar.zst` | `nog --version` says 2.1.0; pacman says `/etc/nog/tier-pins.toml installed as /etc/nog/tier-pins.toml.pacnew` (this desktop runs KognogOS's list since 10-22, and pacman keeps an edited file: the trimmed default lands beside it, unused) | PASS | 10-23; 2.1.0rc2-1 installed, the .pacnew warning shown, nog 2.1.0 (pacman -Q and the .pacnew checked) |
+| 5.2 | `nog history --days 1` | the reboot advice reads top to bottom: "IMPORTANT: It is highly recommended to reboot the system!" first (F-26) | PASS | 10-23 19:32; IMPORTANT first, "mesa was updated this run." last; the update decisions in written order too. Spotted on the way: the dry runs' status/history cases had written into the real runs log; dry-run-200.sh now reads a copy |
 | 5.3 | `nog update` → y | subversion (Ready since 4.8) and whatever else is Ready; one password; Done | | |
 | 5.4 | `ls -l /var/lib/nog/last-update` | a file owned by root, dated 5.3's time: the record for the whole computer (pkg-140) | | |
 
