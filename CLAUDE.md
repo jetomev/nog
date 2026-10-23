@@ -23,7 +23,7 @@ Packages that must move together are held together. Every rule below is a coupli
 - **A hold is counted from the first new version seen, plus a safety wait** (v1.5.2, #27). Counting from the newest build kept linux-zen held from May to the end of September.
 - **The foreign fence:** AUR packages nog did not clear this run stay `--ignore`d; when the AUR cannot be checked, nothing foreign moves, and the summary says `could not check`, never 0 (#25).
 - **The user's intent is the scope:** `nog install` installs only what was asked, never an update first (F-8 #41); `nog update a b` touches only those (#44); nothing is promoted past a hold unless named.
-- **The AUR always needs a person:** no terminal = refuse up front, `--yes` never covers an AUR build (#26, #32); `nog update --yes` with nobody at the keyboard keeps the AUR back with a hint (F-20 #56). Every helper build gets `--sudoloop`, so a long build never ends at a password nobody is there to type (F-21 #57). A broken or unreadable state file is said out loud, never guessed (`sources.toml` garbage = every source off).
+- **The AUR always needs a person:** no terminal = refuse up front, `--yes` never covers an AUR build (#26, #32); `nog update --yes` with nobody at the keyboard keeps the AUR back with a hint (F-20 #56). Every helper build gets `--sudoloop`, so a long build never ends at a password nobody is there to type (F-21 #57), and nog asks sudo itself (`sudo -v`) right before the helper starts, so the loop never prompts in the middle of the helper's menus (F-27 #63). A broken or unreadable state file is said out loud, never guessed (`sources.toml` garbage = every source off).
 - **Say what was seen:** reboot advice checks the machine where it can and names the package where it cannot, never an anonymous warning.
 
 ## The contract with nogForge
@@ -34,7 +34,7 @@ nogForge shows what nog decides and never decides itself, so nog's machine outpu
 - A field is never renamed or removed silently: change nogForge in step, raise its `nog>=` requirement, and update the man page (it documents every JSON document).
 
 ## How to build and test
-- `cargo test --release --locked`; **report the count every time** (303 passing + 6 ignored at v2.1.0; warnings 6). Read warnings from cargo's own `generated N warnings` line, not a grep count.
+- `cargo test --release --locked`; **report the count every time** (304 passing + 6 ignored at v2.1.0; warnings 6). Read warnings from cargo's own `generated N warnings` line, not a grep count.
 - **Never run a real install, removal, update or clean on the development desktop to test.** Unit tests feed pure functions strings and sample files; tests that read the live machine are `#[ignore]` and change nothing. Desktop checks go through `scripts/dry-run-*.sh`: the fresh binary, a throwaway HOME, sudo refused at once, every case stopping before a change; they log to `logs/`.
 - **Real changes happen in the KognogOS test VM** (`kognog-hypeforge`), from a named snapshot: `scripts/vm-put.py` copies the binary in, `vm-exec.py` runs a command, `vm-drive.py` answers prompts as they appear (typed-ahead answers get thrown away by sudo and pacman). The AUR recipe is built in a clean Arch chroot.
 - A release candidate is `scripts/make-rc-package.sh N` → `dist-rc/`, built with the AUR recipe and every test; Javier installs that and runs the written matrix.

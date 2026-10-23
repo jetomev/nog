@@ -15,10 +15,11 @@
 
 - **perl and python wait for the packages built for their new version** (F-25 [#61](https://github.com/jetomev/nog/issues/61), found in Javier's run): on 2026-10-23 perl went 5.42 → 5.44 while apparmor and subversion, already rebuilt for 5.44, were held a day longer, so their perl modules sat where the new perl never looks. Arch says this only in the folder names, so nog now reads who has files in the interpreter's old folder, only when such a move is pending, and the interpreter waits with them (`coupled to apparmor`, or `blocked by` a package with no rebuild yet). A new rule in the coupling chain.
 - **`nog history` keeps a run's lines in order** (F-26 [#62](https://github.com/jetomev/nog/issues/62)): newest run first, each run's own lines as written. A six-line reboot advice used to print upside down, and `nog status` showed its last line as the headline.
+- **The password is asked alone, before an AUR build starts** (F-27 [#63](https://github.com/jetomev/nog/issues/63), found in the KognogOS VM): when a long pacman step outlasted sudo's memory of the password, yay's keep-awake loop asked for it in the middle of yay's own menu, two programs reading the keyboard at once. nog now runs `sudo -v` itself right before the helper: a fresh ticket asks nothing, an expired one asks on its own line, and the loop keeps it fresh after. If sudo is not given the password, the build does not start and nog says so.
 - **One record of the last completed update for the whole computer**, `/var/lib/nog/last-update` (Javier's call): an update by any user, or through nogForge, counts for everyone. Written while sudo still remembers the password, so it never asks; where sudo may run pacman only (a timer's rule), the per-user record is the fallback.
 - **nog's own tier list is generic** (Javier's call): Tier 2 holds PipeWire, WirePlumber and NetworkManager. The desktop and its apps (Plasma, SDDM, Firefox, Dolphin, Konsole, Kate, grubForge, Alacritty, fish, alacrittyForge) are a distribution's or your choice; KognogOS ships its own, fuller list. pacman keeps an edited `/etc/nog/tier-pins.toml` as it is.
 
-Tests: 285 → 303 (each new one seen failing on purpose, except the folder reader's, written with its code and proven against this desktop's real file lists). Warnings unchanged at 6.
+Tests: 285 → 304 (each new one seen failing on purpose, except the folder reader's, written with its code and proven against this desktop's real file lists). Warnings unchanged at 6.
 
 ### v2.0.0 — October 2026
 

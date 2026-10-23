@@ -44,6 +44,18 @@ From snapshot `nog-210-before`, the fresh binary in place, the package lists syn
 
 The VM ran the binary from before F-24 (message text only; covered by its test and 2.6).
 
+## §3b · Claude, the KognogOS VM — rc2 (`scripts/vm-run-210b.sh`)
+
+From `nog-210-before`, a real `nog update --keep proton-ge-custom-bin` at a keyboard (`vm-drive` types the password when sudo asks); the VM's no-password rule moved aside; snapd 2.78 and nogforge 1.5.0 built from the AUR; the VM restored after. Three runs were needed, each failure the bench's own: run 1, sudo refused the password the older scripts carried (it never matched the VM; every earlier bench had the no-password rule on), so the bench now sets a throwaway one per run; run 2, the control hung 56 minutes at yay's cleanBuild menu (the driver's keystroke was lost), so yay's menus are now off in the VM's yay settings — and run 2 is where **F-27** showed (below). Logs: `logs/vm-run-210b-*.log`, `logs/vm-210b-S*.log`.
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 3b.1 | S0: rc2's plan in the VM (read-only) | perl already 5.44 there, apparmor's rebuild held: F-25 has nothing to show in this VM | N/A | perl moved before this snapshot; F-25 rests on its tests (the real 10-23 data) and the live check of this desktop's file lists |
+| 3b.2 | run 2 · S2: rc2 (`--sudoloop`), sudo forgetting after 1 minute, yay's menus on | the AUR step runs | FAIL | **F-27**: yay's keep-awake `sudo -v` asked for the password in the middle of yay's cleanBuild menu; answers crossed, sudo timed out, a dozen prompts; fixed (nog asks `sudo -v` itself right before the helper) |
+| 3b.3 | run 3 · S1 control (2.0.0) and S2 (rc2 + F-27), sudo forgetting after 1 minute | both update, build snapd and nogforge, exit 0 | PASS | both: 2 prompts (pacman's, and one at the install after the builds). **This does not prove `--sudoloop`**: yay's loop refreshes about every 5 minutes, matched to Arch's 5-minute default, so a 1-minute setting outruns it; and snapd built in 45 s. See 3b.5 |
+| 3b.4 | run 3 · S2: the computer-wide record (pkg-140) | `/var/lib/nog/last-update` owned by root, dated the update; no per-user record | PASS | `-rw-r--r-- 1 root root 0 Oct 23 18:45 /var/lib/nog/last-update`; `~/.local/share/nog/last-update` absent |
+| 3b.5 | run 4 · S3: rc2, sudo at its normal memory, a watcher on the processes | yay started with `--sudoloop`; its `sudo -v` keep-awake calls seen | | |
+
 ## §4 · Javier, this desktop — step by step
 
 *rc1: `dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst`. Each step: Claude says what it does and what to expect, Javier types one line and pastes the screen or says PASS. Findings → F-n issues, fixed into the same unpublished 2.1.0 (rc2, …).*
@@ -59,10 +71,22 @@ The VM ran the binary from before F-24 (message text only; covered by its test a
 | 4.7 | `nog history --days 1` | today's runs newest first: 4.3 and 4.5 `stopped`; 4.6 `done` (or `incomplete` if a step failed, or `stopped` if you said n) | PASS | 10-23 16:11; 15:15 done, 14:55 and 14:48 stopped. The reboot advice below printed upside down → **F-26** |
 | 4.8 | `nogforge` → Update (4) → look, then q | nogForge 1.5.0 on nog 2.1.0: the plan read without errors (after 4.6: 0 ready, the held list with its notes) | PASS | 10-23 ~16:20; "1 to update · 0 kept back · 165 held": subversion's hold had just run out (half of F-25 resolved itself), no error |
 
+## §5 · Javier, this desktop — rc2 (F-25, F-26, F-27, the computer-wide record, the trimmed list)
+
+*rc2: `dist-rc/nog-2.1.0rc2-1-x86_64.pkg.tar.zst`. Only what changed since rc1. F-25 cannot be shown here any more (perl already moved on 4.6); it is proven by its tests with the real data and the live check of this desktop's file lists (`usr/lib/perl5/5.42/` → apparmor, subversion). F-27 shows only when an AUR package is Ready and the pacman step outlasts sudo's 5 minutes; it is proven in the VM (§3b).*
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 5.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc2-1-x86_64.pkg.tar.zst` | `nog --version` says 2.1.0; pacman says `/etc/nog/tier-pins.toml installed as /etc/nog/tier-pins.toml.pacnew` (this desktop runs KognogOS's list since 10-22, and pacman keeps an edited file: the trimmed default lands beside it, unused) | | |
+| 5.2 | `nog history --days 1` | the reboot advice reads top to bottom: "IMPORTANT: It is highly recommended to reboot the system!" first (F-26) | | |
+| 5.3 | `nog update` → y | subversion (Ready since 4.8) and whatever else is Ready; one password; Done | | |
+| 5.4 | `ls -l /var/lib/nog/last-update` | a file owned by root, dated 5.3's time: the record for the whole computer (pkg-140) | | |
+
 ## Findings
 
 | # | Step | What happened | Severity | Decision |
 |---|---|---|---|---|
+| F-27 | 3b.2 | With `--sudoloop`, when sudo had forgotten the password during a long pacman step, yay's background `sudo -v` prompted in the middle of yay's own cleanBuild menu: two programs reading the keyboard at once; answers crossed, sudo timed out, a dozen prompts followed, the step failed. | medium | rc2 (#63): `aur::sudo_refresh` — nog runs `sudo -v` alone right before the helper; refused = "sudo was not given the password, so the build did not start"; tests seen failing first |
 | F-26 | 4.7 | `nog history` printed the 10-22 update's six-line reboot advice upside down: each day was reversed row by row, splitting what one run wrote; `nog status` took the last line as the headline. | low | rc2 (#62): `history::newest_first` reverses runs, not rows; test seen failing first |
 | F-25 | 4.6 | perl went 5.42 → 5.44 while apparmor 4.1.8-2 and subversion 1.14.5-6, rebuilt for it, were still Held (1 day): perl's hook warned that `/usr/lib/perl5/5.42` holds data from 2 packages the new perl won't use. Arch expresses this only in file paths (no versioned dependency, no ABI provide); python has the same shape, larger. | medium | rc2 (#61): a coupling rule — an interpreter changing series waits for the installed packages under its old module directory |
 | F-24 | 2.6 | Seven error messages said "exited with status exit status: 1": nog's words, then Rust's own description of how a program ended. Seen in the 2.0.0 dry run's T6 with the 2.1.0 binary. | low | fixed in rc1 (#60): `machine::status_text` gives "1", or "signal 9"; test `status_text_says_the_number_once` seen failing first; 2.6 re-run |

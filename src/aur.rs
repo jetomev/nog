@@ -178,6 +178,27 @@ fn interpret_qua(
 /// On 2026-10-22 yay built snapd for seven minutes and then asked for the password to install
 /// it; nobody was at the keyboard by then, sudo timed out, and the update ended incomplete.
 /// With the loop, the password is asked once when the step starts, with the person there.
+/// v2.1.0 (F-27): the password, asked alone, right before the helper starts. With
+/// `--sudoloop` the helper runs `sudo -v` in the background while it shows its own
+/// menus; when sudo had forgotten the password (a pacman step longer than its 5
+/// minutes), the two read the keyboard at once — seen in the KognogOS VM on
+/// 2026-10-23: the answers crossed, sudo timed out, a dozen prompts followed. Asked
+/// here first, the ticket is fresh and the loop keeps it so, silently. A ticket
+/// still fresh asks nothing.
+pub fn sudo_refresh() -> Command {
+    let mut c = crate::machine::sudo();
+    c.arg("-v");
+    c
+}
+
+/// Run `sudo_refresh`: true when sudo has the password (or did not need it).
+fn refresh_sudo() -> bool {
+    sudo_refresh().status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// What a helper step says when sudo was not given the password before it.
+pub const SUDO_NOT_GIVEN: &str = "sudo was not given the password, so the build did not start";
+
 pub fn build_flags() -> Vec<String> {
     let mut f = crate::machine::helper_sudo_args();
     f.push("--sudoloop".to_string());
@@ -189,6 +210,10 @@ pub fn build_flags() -> Vec<String> {
 /// package — the helper handles it. Runs as the invoking user; the helper
 /// sudo-s to pacman internally for the pacman portion.
 pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
+    if !refresh_sudo() {
+        eprintln!("nog: {}.", SUDO_NOT_GIVEN);
+        return std::os::unix::process::ExitStatusExt::from_raw(1 << 8);
+    }
     let pkgs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
     let mut args = vec!["-S"];
     args.extend_from_slice(&pkgs);
@@ -218,6 +243,12 @@ pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
 /// `excluded` is still passed as `--ignore`: an AUR build can pull a repo
 /// package in as a dependency, and a held package must stay held even then.
 pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String]) -> crate::handoff::Handoff {
+    if !refresh_sudo() {
+        return crate::handoff::Handoff {
+            status: std::os::unix::process::ExitStatusExt::from_raw(1 << 8),
+            reason: Some(SUDO_NOT_GIVEN.to_string()),
+        };
+    }
     let mut args: Vec<String> = vec!["-S".to_string()];
     args.extend(packages.iter().cloned());
     if !excluded.is_empty() {
@@ -356,6 +387,16 @@ mod tests {
         // v2.1.0 (F-21): yay and paru both keep sudo's ticket fresh with --sudoloop, so a long
         // build never ends at a password prompt nobody is there to answer.
         assert!(build_flags().iter().any(|f| f == "--sudoloop"));
+    }
+
+    #[test]
+    fn the_password_is_asked_alone_before_the_helper() {
+        // v2.1.0 (F-27): `sudo -v` before the helper, so its --sudoloop never prompts
+        // in the middle of its own menus.
+        let c = sudo_refresh();
+        assert_eq!(c.get_program(), "sudo");
+        let args: Vec<_> = c.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(args.last().map(|s| s.as_str()), Some("-v"));
     }
 
     // ---- v1.5.4: a failing helper is not "nothing to update" (#25) ----------

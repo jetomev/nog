@@ -2983,10 +2983,17 @@ fn print_incomplete(step_failures: &[String]) {
 /// v2.1.0 (F-21): a failed step's label for the closing summary — its status, and the
 /// cause too when nog knows it for certain (a password nobody typed in time).
 fn failure_label(step: &str, code: i32, reason: Option<&str>) -> String {
-    match reason {
-        Some(r) if r == crate::handoff::PASSWORD_TIMED_OUT => format!("{} (status {}: {})", step, code, r),
-        _ => format!("{} (status {})", step, code),
+    match known_cause(reason) {
+        Some(r) => format!("{} (status {}: {})", step, code, r),
+        None => format!("{} (status {})", step, code),
     }
+}
+
+/// v2.1.0: the reasons nog knows for certain, said as the cause — a password nobody typed
+/// in time (F-21), or sudo refused before a build started (F-27). Any other reason is a
+/// guess from the tool's output: on screen and in the log, never stated as the cause.
+fn known_cause(reason: Option<&str>) -> Option<&str> {
+    reason.filter(|r| *r == crate::handoff::PASSWORD_TIMED_OUT || *r == crate::aur::SUDO_NOT_GIVEN)
 }
 
 /// Issue #9: say something when the running machine no longer matches what is
@@ -3158,9 +3165,9 @@ fn prompt_continue_after_failure(step: &str, code: i32, reason: Option<&str>) ->
     use std::io::{self, IsTerminal, Write};
     eprintln!();
     eprintln!("{}nog: the {} step exited with status {}.{}", C_BOLD, step, code, C_RESET);
-    if reason == Some(crate::handoff::PASSWORD_TIMED_OUT) {
-        // v2.1.0 (F-21): the cause is known, so it is said.
-        eprintln!("{}     The cause: {}. Official packages already{}", C_SUBTEXT, reason.unwrap_or(""), C_RESET);
+    if let Some(cause) = known_cause(reason) {
+        // v2.1.0 (F-21, F-27): the cause is known, so it is said.
+        eprintln!("{}     The cause: {}. Official packages already{}", C_SUBTEXT, cause, C_RESET);
     } else {
         eprintln!("{}     That is either a declined prompt or an error — the exit status{}",
             C_SUBTEXT, C_RESET);
@@ -3890,6 +3897,9 @@ mod output_tests {
     fn a_failed_step_names_the_password_when_that_was_the_cause() {
         let pw = crate::handoff::PASSWORD_TIMED_OUT;
         assert_eq!(failure_label("aur", 1, Some(pw)), format!("aur (status 1: {})", pw));
+        // v2.1.0 (F-27): sudo refused before the build started is a known cause too
+        let refused = crate::aur::SUDO_NOT_GIVEN;
+        assert_eq!(failure_label("aur", 1, Some(refused)), format!("aur (status 1: {})", refused));
         // any other reason stays out of the one-line summary (it is on screen and in the log)
         assert_eq!(failure_label("aur", 1, Some("error: target not found: foo")), "aur (status 1)");
         assert_eq!(failure_label("flatpak", 3, None), "flatpak (status 3)");
