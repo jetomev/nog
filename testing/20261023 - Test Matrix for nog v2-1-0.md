@@ -1,0 +1,66 @@
+# Test Matrix — nog v2.1.0 (unattended updates: #56, F-21 #57, F-22 #58, F-23 #59, F-24 #60)
+
+*Built the night of 2026-10-22 → 23 while Javier slept (stage 02 of the KognogOS road: "Everything you can do without me"). §1–§3 are Claude's and done; §4 is Javier's, step by step, on this desktop, with rc1 from `dist-rc/`. The roll-up is `tally-matrix.py`'s, never a hand count.*
+
+**What this version adds:** `nog update --yes`, so an installer, a timer or a script can update with nobody at the keyboard (Ready packages go in; Unknown ones are kept back and listed; the AUR's build review waits for a person). Long AUR builds keep sudo awake (`--sudoloop`), and a password nobody typed in time is named as the cause. An update that leaves a step unfinished exits **3** and its runs line says **incomplete**. With `--yes` and nobody at the keyboard, nog checks first whether sudo would need a password. Error messages say the exit status once. Versions: 2.1.0rc1 = this build.
+
+**Where these came from:** Javier's real `nog update` on 2026-10-22 (`~/.local/share/nog/logs/20261022-170019 update.log`): 184 installed, then snapd's seven-minute AUR build ended at "sudo: timed out reading password", and the run still said "done" with exit 0.
+
+## §1 · Baseline sanity
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 1.1 | `cargo test --release --locked` | green | **PASS** | 294 passed, 0 failed, 5 ignored (285 at v2.0.0); each new test seen failing first |
+| 1.2 | Warning delta vs v2.0.0 | unchanged | **PASS** | 6 → 6 (`generated 6 warnings`) |
+| 1.3 | `grep -rn "TODO\|FIXME" src/` | empty | **PASS** | |
+| 1.4 | `strings target/release/nog \| grep CARGO_MANIFEST_DIR` | empty | **PASS** | |
+| 1.5 | `man --warnings -l nog.1` | no warnings | **PASS** | the new EXIT STATUS section included |
+| 1.6 | Version sync | 2.1.0 in Cargo.toml, Cargo.lock, nog.conf, nog.1, README | **PASS** | |
+| 1.7 | rc1 package | built from the AUR recipe, tests in the build | **PASS** | `dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst`, 294 tests in `check()`; the binary inside says 2.1.0; no `.sig` beside it. fakeroot printed "payload not recognized!" once, as in 2.0.0rc1 (that package passed 54/54) |
+
+## §2 · Claude, this desktop — dry runs (nothing changes)
+
+Every case stops before a change: nobody at the keyboard, or sudo refused at once by a stand-in `sudo` first on the script's PATH. nog's own records go to a temporary home.
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 2.1 | `nog update </dev/null` | "Not updating", the cause said (nobody at the keyboard), `--yes` offered; exit 1 | **PASS** | D1, `logs/dry-run-210-latest.log` |
+| 2.2 | `nog update --yes </dev/null`, sudo would need a password | "Not updating … sudo still asks for a password, and nobody is at the keyboard", how to set it up; exit 1 | **PASS** | D2 |
+| 2.3 | `nog update --yes` at a terminal, sudo refused | "Begin the handoff? yes (--yes)"; pacman's step fails → the run is cancelled, exit 1, runs line `stopped` | **PASS** | D3. Claude first expected 3; wrong: nothing was updated, so the run stopped. 3 means a *later* step failed after pacman's went through (§3, 3.4) |
+| 2.4 | `nog update --help` · `man -l nog.1` | `--yes` described; EXIT STATUS lists 0, 1, 2, 3 | **PASS** | D4 |
+| 2.5 | `scripts/dry-run-200.sh` · `dry-run-190.sh` with the 2.1.0 binary | OK, no crash; exits as at 2.0.0 | **PASS** | 41 + 26 cases. Two changed result because this desktop changed, not nog: T6 (`tier bash --set 3`) — bash is now pinned Tier 1 in `/etc/nog/tier-pins.toml` (changed 10-22), so a move is attempted and sudo refused; C6 (`clean --only snap`) — snapd is installed now |
+| 2.6 | T6's refusal message | "sudo tee /etc/nog/tier-pins.toml exited with status 1" | **PASS** | it read "exited with status exit status: 1" → **F-24**, fixed and re-run |
+
+## §3 · Claude, the KognogOS VM — real changes (`scripts/vm-run-210.sh`)
+
+From snapshot `nog-210-before`, the fresh binary in place, the package lists synced (147 pending). Every nog run as the VM's user `javier`, through the guest agent with stdin from `/dev/null`: no terminal at all, so no password can ever be typed. The VM's leftover 1.9.0 rule (`90-test-nopasswd`, anything without a password) is moved aside for Y2–Y4. The VM went back to `nog-210-before` afterwards. Log: `logs/vm-run-210-20261023-001116.log`. (The first run, 00:04, kept that rule, so its Y2 updated 41 packages: right for nog, a wrong premise of Claude's.)
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 3.1 | Y1: `nog update` | "Not updating", the cause said; exit 1; pending 147 → 147 | **PASS** | |
+| 3.2 | Y2: `nog update --yes`, sudo would ask (`sudo -n pacman` → 1) | "Not updating", the password said; exit 1; pending 147 → 147 | **PASS** | |
+| 3.3 | Y3: `nog update --yes`, a sudo rule for pacman only | "Begin the handoff? yes (--yes)"; pacman with `--noconfirm`; "kept back from the AUR: proton-ge-custom-bin, snapd"; "Update finished!"; exit 0, runs line `done` | **PASS** | 41 updated, pending 147 → 106 (the rest held) |
+| 3.4 | Y4: `nog update --yes`, a stand-in flatpak (one dated app whose update fails, one app without a date) | "--yes keeps 1 Unknown package(s) back: org.nogbench.NoDate"; "the flatpak step exited with status 1"; "Continue with the remaining sources? no (--yes takes the default)"; "Update finished, with 1 step(s) that did not complete"; exit **3**, runs line **incomplete** | **PASS** | the update log: 1 unknown `skipped`, 1 ready `did not complete (status 1)` |
+
+The VM ran the binary from before F-24 (message text only; covered by its test and 2.6).
+
+## §4 · Javier, this desktop — step by step
+
+*rc1: `dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst`. Each step: Claude says what it does and what to expect, Javier types one line and pastes the screen or says PASS. Findings → F-n issues, fixed into the same unpublished 2.1.0 (rc2, …).*
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 4.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc1-1-x86_64.pkg.tar.zst` | the package-file install; `nog --version` says **2.1.0** | | |
+| 4.2 | `nog update --help` | a `--yes` line: Ready goes in, Unknown kept back, the AUR's review waits for a person | | |
+| 4.3 | `nog update </dev/null` | the tables, then "Not updating — Nothing is at the keyboard …", `--yes` offered; "Stopped"; nothing changed | | |
+| 4.4 | `sudo -K` | nothing printed: sudo forgets the password it remembered from 4.1 (it keeps it ~5 minutes; without this, 4.5 would really update) | | |
+| 4.5 | `nog update --yes </dev/null` | "Not updating — --yes answers nog's and pacman's questions, but sudo still asks for a password …", how a timer would set it up; "Stopped"; nothing changed | | |
+| 4.6 | `nog update` (the real one; your call, y or n) | as before at the terminal. If you say y and the AUR has updates (snapd, proton-ge-custom-bin): the password once when the AUR step starts, then **no second password** however long snapd builds (`--sudoloop`). The end says "Done", or, if a later step fails, "with N step(s) that did not complete" and "Run nog update again to finish them" | | F-21 proof (yesterday's run ended at a password after 7 minutes) |
+| 4.7 | `nog history --days 1` | today's runs newest first: 4.3 and 4.5 `stopped`; 4.6 `done` (or `incomplete` if a step failed, or `stopped` if you said n) | | |
+| 4.8 | `nogforge` → Update (5) → run it, or close at nog's question | nogForge 1.5.0 on nog 2.1.0: unchanged; a finished update shows the green done line | | sanity |
+
+## Findings
+
+| # | Step | What happened | Severity | Decision |
+|---|---|---|---|---|
+| F-24 | 2.6 | Seven error messages said "exited with status exit status: 1": nog's words, then Rust's own description of how a program ended. Seen in the 2.0.0 dry run's T6 with the 2.1.0 binary. | low | fixed in rc1 (#60): `machine::status_text` gives "1", or "signal 9"; test `status_text_says_the_number_once` seen failing first; 2.6 re-run |
