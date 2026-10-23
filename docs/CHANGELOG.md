@@ -2,6 +2,19 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v2.1.0 — October 2026
+
+**Unattended updates** ([#56](https://github.com/jetomev/nog/issues/56) · F-21 [#57](https://github.com/jetomev/nog/issues/57) · F-22 [#58](https://github.com/jetomev/nog/issues/58) · F-23 [#59](https://github.com/jetomev/nog/issues/59)). The KognogOS installer and welcome app, a timer or a script can now run an update with nobody at the keyboard, and know how it ended.
+
+- **`nog update --yes`**: nog answers its own question and pacman's. The Ready packages go in. **Unknown** packages are kept back and listed: each has no usable build date, so updating it is a decision, and `--yes` never makes it (`yes | nog update` used to). With nobody at the keyboard, the AUR's build review waits for a person: those packages stay Ready, with a hint. When a later step fails, `--yes` takes the question's default and stops there.
+- **Nobody at the keyboard, said as the cause**: without `--yes`, nog says so before anything changes, instead of reading end-of-input as "no" and printing "Cancelled". With `--yes`, nog first checks that sudo can run pacman without a password, and if not, says how to set that up.
+- **Long AUR builds keep sudo awake** (`--sudoloop`, in yay and paru alike). On 2026-10-22 a seven-minute snapd build ended at a password prompt nobody was there to answer; now the password is asked once, when the step starts. When a password does time out, nog says that was the cause.
+- **An unfinished update says so where programs read it**: exit status **3**, and **incomplete** in the day's runs log (it was 0 and "done", and nogForge showed a green "done"). The man page gains an EXIT STATUS section.
+
+- **Error messages say the exit status once** (F-24 [#60](https://github.com/jetomev/nog/issues/60)): seven messages read "exited with status exit status: 1"; now "exited with status 1", or the signal that stopped the program.
+
+Tests: 285 → 294, each new one seen failing on purpose. Warnings unchanged at 6.
+
 ### v2.0.0 — October 2026
 
 **The crown release: one tool for every source** ([#7](https://github.com/jetomev/nog/issues/7) C4 + C5 + C7 · [#5](https://github.com/jetomev/nog/issues/5)). Javier, 2026-10-14 night: *"I want all issues done, nothing open."* The v2 arc designed on 2026-08-10 is complete.

@@ -9,7 +9,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 2.0.0](https://img.shields.io/badge/Version-2.0.0-purple.svg)
+![Version: 2.1.0](https://img.shields.io/badge/Version-2.1.0-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -87,82 +87,12 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **`nog info`** *(v2.0.0)* — everything nog knows about one package, from whichever source has it: source, version, tier and why, how long its updates wait, the details its own tool gives
 - **`nog reinstall`** *(v2.0.0)* — puts back the files of installed packages, each through its own tool; a snap cannot be reinstalled in place, so nog says the way and what it costs instead of doing it
 
-**Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
-
----
-
-## Why nog?
-
-Arch Linux is fast, current, and beautifully simple. But it treats every package the same. When an update exists, it installs. Your kernel updates on the same schedule as an icon theme — and one bad kernel update means your machine doesn't boot.
-
-There's no safety net. One bad sync and you're in single-user mode at 2 AM.
-
-**nog adds one idea: not every package deserves the same urgency.**
-
-Every package belongs to a tier, and each tier waits a different length of time before updates land:
-
-| Tier | What's in it | Waits |
-|---|---|---|
-| **1** | Kernel, bootloader, glibc, systemd, mesa | **30 days** |
-| **2** | Desktop and key applications | **15 days** |
-| **3** | Everything else | **7 days** |
-
-The waiting is the point. Thousands of Arch users install an update before you do. If it's broken, they find out first and it gets fixed before it reaches your machine. Your everyday software stays current; the parts that can ruin your week don't move until they've been proven.
-
-nog is a wrapper around pacman, not a replacement. Same commands, same flags, same mental model. It never patches pacman, never shadows it, and cannot bypass its signature checks.
-
----
-
-## Features
-
-**The tier system**
-- Every package is Tier 1, Tier 2, or Tier 3, with 30 / 15 / 7-day holds
-- **Keys are never held** *(v1.5.6)* — `archlinux-keyring` and `chaotic-keyring` skip the tiers and install first, because holding the keys back makes every later signature check fail. A key store that was never set up is set up for you
-- **Installs and removals ask first** *(v1.5.8)* — pacman shows exactly what will change, dependencies included, and waits for your answer.
-- **Every run starts and ends the same way** *(v1.5.8)* — a banner with nog's version, the command, date, time and user; then "Done" or "Stopped", the logs written and a thank-you. Every run is logged (`nog-runs.csv`)
-- **Every run kept whole** *(v1.6.0)* — what a run showed on screen (nog's tables, pacman's questions, an AUR build, any error) is kept as `YYYYMMDD-HHMMSS <command>.log` beside the CSV logs, for 30 days. Recorded with util-linux `script`: you answer prompts as usual, and what you type (a password included) is never in the file. nogForge's nog Logs opens it. It is the log the closing note names; the CSV logs stay as nog's own bookkeeping (the hold clock, nogForge's tables)
-- **One command set for every source** *(v2.0.0 — the v2 arc complete)* — `install`, `remove`, `reinstall`, `search`, `list`, `info`, `tier`, `lock`/`unlock`, `status`, `history` and `clean` all work across the repositories, the AUR, Flatpak and Snap, each source through the tool that owns it, in its own voice; every query command answers in JSON with `--json`
-- **Locks** *(v2.0.0)* — `nog lock <pkg>` keeps a package at its installed version until `nog unlock <pkg>`: `nog update` lists it as held, *"locked by you"*, pacman is told to ignore it, and `--promote` never pulls it in. Written to `/etc/nog/locks.toml`, so every user of the computer and nogForge see the same locks
-- **Linchpins** *(v2.0.0, [#5](https://github.com/jetomev/nog/issues/5))* — when `glibc` or `gcc-libs` has a held update that changes its series (2.44 → 2.45, which brings new `GLIBC_2.45` symbol versions), the fast-lane packages built after that new build are held with it (*"12 days · built after the new glibc, moves with it"*), because they were probably linked against it and would fail at runtime. A same-series rebuild moves nothing. The way out is to promote the linchpin, never to downgrade the fast lane
-- **One install command for every source** *(v1.9.0)* — `nog install <name>` looks in the repositories, then the AUR, then Flatpak, then Snap, and the table says which one answered before anything is downloaded or built. A Flatpak is matched exactly (the app ID, its last word, or the app's name — *gimp*, *spotify*); when several apps answer to a name nog numbers them and asks which one. `flatpak/<app-id>` and `snap/<name>` name the source. A backend that isn't set up is offered, once, to a person at the keyboard — never installed unasked
-- **What nog installs, nog removes** *(v1.9.0)* — `nog remove` recognises an installed Flatpak or snap by name and hands it to its own tool
-- **A removal says what else goes, and who still uses it** *(v1.9.0, F-13)* — before pacman runs, every package the removal would take along that another installed app still uses *optionally* is named in plain words (*"ell goes too, but bluez-utils uses it (optional: for btpclient)"*), with a Keep for each, default yes. `nog keep <pkg>` does the same on its own: marked as installed on purpose, never taken along again
-- **`--yes` for scripts** *(v1.9.0)* — `nog install --yes` and `nog remove --yes` answer the question for you (pacman's, flatpak's, nog's own for Snap). Never the AUR's build review. Without it and with no terminal, nog now says that nothing is at the keyboard, instead of blaming you for a "no" nobody gave
-- **See where it comes from before installing** *(v1.8.0)* — `nog install` shows each package's version, source and tier before anything is downloaded or built; a repository package standing in for the name is said plainly (*"chaotic-aur — unifetch provides it"*). When the AUR is involved nog asks first, then says it's handing off to yay; a name found nowhere stops before anything happens
-- **Install from the source you name** *(v1.7.0)* — `nog install aur/<name>` is always built from the AUR, `nog install extra/<name>` comes from that repository only; nothing can be swapped in because it "provides" the same name
-- **Steps for programs** *(v1.7.0)* — with `NOG_EVENTS=<file>`, nog writes each step it takes (and its own questions) as a line a program can read; nogForge shows them as a checklist with a progress bar
-- **Update only what you name** *(v1.6.1)* — `nog update a b c` shows one table with just those and installs only them. A named package that is on hold must be promoted first (`--promote`); otherwise nog stops before anything runs and says what to do
-- **An install installs only what you asked** *(v1.6.0)* — like `pacman -S`: no update first, and never a list refresh on its own (that would be a partial upgrade). If an install fails and the package lists are old, nog says so: `nog update`, then try again
-- **A hold always ends** *(v1.5.2)* — the wait counts from the first new version, so a stream of newer builds can't keep a package back forever. The version that installs must still be a few days old (the safety wait)
-- Pin anything to any tier — `nog tier <pkg> --set <N>` (or `nog pin <pkg> --tier=<N>`); `nog tier <pkg>` says which tier and why *(v2.0.0)*
-- Need a held package now? `nog unlock <pkg> --promote`
-- Expert mode: require your explicit approval for *every* Tier 1 update
-
-**Every source, one set of rules**
-- **Official repos** through pacman
-- **AUR** through yay or paru, detected automatically
-- **Flatpak** *(v1.1.0)* — aged by the pending release's publish date; installed and removed through nog since v1.9.0
-- **Snap** *(v1.2.0)* — aged by the publish date in the channel you track, and since v1.4.1 the hold is placed in snapd itself, so its own four-times-a-day auto-refresh cannot walk past it; installed and removed through nog since v1.9.0
-
-  Flatpak and Snap are optional in both directions. If the program isn't installed, that source sits quietly dormant — never an error — and `nog install` offers to set it up only when the chain reaches it with a person at the keyboard. Turn any of them on or off with `nog activate|deactivate <source>`.
-
-**Clear reporting**
-- A **summary table** first *(v1.5.4)* — one row per repository (`core`, `extra`, `multilib`, `chaotic-aur`…), then AUR, Flatpak and Snap, with what is ready now and what is on hold. A source that could not be checked says `could not check`, never `0`
-- Updates grouped into **Ready** / **Held** / **Unknown**, with tier colours
-- Every row has a **Source** column *(v1.5.4)*: the repository it comes from, or `AUR`, `Flatpak`, `Snap` — each non-official source in its own colour
-- Held packages sorted by how soon they release, so the list reads as a calendar
-- Packages with no usable date are never guessed at — nog asks you, one at a time
-- Every run is logged to a dated CSV you can open in a spreadsheet, kept 90 days — one row per package with its source and what actually happened to it, and the reason whenever a step did not complete *(v1.4.3)*
-- **Reboot advice** *(v1.4.0)* — when a kernel or driver update leaves the running system out of step with what is now installed, nog says so at the end of the run. Where it can check, it says `verified` and shows both versions; where it cannot, it names the package and says plainly that this is advice rather than a finding
-
-**Maintenance**
-- **`nog clean`** *(v1.5.5)* — clears old downloads from pacman's cache, keeping more of what hurts to lose: 3 versions of each Tier 1 package, 2 of Tier 2, 1 of Tier 3. The installed version is never removed, and packages you no longer have are cleared. It shows what it would remove, per tier, and asks first
-
 **Security**
 - **One manager per source** *(v1.3.0)* — pacman upgrades official packages; your AUR helper is handed only the AUR packages nog cleared, **by name**. Nothing unnamed can move, so a failed AUR lookup cannot release a hold by omission. Born from a real bypass we caught on our own machine, originally patched by the foreign fence *(v1.0.9)*, which now backs it up as a second layer.
 - **Kill switches** *(v1.0.9)* — `nog deactivate aur` or `nog deactivate chaotic-aur` cuts off a supply chain in one command during an incident. `nog activate` puts it back exactly as it was.
 - **Runs as you, not as root** — nog escalates only at the specific moments root is genuinely needed, and you see every prompt. See [Privilege model](#privilege-model).
 - **Holds use pacman's own `--ignore`**, so there's no mechanism by which nog could quietly skip one.
+- **Signed and verifiable** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
 
 ---
 
@@ -501,7 +431,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "2.0.0"
+version = "2.1.0"
 log_level = "info"
 
 [paths]
@@ -828,9 +758,22 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
+> **v2.1.0** (built, waits on Javier's run) — unattended updates: `nog update --yes`, and an update that doesn't finish says so in its exit status.
+>
 > **v2.0.0** — the crown release: one tool for every source. The command surface across the repositories, the AUR, Flatpak and Snap (`search`, `list`, `info`, `reinstall`, `tier`, `lock`, `status`, `history`, all with `--json`), maintenance across every source (`nog clean`), and the linchpin rule for glibc and gcc-libs ([#7](https://github.com/jetomev/nog/issues/7) complete, [#5](https://github.com/jetomev/nog/issues/5)). **v1.9.0 shipped 2026-10-14** — the install chain is whole: `nog install` looks in the repositories, then the AUR, then Flatpak, then Snap, and removes what it installed (C3); a removal says what else goes and who still uses it, with a Keep ([#49](https://github.com/jetomev/nog/issues/49)); `--yes` for scripts ([#32](https://github.com/jetomev/nog/issues/32)).
 
-### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — built 2026-10-15, waits on Javier's run
+### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60)) — built 2026-10-22/23, waits on Javier's run
+
+- [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
+- [x] Nobody at the keyboard and no `--yes`: the cause said before anything changes (was "Cancelled")
+- [x] Long AUR builds keep sudo awake (`--sudoloop`); a password nobody typed in time is named as the cause (F-21 #57, from a real update on 2026-10-22)
+- [x] An update that leaves a step incomplete exits **3** and its runs line says **incomplete** (F-22 #58); the man page gains EXIT STATUS
+- [x] `--yes` with nobody at the keyboard asks sudo up front, and says how to set it up if a password would be needed (F-23 #59)
+- [x] Error messages say the exit status once (F-24 [#60](https://github.com/jetomev/nog/issues/60)): "exited with status 1", not "exited with status exit status: 1"
+- [x] 285 → 294 tests (each new one seen failing), warnings 6; the KognogOS VM: `scripts/vm-run-210.sh` 4/4 PASS on 2026-10-23 (Y1 nobody at the keyboard → Not updating, 147 pending unchanged; Y2 sudo would ask → Not updating, unchanged; Y3 a pacman-only sudo rule → 41 updated, the AUR kept back with a hint, exit 0; Y4 a failing flatpak step → "no (--yes takes the default)", exit 3, runs line incomplete); the desktop: `scripts/dry-run-210.sh` OK
+- [ ] Javier's run ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md)); tag, GitHub Release, AUR after it
+
+### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — released 2026-10-16 (GitHub + AUR, after Javier's bench: 54/54)
 
 - [x] `nog search` across every source (Flatpak and Snap rows, `--json` with `install_as`)
 - [x] `nog list` with the installed Flatpak apps and snaps beside the packages (`remove_as`)
@@ -838,15 +781,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [x] `nog clean` across every source: pacman's cache and orphans, the helper's build trees, unused Flatpak runtimes, old snap revisions; each category picked on its own; `--json`, `--only`, `--yes`
 - [x] Tier ABI skew ([#5](https://github.com/jetomev/nog/issues/5)): the linchpin rule, keyed on a glibc or gcc-libs series change
 - [x] Desktop dry runs (`scripts/dry-run-200.sh`, 41 cases), the KognogOS VM (`scripts/vm-run-200.sh`, `vm-run-200b.sh`); 259 → 285 tests, warnings 6
-- [ ] Javier's run ([testing/](testing/20261015%20-%20Test%20Matrix%20for%20nog%20v2-0-0.md)); tag, GitHub Release, AUR after it
-
-### v1.9.0 — the install chain, whole (C3: [#7](https://github.com/jetomev/nog/issues/7); [#49](https://github.com/jetomev/nog/issues/49), [#32](https://github.com/jetomev/nog/issues/32))
-
-- [x] `nog install`: the repositories, then the AUR, then Flatpak, then Snap; the source in the table; `flatpak/x` and `snap/x`; a backend offered when the chain reaches it
-- [x] `nog remove` for Flatpaks and snaps; what goes along and who still uses it, with a Keep (F-13); `nog keep`
-- [x] `--yes` on install and remove; "nothing is at the keyboard" said as the cause
-- [x] Dry runs on the desktop; the KognogOS VM from a clean install (Flatpak set up on the offer, snapd from the AUR on the offer, the removal that keeps `ell`)
-- [x] Javier's own run, step by step ([testing/](testing/20261014%20-%20Test%20Matrix%20for%20nog%20v1-9-0.md)): 20 steps on 14 Oct, 57 checks, two findings fixed the same day (F-15 #51: several Flatpak answers are numbered and asked; F-16 #52: the snap removal question defaults to yes) and both passed on his rerun of rc3 the same evening
+- [x] Javier's bench, 54/54 ([testing/](testing/20261015%20-%20Test%20Matrix%20for%20nog%20v2-0-0.md)); tag, GitHub Release, AUR (16 Oct)
 
 **Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
 
@@ -873,6 +808,19 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v2.1.0 — October 2026
+
+**Unattended updates** ([#56](https://github.com/jetomev/nog/issues/56) · F-21 [#57](https://github.com/jetomev/nog/issues/57) · F-22 [#58](https://github.com/jetomev/nog/issues/58) · F-23 [#59](https://github.com/jetomev/nog/issues/59)). The KognogOS installer and welcome app, a timer or a script can now run an update with nobody at the keyboard, and know how it ended.
+
+- **`nog update --yes`**: nog answers its own question and pacman's. The Ready packages go in. **Unknown** packages are kept back and listed: each has no usable build date, so updating it is a decision, and `--yes` never makes it (`yes | nog update` used to). With nobody at the keyboard, the AUR's build review waits for a person: those packages stay Ready, with a hint. When a later step fails, `--yes` takes the question's default and stops there.
+- **Nobody at the keyboard, said as the cause**: without `--yes`, nog says so before anything changes, instead of reading end-of-input as "no" and printing "Cancelled". With `--yes`, nog first checks that sudo can run pacman without a password, and if not, says how to set that up.
+- **Long AUR builds keep sudo awake** (`--sudoloop`, in yay and paru alike). On 2026-10-22 a seven-minute snapd build ended at a password prompt nobody was there to answer; now the password is asked once, when the step starts. When a password does time out, nog says that was the cause.
+- **An unfinished update says so where programs read it**: exit status **3**, and **incomplete** in the day's runs log (it was 0 and "done", and nogForge showed a green "done"). The man page gains an EXIT STATUS section.
+
+- **Error messages say the exit status once** (F-24 [#60](https://github.com/jetomev/nog/issues/60)): seven messages read "exited with status exit status: 1"; now "exited with status 1", or the signal that stopped the program.
+
+Tests: 285 → 294, each new one seen failing on purpose. Warnings unchanged at 6.
+
 ### v2.0.0 — October 2026
 
 **The crown release: one tool for every source** ([#7](https://github.com/jetomev/nog/issues/7) C4 + C5 + C7 · [#5](https://github.com/jetomev/nog/issues/5)). Javier, 2026-10-14 night: *"I want all issues done, nothing open."* The v2 arc designed on 2026-08-10 is complete.
@@ -886,22 +834,7 @@ Dry runs on the desktop ([scripts/dry-run-200.sh](scripts/dry-run-200.sh): 41 ca
 
 Tests: 259 → 285. Warnings unchanged at 6.
 
-### v1.9.0 — October 2026
-
-**The install chain, whole; a removal that says what else goes; `--yes` for scripts** ([#7](https://github.com/jetomev/nog/issues/7) C3 · [#49](https://github.com/jetomev/nog/issues/49) F-13 · [#32](https://github.com/jetomev/nog/issues/32)). Javier, 2026-10-14: *"work on open issues first, then implement Flatpak and Snap."*
-
-- **`nog install` looks in every source, in order**: the repositories (chaotic-aur included), then the AUR, then Flatpak, then Snap, each only when the one before doesn't have the name (the order locked in [docs/v2-design.md](docs/v2-design.md)). The table says which source answered, before anything is downloaded or built: *"wonderpen · 3.4.0 · Flatpak — flathub, as com.tominlab.wonderpen · Tier 3"*, *"hello-world · 6.4 · Snap — sandboxed"*. A Flatpak is matched exactly — the app ID, its last word, or the app's name, case ignored — never fuzzily; when several apps answer to one name (*calculator*: five of them) nog says where it looked, numbers them and asks *"Which one? [1-5, or n for none]"* — a snap of that exact name is on the same list (F-15, Javier's run: it used to stop and make you retype). A script — no keyboard, or `--yes` — gets the list and the `flatpak/<app-id>` way out instead. `flatpak/<app-id>` and `snap/<name>` look in that source only.
-- **A backend that isn't set up is offered, once**, to a person at the keyboard, default no: Flatpak is the `flatpak` package from extra (Flathub comes with it); Snap is snapd built from the AUR by the helper, its socket started, `/snap` linked. Without a person, or with `--yes`, the missing backend is only named in the not-found notice, which now says everywhere nog looked and why a source was skipped.
-- **Each source makes its own transaction**, in the chain's order, and keeps its own voice: pacman (or the helper), then `flatpak install` (it shows the runtimes an app needs and asks), then `sudo snap install` — which never asks, so nog asks *"Install these? [Y/n]"* itself when a snap is involved, as for the AUR. A snap the store marks *classic* says so in the table and is installed as one. A step that stops ends the run, and the notice says what had already gone in.
-- **What nog installs, nog removes**: `nog remove` recognises an installed Flatpak (by app ID, its last word, or the app's name) or snap and hands it to its own tool; flatpak asks, `snap remove` doesn't, so nog asks first — *"Remove hello-world? [Y/n]"*, Enter meaning yes like pacman's and flatpak's question in the same removal (F-16, Javier's run: the third Enter of three used to cancel).
-- **A removal says what else goes, and who still uses it** (F-13, Javier 2026-10-08: removing Elisa would have taken `vlc-plugin-ffmpeg`, and VLC most of its video formats, silently). Before pacman runs, nog reads pacman's own dry run, names every package in it that another installed app lists as optional, with pacman's reason — *"ell goes too, but bluez-utils uses it (optional: for btpclient)"* — and asks *"Keep ell? [Y/n]"*, default yes. Kept means marked as installed on purpose. **`nog keep <pkg>`** does the same on its own (pacman's `-D --asexplicit`, without leaving nog).
-- **`--yes` on `nog install` and `nog remove`** (#32, seen 2026-10-01 and again 2026-10-07): answers pacman's and flatpak's question and nog's own, keeps what another app still uses on a removal, and sends repository packages to pacman directly. **Never the AUR**: an AUR name with `--yes` stops before anything, because the helper's build review is the AUR's one safety. Without `--yes` and with no terminal, nog now stops first and says *"Nothing is at the keyboard to answer…"*, instead of *"you answered no"* to someone who was never asked. `nog install --help` lists it.
-
-Dry runs on the desktop ([scripts/dry-run-190.sh](scripts/dry-run-190.sh): every case stops before a password), then the KognogOS VM from a clean install with nothing set up: Flatpak set up on the offer and WonderPen installed and removed, snapd built from the AUR on the offer and hello-world installed and removed, `nog remove iwd` keeping `ell`, `--yes` with no terminal. Javier's own run on the desktop (14 Oct, 20 steps; two findings, fixed in this version before the release: F-15 [#51](https://github.com/jetomev/nog/issues/51), F-16 [#52](https://github.com/jetomev/nog/issues/52)): [testing/](testing/20261014%20-%20Test%20Matrix%20for%20nog%20v1-9-0.md).
-
-Tests: 242 → 259. Warnings unchanged at 6.
-
-*Every earlier release is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md), newest-first.*
+*The complete history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md).*
 
 ## Related Projects
 
