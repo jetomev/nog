@@ -572,6 +572,37 @@ fn nobody_to_answer_lines(verb: &str) -> Vec<String> {
     ]
 }
 
+/// v2.1.0 (F-20, #56): the words when `nog update` has nobody to answer and no `--yes`.
+/// Until now pacman read end-of-input as "no" and the run said "Cancelled", as if
+/// someone had answered.
+fn nobody_to_answer_update_lines() -> Vec<String> {
+    vec![
+        "Nothing is at the keyboard to answer the question asked before anything changes,".to_string(),
+        "and with no answer nog stops. Nothing was changed.".to_string(),
+        "Run this in a terminal, or add --yes: nog answers for you (`nog update --yes`).".to_string(),
+        "--yes installs what is Ready; Unknown packages are kept back and listed, and the".to_string(),
+        "AUR's build review waits for a person.".to_string(),
+    ]
+}
+
+/// v2.1.0 (F-20, #56): --yes with nobody at the keyboard, and sudo would ask for a password
+/// nobody can type. Said before anything changes, instead of failing at pacman's step.
+fn sudo_needs_a_person_lines() -> Vec<String> {
+    vec![
+        "--yes answers nog's and pacman's questions, but sudo still asks for a password,".to_string(),
+        "and nobody is at the keyboard to type it. Nothing was changed.".to_string(),
+        "For a timer or a script: a sudo rule that lets this user run pacman without a".to_string(),
+        "password, or NOG_ASKPASS=1 with a password window (nogForge's way). Or run it in a terminal.".to_string(),
+    ]
+}
+
+/// v2.1.0 (F-20, #56): with --yes, what becomes of the Unknown packages: every one is kept
+/// back. An Unknown is a decision (no usable build date), and a blanket yes would hide it;
+/// `yes | nog update` used to answer it.
+fn keep_unknowns_back(unknown: &[String]) -> Vec<String> {
+    unknown.to_vec()
+}
+
 /// A plain yes/no question of nog's own, with a default. End-of-input is the default.
 fn prompt_yes_no(question: &str, default_yes: bool) -> bool {
     use std::io::{self, Write};
@@ -1586,15 +1617,42 @@ const KEYRINGS: [&str; 2] = ["archlinux-keyring", "chaotic-keyring"];
 enum UpdateEnd {
     /// pacman ran, or nothing was pending.
     Done,
+    /// v2.1.0 (F-22): the update ran, and a later step (the AUR, Flatpak, Snap) did not
+    /// complete. Exits with `INCOMPLETE`, so a script, the installer and nogForge can tell.
+    Incomplete,
     /// Cancelled, or stopped before the end (a plan for nogForge).
     Stopped,
     /// v1.5.7 (F-4, #36): an error ended the run; carries the exit status.
     Failed(i32),
 }
 
-pub fn update(realign: bool) {
-    if let UpdateEnd::Failed(code) = run_update(realign) {
-        end(code);
+/// v2.1.0 (F-22, 2026-10-22): the exit status of an update that ran but left a step
+/// incomplete. Until now it exited 0 and its run line said "done": a snapd build whose
+/// password timed out read as a clean update, and nogForge showed a green "done".
+pub const INCOMPLETE: i32 = 3;
+
+/// v2.1.0 (F-20, #56): `nog update --yes`, remembered for the whole run.
+static UPDATE_YES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn update_yes() -> bool {
+    UPDATE_YES.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn update(realign: bool, yes: bool) {
+    UPDATE_YES.store(yes, std::sync::atomic::Ordering::SeqCst);
+    match run_update(realign) {
+        UpdateEnd::Failed(code) => end(code),
+        UpdateEnd::Incomplete => end(INCOMPLETE),
+        UpdateEnd::Done | UpdateEnd::Stopped => {}
+    }
+}
+
+/// v2.1.0 (F-22): the word a run's line in the runs log carries for its exit status.
+fn outcome_word(code: i32) -> &'static str {
+    match code {
+        0 => "done",
+        INCOMPLETE => "incomplete",
+        _ => "stopped",
     }
 }
 
@@ -1682,7 +1740,7 @@ pub fn end(code: i32) -> ! {
     let Some(mut f) = frame else {
         std::process::exit(code);
     };
-    let outcome = if code == 0 { "done" } else { "stopped" };
+    let outcome = outcome_word(code);
     let dir = NogConfig::load_default().paths.run_logs;
     let mut problem = None;
     match runlog::today_and_cutoff() {
@@ -2526,7 +2584,28 @@ fn run_update(realign: bool) -> UpdateEnd {
     // Interactive step: decide what to do with Unknowns. Each gets a y/N prompt.
     // EOF or non-TTY stdin → default all remaining to skip, with a warning.
     let mut extra_ignore: Vec<String> = Vec::new();
-    if !unknown.is_empty() {
+    // v2.1.0 (F-20, #56): nothing at the keyboard and no --yes. Until now pacman read
+    // end-of-input as "no" and the run said "Cancelled", as if someone had answered.
+    if !update_yes() && !at_the_keyboard() {
+        enotice(C_PEACH, "Not updating", &nobody_to_answer_update_lines());
+        write_run_log(&cfg, &run_date, &run_time, &run_user,
+            settle_rows(&log_rows, &extra_ignore, &RunEnd::Cancelled), "");
+        return UpdateEnd::Failed(1);
+    }
+    if update_yes() && !at_the_keyboard() && !pacman::sudo_ready_unattended() {
+        enotice(C_PEACH, "Not updating", &sudo_needs_a_person_lines());
+        write_run_log(&cfg, &run_date, &run_time, &run_user,
+            settle_rows(&log_rows, &extra_ignore, &RunEnd::Cancelled), "");
+        return UpdateEnd::Failed(1);
+    }
+    if !unknown.is_empty() && update_yes() {
+        let names: Vec<String> = unknown.iter().map(|(u, _)| u.name.clone()).collect();
+        println!();
+        println!("{}nog: --yes keeps {} Unknown package(s) back: {}{}", C_BOLD, names.len(), names.join(", "), C_RESET);
+        println!("{}     Each has no usable build date, so updating it is a decision, and --yes{}", C_SUBTEXT, C_RESET);
+        println!("{}     never makes it for you. Decide them at a terminal: nog update{}", C_SUBTEXT, C_RESET);
+        extra_ignore.extend(keep_unknowns_back(&names));
+    } else if !unknown.is_empty() {
         println!();
         println!("{}nog: {} package(s) have no usable build date in any sync DB.{}",
             C_SUBTEXT, unknown.len(), C_RESET);
@@ -2652,7 +2731,13 @@ fn run_update(realign: bool) -> UpdateEnd {
     // at the point where the detail is in front of them. One prompt per tool
     // that actually runs; sources with nothing to do stay silent.
     println!();
-    if !prompt_proceed() {
+    let go = if update_yes() {
+        println!("nog: Begin the handoff? yes (--yes)");
+        true
+    } else {
+        prompt_proceed()
+    };
+    if !go {
         println!("nog: Cancelled — nothing was installed.");
         write_run_log(&cfg, &run_date, &run_time, &run_user,
             settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Cancelled), "");
@@ -2716,7 +2801,7 @@ fn run_update(realign: bool) -> UpdateEnd {
         }
     }
     crate::events::start("pacman", "Official packages");
-    let pac = pacman::update_excluding(&ignore);
+    let pac = pacman::update_excluding(&ignore, update_yes());
     crate::events::finished("pacman", "Official packages", pac.status.success(),
         &if pac.status.success() { String::new() } else { format!("pacman stopped (status {})", pac.status.code().unwrap_or(-1)) });
     steps.insert(Source::Pacman, StepState::from(&pac));
@@ -2740,7 +2825,14 @@ fn run_update(realign: bool) -> UpdateEnd {
     // so held AUR packages are not merely ignored, they are never mentioned.
     if let Some(h) = helper {
         let aur_apply = aur::apply_list(&aur_names, &ready_names, &unknown_names, &ignore);
-        if !aur_apply.is_empty() {
+        // v2.1.0 (F-20, #56): the AUR's build review needs a person (#26, #32); --yes never
+        // covers it. With nobody at the keyboard they wait for the next run at a terminal.
+        if !aur_apply.is_empty() && update_yes() && !at_the_keyboard() {
+            println!();
+            println!("{}nog: kept back from the AUR: {}{}", C_BOLD, aur_apply.join(", "), C_RESET);
+            println!("{}     A build is reviewed by a person, and nobody is at the keyboard. They are{}", C_SUBTEXT, C_RESET);
+            println!("{}     still Ready; run nog update in a terminal to build them.{}", C_SUBTEXT, C_RESET);
+        } else if !aur_apply.is_empty() {
             println!();
             println!("{}nog: Handing off {} AUR package(s) to {} ...{}",
                 C_BOLD, aur_apply.len(), h, C_RESET);
@@ -2753,11 +2845,12 @@ fn run_update(realign: bool) -> UpdateEnd {
             steps.insert(Source::Aur, StepState::from(&aur_run));
             if !aur_run.status.success() {
                 let code = aur_run.status.code().unwrap_or(-1);
-                step_failures.push(format!("aur (status {})", code));
-                if !prompt_continue_after_failure(&h.to_string(), code) {
+                step_failures.push(failure_label("aur", code, aur_run.reason.as_deref()));
+                if !prompt_continue_after_failure(&h.to_string(), code, aur_run.reason.as_deref()) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return UpdateEnd::Done;
+                    print_incomplete(&step_failures);
+                    return UpdateEnd::Incomplete;
                 }
             }
         }
@@ -2779,11 +2872,12 @@ fn run_update(realign: bool) -> UpdateEnd {
             steps.insert(Source::Flatpak, StepState::from(&fp_run));
             if !fp_run.status.success() {
                 let code = fp_run.status.code().unwrap_or(-1);
-                step_failures.push(format!("flatpak (status {})", code));
-                if !prompt_continue_after_failure("flatpak", code) {
+                step_failures.push(failure_label("flatpak", code, fp_run.reason.as_deref()));
+                if !prompt_continue_after_failure("flatpak", code, fp_run.reason.as_deref()) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return UpdateEnd::Done;
+                    print_incomplete(&step_failures);
+                    return UpdateEnd::Incomplete;
                 }
             }
         }
@@ -2804,11 +2898,12 @@ fn run_update(realign: bool) -> UpdateEnd {
             steps.insert(Source::Snap, StepState::from(&sn_run));
             if !sn_run.status.success() {
                 let code = sn_run.status.code().unwrap_or(-1);
-                step_failures.push(format!("snap (status {})", code));
-                if !prompt_continue_after_failure("snap", code) {
+                step_failures.push(failure_label("snap", code, sn_run.reason.as_deref()));
+                if !prompt_continue_after_failure("snap", code, sn_run.reason.as_deref()) {
                     write_run_log(&cfg, &run_date, &run_time, &run_user,
                         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
-                    return UpdateEnd::Done;
+                    print_incomplete(&step_failures);
+                    return UpdateEnd::Incomplete;
                 }
             }
         }
@@ -2823,9 +2918,7 @@ fn run_update(realign: bool) -> UpdateEnd {
     if step_failures.is_empty() {
         println!("nog: Update finished!");
     } else {
-        println!("{}nog: Update finished, with {} step(s) that did not complete.{}",
-            C_BOLD, step_failures.len(), C_RESET);
-        println!("{}     Incomplete: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
+        print_incomplete(&step_failures);
     }
     write_run_log(&cfg, &run_date, &run_time, &run_user,
         settle_rows(&log_rows, &extra_ignore_log, &RunEnd::Steps(steps)), "");
@@ -2859,7 +2952,24 @@ fn run_update(realign: bool) -> UpdateEnd {
         }
     }
 
-    UpdateEnd::Done
+    if step_failures.is_empty() { UpdateEnd::Done } else { UpdateEnd::Incomplete }
+}
+
+/// v2.1.0 (F-22): "Update finished, with N step(s) that did not complete", and which.
+fn print_incomplete(step_failures: &[String]) {
+    println!("{}nog: Update finished, with {} step(s) that did not complete.{}",
+        C_BOLD, step_failures.len(), C_RESET);
+    println!("{}     Incomplete: {}{}", C_SUBTEXT, step_failures.join(", "), C_RESET);
+    println!("{}     Run nog update again to finish them.{}", C_SUBTEXT, C_RESET);
+}
+
+/// v2.1.0 (F-21): a failed step's label for the closing summary — its status, and the
+/// cause too when nog knows it for certain (a password nobody typed in time).
+fn failure_label(step: &str, code: i32, reason: Option<&str>) -> String {
+    match reason {
+        Some(r) if r == crate::handoff::PASSWORD_TIMED_OUT => format!("{} (status {}: {})", step, code, r),
+        _ => format!("{} (status {})", step, code),
+    }
 }
 
 /// Issue #9: say something when the running machine no longer matches what is
@@ -3027,17 +3137,28 @@ fn prompt_proceed() -> bool {
 /// so. Agreeing to an update is not agreeing to push past a failure in it, and
 /// a non-interactive run must never carry on through an error it cannot show
 /// anyone. Ctrl-D stops, same as answering no.
-fn prompt_continue_after_failure(step: &str, code: i32) -> bool {
+fn prompt_continue_after_failure(step: &str, code: i32, reason: Option<&str>) -> bool {
     use std::io::{self, IsTerminal, Write};
     eprintln!();
     eprintln!("{}nog: the {} step exited with status {}.{}", C_BOLD, step, code, C_RESET);
-    eprintln!("{}     That is either a declined prompt or an error — the exit status{}",
-        C_SUBTEXT, C_RESET);
-    eprintln!("{}     alone cannot tell the two apart. Official packages already{}",
-        C_SUBTEXT, C_RESET);
+    if reason == Some(crate::handoff::PASSWORD_TIMED_OUT) {
+        // v2.1.0 (F-21): the cause is known, so it is said.
+        eprintln!("{}     The cause: {}. Official packages already{}", C_SUBTEXT, reason.unwrap_or(""), C_RESET);
+    } else {
+        eprintln!("{}     That is either a declined prompt or an error — the exit status{}",
+            C_SUBTEXT, C_RESET);
+        eprintln!("{}     alone cannot tell the two apart. Official packages already{}",
+            C_SUBTEXT, C_RESET);
+    }
     eprintln!("{}     upgraded; either way it is confined to {}, and the remaining{}",
         C_SUBTEXT, step, C_RESET);
     eprintln!("{}     sources are independent of it.{}", C_SUBTEXT, C_RESET);
+    if update_yes() {
+        // v2.1.0 (F-20, #56): --yes takes the question's default. Agreeing to an update is
+        // not agreeing to push past a failure in it; the rest waits for the next run.
+        println!("nog: Continue with the remaining sources? no (--yes takes the default)");
+        return false;
+    }
     print!("nog: Continue with the remaining sources? [y/N] ");
     if io::stdout().flush().is_err() {
         return false;
@@ -3734,6 +3855,56 @@ fn write_run_log(
 #[cfg(test)]
 mod output_tests {
     use super::*;
+
+    // ---- v2.1.0: nog update --yes (F-20 #56), the password reason (F-21), incomplete (F-22) ----
+
+    #[test]
+    fn an_incomplete_update_is_said_in_its_exit_status_and_its_run_line() {
+        // F-22 (2026-10-22): snapd's build failed and the run said "done", status 0
+        assert_eq!(outcome_word(0), "done");
+        assert_eq!(outcome_word(INCOMPLETE), "incomplete");
+        assert_eq!(outcome_word(1), "stopped");
+        assert_ne!(INCOMPLETE, 0);
+        assert_ne!(INCOMPLETE, 1, "1 already means stopped or an error");
+        assert_ne!(INCOMPLETE, 2, "2 is a mistyped command (clap)");
+    }
+
+    #[test]
+    fn a_failed_step_names_the_password_when_that_was_the_cause() {
+        let pw = crate::handoff::PASSWORD_TIMED_OUT;
+        assert_eq!(failure_label("aur", 1, Some(pw)), format!("aur (status 1: {})", pw));
+        // any other reason stays out of the one-line summary (it is on screen and in the log)
+        assert_eq!(failure_label("aur", 1, Some("error: target not found: foo")), "aur (status 1)");
+        assert_eq!(failure_label("flatpak", 3, None), "flatpak (status 3)");
+    }
+
+    #[test]
+    fn nobody_at_the_keyboard_for_an_update_is_said_as_the_cause() {
+        // F-20 (#56): an update from a script used to read "Cancelled", as if someone answered no
+        let l = nobody_to_answer_update_lines().join(" ");
+        assert!(l.starts_with("Nothing is at the keyboard"));
+        assert!(l.contains("Nothing was changed"));
+        assert!(l.contains("nog update --yes"));
+        assert!(l.contains("Unknown packages are kept back"));
+        assert!(l.contains("AUR's build review waits for a person"));
+        assert!(!l.contains("answered no") && !l.contains("Cancelled"));
+    }
+
+    #[test]
+    fn a_password_nobody_can_type_is_said_before_anything_changes() {
+        let l = sudo_needs_a_person_lines().join(" ");
+        assert!(l.contains("sudo still asks for a password"));
+        assert!(l.contains("Nothing was changed"));
+        assert!(l.contains("run pacman without a") && l.contains("NOG_ASKPASS=1"));
+    }
+
+    #[test]
+    fn yes_never_decides_an_unknown() {
+        // F-20 (#56): `yes | nog update` said yes to every Unknown; --yes keeps them all back
+        let unknown = vec!["foo".to_string(), "bar".to_string()];
+        assert_eq!(keep_unknowns_back(&unknown), unknown);
+        assert!(keep_unknowns_back(&[]).is_empty());
+    }
 
     #[test]
     fn table_aligns_and_counts() {

@@ -178,9 +178,31 @@ pub fn update() -> ExitStatus {
 
 /// `-Syu --ignore <held>`. pacman's stderr stays on the terminal (v1.5.8
 /// F-8) so its question cannot overtake its table.
-pub fn update_excluding(excluded: &[String]) -> crate::handoff::Handoff {
+/// v2.1.0 (F-20, #56): can sudo run pacman with nobody at the keyboard? `sudo -n` never asks;
+/// `pacman --version` changes nothing. Asked exactly for pacman, because a timer's or an
+/// installer's sudo rule usually allows only that. With `NOG_ASKPASS=1` a window asks instead,
+/// so the answer is yes.
+pub fn sudo_ready_unattended() -> bool {
+    if crate::machine::askpass() {
+        return true;
+    }
+    std::process::Command::new("sudo")
+        .args(["-n", "pacman", "--version"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// `yes` (v2.1.0, F-20 #56): `nog update --yes` answers pacman's question too.
+pub fn update_excluding(excluded: &[String], yes: bool) -> crate::handoff::Handoff {
     let mut cmd = crate::machine::sudo();
     cmd.args(["pacman", "-Syu"]);
+    if yes {
+        cmd.arg("--noconfirm");
+    }
     if !excluded.is_empty() {
         cmd.args(["--ignore", &excluded.join(",")]);
     }

@@ -173,6 +173,17 @@ fn interpret_qua(
     Ok(updates)
 }
 
+/// v2.1.0 (F-21, 2026-10-22): the flags for every helper call that builds and installs.
+/// `--sudoloop` keeps sudo's ticket fresh while the helper builds (yay and paru both have it).
+/// On 2026-10-22 yay built snapd for seven minutes and then asked for the password to install
+/// it; nobody was at the keyboard by then, sudo timed out, and the update ended incomplete.
+/// With the loop, the password is asked once when the step starts, with the person there.
+pub fn build_flags() -> Vec<String> {
+    let mut f = crate::machine::helper_sudo_args();
+    f.push("--sudoloop".to_string());
+    f
+}
+
 /// Install one or more packages via the helper. The helper checks sync repos
 /// first, then falls back to AUR. nog doesn't care which path serves the
 /// package — the helper handles it. Runs as the invoking user; the helper
@@ -182,7 +193,7 @@ pub fn install(helper: Helper, packages: &[String]) -> ExitStatus {
     let mut args = vec!["-S"];
     args.extend_from_slice(&pkgs);
     Command::new(helper.binary())
-        .args(crate::machine::helper_sudo_args())
+        .args(build_flags())
         .args(&args)
         .status()
         .unwrap_or_else(|e| panic!("nog: failed to launch {}: {}", helper.binary(), e))
@@ -214,7 +225,7 @@ pub fn upgrade_cleared(helper: Helper, packages: &[String], excluded: &[String])
         args.push(excluded.join(","));
     }
     let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    crate::handoff::run(Command::new(helper.binary()).args(crate::machine::helper_sudo_args()).args(&str_args), helper.binary())
+    crate::handoff::run(Command::new(helper.binary()).args(build_flags()).args(&str_args), helper.binary())
 }
 
 /// Which AUR packages this run cleared: Ready ones, plus Unknowns the user
@@ -339,6 +350,13 @@ fn parse_date_to_unix(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_build_keeps_sudo_awake() {
+        // v2.1.0 (F-21): yay and paru both keep sudo's ticket fresh with --sudoloop, so a long
+        // build never ends at a password prompt nobody is there to answer.
+        assert!(build_flags().iter().any(|f| f == "--sudoloop"));
+    }
 
     // ---- v1.5.4: a failing helper is not "nothing to update" (#25) ----------
 

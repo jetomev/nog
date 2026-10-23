@@ -167,6 +167,18 @@ pub fn helper_sudo_args() -> Vec<String> {
     if askpass() { vec!["--sudoflags".into(), "-A".into()] } else { Vec::new() }
 }
 
+/// How a program ended, as the tail of "… exited with status {}" (F-24): the number alone, or the
+/// signal that stopped it. Rust's own text is "exit status: 1", which read "exited with status exit
+/// status: 1" in seven of nog's messages.
+pub fn status_text(s: &std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    match (s.code(), s.signal()) {
+        (Some(c), _) => c.to_string(),
+        (None, Some(sig)) => format!("signal {}", sig),
+        (None, None) => s.to_string(),
+    }
+}
+
 pub fn tier_number(t: &Tier) -> u8 {
     match t {
         Tier::One => 1,
@@ -373,6 +385,16 @@ pub fn search_json(tm: &TierManager, query: &str, repo_out: &str, aur_out: Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_text_says_the_number_once() {
+        use std::os::unix::process::ExitStatusExt;
+        let one = std::process::ExitStatus::from_raw(1 << 8);
+        assert_eq!(status_text(&one), "1");
+        assert_eq!(format!("sudo tee x exited with status {}", status_text(&one)), "sudo tee x exited with status 1");
+        let killed = std::process::ExitStatus::from_raw(9);
+        assert_eq!(status_text(&killed), "signal 9");
+    }
 
     const DESC: &str = "%NAME%\nsteam\n\n%VERSION%\n1.0.0.87-3\n\n%DESC%\nValve's digital software delivery system\n\n%SIZE%\n20475439\n\n%REASON%\n1\n\n%DEPENDS%\nbash\ncoreutils>=9\nlib32-glibc\n\n%PROVIDES%\nsteam-runtime=1\n";
 

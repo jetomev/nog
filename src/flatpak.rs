@@ -63,7 +63,7 @@ pub fn pending_updates() -> Result<Vec<FlatpakUpdate>, String> {
     if !output.status.success() {
         let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if msg.is_empty() {
-            format!("flatpak remote-ls exited with status {}", output.status)
+            format!("flatpak remote-ls exited with status {}", crate::machine::status_text(&output.status))
         } else {
             msg
         });
@@ -231,7 +231,7 @@ pub fn search(query: &str) -> Result<Vec<FlatpakApp>, String> {
     if !output.status.success() {
         let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if msg.is_empty() {
-            format!("flatpak search exited with status {}", output.status)
+            format!("flatpak search exited with status {}", crate::machine::status_text(&output.status))
         } else {
             msg
         });

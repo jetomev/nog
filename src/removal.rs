@@ -29,7 +29,7 @@ pub fn sweep(named: &[String]) -> Result<Vec<String>, String> {
     if !output.status.success() {
         let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if msg.is_empty() {
-            format!("pacman -Rsp exited with status {}", output.status)
+            format!("pacman -Rsp exited with status {}", crate::machine::status_text(&output.status))
         } else {
             msg.lines().map(|l| l.trim_start_matches("error: ").to_string())
                 .collect::<Vec<_>>().join("\n")

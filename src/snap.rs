@@ -64,7 +64,7 @@ pub fn pending_updates() -> Result<Vec<SnapUpdate>, String> {
     if !output.status.success() {
         let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if msg.is_empty() {
-            format!("snap refresh --list exited with status {}", output.status)
+            format!("snap refresh --list exited with status {}", crate::machine::status_text(&output.status))
         } else {
             msg
         });
@@ -349,7 +349,7 @@ pub fn info(name: &str) -> Result<Option<SnapInfo>, String> {
             return Ok(None);
         }
         return Err(if stderr.is_empty() {
-            format!("snap info exited with status {}", output.status)
+            format!("snap info exited with status {}", crate::machine::status_text(&output.status))
         } else {
             stderr.trim_start_matches("error: ").to_string()
         });
@@ -425,7 +425,7 @@ pub fn find(query: &str) -> Result<Vec<Found>, String> {
         if stderr.contains("No matching snaps") || stderr.contains("no snaps found") {
             return Ok(Vec::new());
         }
-        return Err(if stderr.is_empty() { format!("snap find exited with status {}", output.status) }
+        return Err(if stderr.is_empty() { format!("snap find exited with status {}", crate::machine::status_text(&output.status)) }
                    else { stderr.trim_start_matches("error: ").to_string() });
     }
     Ok(parse_find(&String::from_utf8_lossy(&output.stdout)))

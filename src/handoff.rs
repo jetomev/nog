@@ -133,6 +133,9 @@ fn to_crlf(chunk: &[u8], after_cr: &mut bool) -> Vec<u8> {
 /// says less. So the last `error:` line wins; failing that, the last line
 /// with anything on it — which, when the user declined, is the question they
 /// said no to.
+/// v2.1.0 (F-21): the reason when sudo gave up waiting for the password.
+pub const PASSWORD_TIMED_OUT: &str = "the password was not typed in time (sudo stopped waiting)";
+
 pub fn reason_from(tail: &[u8]) -> Option<String> {
     let text = strip_ansi(&String::from_utf8_lossy(tail));
     let lines: Vec<&str> = text
@@ -140,6 +143,12 @@ pub fn reason_from(tail: &[u8]) -> Option<String> {
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
         .collect();
+    // v2.1.0 (F-21, 2026-10-22): sudo's own words for a password nobody typed in time come
+    // before the helper's generic "error installing … exit status 1". The cause is the
+    // password, so that is the reason, in plain words.
+    if lines.iter().any(|l| l.to_ascii_lowercase().contains("timed out reading password")) {
+        return Some(PASSWORD_TIMED_OUT.to_string());
+    }
     let pick = lines
         .iter()
         .rev()
@@ -183,6 +192,16 @@ fn strip_ansi(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_password_nobody_typed_in_time_is_the_reason() {
+        // v2.1.0 (F-21): the tail of yay's snapd step on 2026-10-22, as the log has it.
+        let tail = b"==> Finished making: snapd 2.78-1\n==> Cleaning up...\n[sudo] password for jetomev: \nsudo: timed out reading password\nsudo: a password is required\n -> error installing: [/home/j/.cache/yay/snapd/snapd-2.78-1-x86_64.pkg.tar.zst] - exit status 1\n";
+        assert_eq!(reason_from(tail).as_deref(), Some(PASSWORD_TIMED_OUT));
+        // and an ordinary failure still gets its own words, not the password's
+        let other = b"==> ERROR: A failure occurred in build().\n -> error making: foo-1.0-1\n";
+        assert_eq!(reason_from(other).as_deref(), Some("==> ERROR: A failure occurred in build()."));
+    }
 
     #[test]
     fn the_error_line_beats_the_summary_after_it() {

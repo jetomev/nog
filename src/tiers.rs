@@ -387,7 +387,7 @@ pub(crate) fn write_as_root(path: &str, contents: &str) -> Result<(), String> {
     let status = child.wait()
         .map_err(|e| format!("sudo tee wait failed: {}", e))?;
     if !status.success() {
-        return Err(format!("sudo tee {} exited with status {}", path, status));
+        return Err(format!("sudo tee {} exited with status {}", path, crate::machine::status_text(&status)));
     }
     Ok(())
 }

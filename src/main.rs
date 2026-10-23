@@ -113,6 +113,11 @@ enum Commands {
         /// Promote these: ready now, installed with the rest; partners they need come too
         #[arg(long, value_delimiter = ',')]
         promote: Vec<String>,
+        /// Answer for you, for a script, a timer or the installer (v2.1.0, #56): the Ready
+        /// packages go in; Unknown ones are kept back and listed, never decided for you; with
+        /// nobody at the keyboard the AUR's build review waits for a person
+        #[arg(long)]
+        yes: bool,
     },
     /// Search every source: the repositories, the AUR, Flatpak and Snap
     ///
@@ -282,7 +287,7 @@ fn main() {
         Commands::Install { packages, yes } => commands::install(&packages, yes),
         Commands::Remove { packages, yes } => commands::remove(&packages, yes),
         Commands::Keep { packages } => commands::keep(&packages),
-        Commands::Update { packages, realign, json, keep, promote } => {
+        Commands::Update { packages, realign, json, keep, promote, yes } => {
             machine::set_only(packages);
             machine::set_promote(promote);
             if json {
@@ -290,7 +295,7 @@ fn main() {
             } else {
                 machine::set_keep(keep);
             }
-            commands::update(realign)
+            commands::update(realign, yes)
         }
         Commands::Search { query, json } => commands::search(&query, json),
         Commands::List { json } => commands::list(json),
@@ -402,5 +407,21 @@ fn debug_hold(package: &str) {
         holds::HoldStatus::Unknown => {
             println!("status:    UNKNOWN (no build date available)");
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn update_takes_yes() {
+        // v2.1.0 (F-20, #56): `nog update --yes` was refused ("unexpected argument '--yes'")
+        let cli = Cli::try_parse_from(["nog", "update", "--yes"]).expect("update --yes parses");
+        assert!(matches!(cli.command, Commands::Update { yes: true, .. }));
+        let cli = Cli::try_parse_from(["nog", "update"]).unwrap();
+        assert!(matches!(cli.command, Commands::Update { yes: false, .. }));
+        let cli = Cli::try_parse_from(["nog", "update", "firefox", "--yes"]).unwrap();
+        assert!(matches!(cli.command, Commands::Update { yes: true, ref packages, .. } if packages == &vec!["firefox".to_string()]));
     }
 }
