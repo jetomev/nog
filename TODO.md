@@ -49,7 +49,8 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **tally-matrix.py skipped rows with a letter in their number** (3b.1, 4.1b) without a word: it read 29 checks here. Fixed (`§3b` sections, `3b.1`/`4.1b` ids) and it now STOPS on a numbered row it cannot read. Re-tallying every matrix found one past miscount: **1.9.0 was 58/58, not the 57 recorded on 10-14** (4.1b, the rc3 install, PASS)
 - [x] dry-run-200.sh: history/status read a copy of the real logs (they wrote their own lines into Javier's runs log)
 - [x] `scripts/vm-run-210b.sh`: the control (2.0.0) and rc2 at a keyboard, snapd + nogforge built; S3 watcher: `yay --sudoloop -S …`, one password for the whole update; the long-build (>5 min) case not provable in the VM (snapd builds in 45 s)
-- [ ] `scripts/make-rc-package.sh 1` → Javier's run of `testing/20261023 - Test Matrix for nog v2-1-0.md`; then tag, GitHub Release, AUR (`pkgdesc` with the "where it runs" words at the same bump); close #56–#60
+- [x] `scripts/make-rc-package.sh 1` → Javier's run (rc1 §4 8/8, rc2 §5 4/4; 34 checks, 32 PASS, 1 FAIL = F-27 fixed, 1 N/A)
+- [ ] **Release (Javier 10-23: "start the release now")**: docs + signed tag `v2.1.0` → GitHub Release (reproducible signed files, Latest) → AUR recipe (pkgdesc with the "where it runs" words, pkg-143) → makepkg → Javier installs the local build → AUR push → close #56–#63 → kognogos.org card
 
 ## Later · 1.x (after KognogOS 1.0)
 - [ ] **`nog lock` by version** (Javier, 2026-10-23: the 2.0.0 follow-ups → 1.x): lock a package at the version it has, so a new one waits; today `nog lock` is by name only

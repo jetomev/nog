@@ -2,7 +2,7 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
-### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — built 2026-10-22/23, waits on Javier's run
+### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — released 2026-10-23 (Javier's run: 34 checks; F-27 fixed in rc2)
 
 - [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
 - [x] Nobody at the keyboard and no `--yes`: the cause said before anything changes (was "Cancelled")
@@ -15,7 +15,8 @@
 - [x] From the VM, proving `--sudoloop`: when sudo had forgotten the password, yay's keep-awake loop asked for it in the middle of yay's own menu — **nog now asks sudo itself, alone, right before the helper starts** (F-27 [#63](https://github.com/jetomev/nog/issues/63))
 - [x] Javier's answers: the record of the last completed update is **one for the whole computer** (`/var/lib/nog/last-update`); nog's own tier list **trimmed to generic packages** (PipeWire, WirePlumber, NetworkManager), the desktop and its apps being a distribution's choice
 - [x] Javier's run of rc1: 25/25 ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md))
-- [ ] Javier's re-run on rc2 (§5 of the matrix); tag, GitHub Release, AUR after it
+- [x] Javier's re-run on rc2: §5 4/4; tag `v2.1.0` (signed) and the GitHub Release, 23 Oct
+- [ ] AUR 2.1.0-1, after his install of the locally built package
 
 ### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — released 2026-10-16 (GitHub + AUR, after Javier's bench: 54/54)
 

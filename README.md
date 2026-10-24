@@ -54,6 +54,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **What nog installs, nog removes** *(v1.9.0)* — `nog remove` recognises an installed Flatpak or snap by name and hands it to its own tool
 - **A removal says what else goes, and who still uses it** *(v1.9.0, F-13)* — before pacman runs, every package the removal would take along that another installed app still uses *optionally* is named in plain words (*"ell goes too, but bluez-utils uses it (optional: for btpclient)"*), with a Keep for each, default yes. `nog keep <pkg>` does the same on its own: marked as installed on purpose, never taken along again
 - **`--yes` for scripts** *(v1.9.0)* — `nog install --yes` and `nog remove --yes` answer the question for you (pacman's, flatpak's, nog's own for Snap). Never the AUR's build review. Without it and with no terminal, nog now says that nothing is at the keyboard, instead of blaming you for a "no" nobody gave
+- **Unattended updates** *(v2.1.0, [#56](https://github.com/jetomev/nog/issues/56))* — `nog update --yes` for the installer, a timer or a script: Ready goes in, Unknown is kept back and listed, the AUR waits for a person; an update that leaves a step undone exits **3** and says `incomplete`; long AUR builds ask for the password once, alone, before the build starts
 - **See where it comes from before installing** *(v1.8.0)* — `nog install` shows each package's version, source and tier before anything is downloaded or built; a repository package standing in for the name is said plainly (*"chaotic-aur — unifetch provides it"*). When the AUR is involved nog asks first, then says it's handing off to yay; a name found nowhere stops before anything happens
 - **Install from the source you name** *(v1.7.0)* — `nog install aur/<name>` is always built from the AUR, `nog install extra/<name>` comes from that repository only; nothing can be swapped in because it "provides" the same name
 - **Steps for programs** *(v1.7.0)* — with `NOG_EVENTS=<file>`, nog writes each step it takes (and its own questions) as a line a program can read; nogForge shows them as a checklist with a progress bar
@@ -150,6 +151,8 @@ Every member of a group inherits the highest tier any member has. You can use th
 
 The driver modules themselves don't need grouping. Once the kernel and headers agree, their rebuilds succeed on their own.
 
+Some links nog finds on its own, without a group: packages built from one recipe, a `lib32-` package and its 64-bit half, a library version another package still needs, glibc's series *(v2.0.0)*, and *(v2.1.0)* perl or python moving to a new version: they wait for every installed package with modules in the old version's folder (`/usr/lib/perl5/5.42/`), so nothing is left where the new interpreter never looks.
+
 ---
 
 ## Requirements
@@ -212,6 +215,10 @@ nog install ./<package>-<version>-<arch>.pkg.tar.zst
 
 # Update everything (tier holds applied across all sources)
 nog update
+
+# The same with nobody at the keyboard — an installer, a timer, a script (v2.1.0):
+# Ready goes in, Unknown is kept back and listed, the AUR waits for a person
+nog update --yes
 
 # Search every source — the repositories, the AUR, Flatpak, Snap — with each result's tier (v2.0.0)
 nog search <query>
@@ -419,6 +426,8 @@ The tier digit is colour-coded — red, yellow, green — and non-official sourc
 `--keep` works in a real `nog update` too: the packages named are held before the coupling rules run, so their partners stay back with them. Keeping `ldb` back, for example, also holds `libwbclient` and `smbclient`, which come from the same Samba build.
 
 A program (or a script) that installs or removes on its own passes `--yes` *(v1.9.0)*: pacman, flatpak and nog's own Snap question are answered, what another app still uses is kept on a removal, and an AUR name stops before anything, because the AUR's build review needs a person. Without `--yes` and without a terminal, nog stops first and says nothing is at the keyboard.
+
+`nog update --yes` *(v2.1.0)* does the same for an update: the Ready packages go in, Unknown ones are kept back and listed, and with nobody at the keyboard the AUR's packages wait for a run at a terminal. sudo must be able to run pacman without a password (a sudo rule for the timer's user), or `NOG_ASKPASS=1` with a password window; nog checks first and says which. How it ended is in the **exit status**: 0 done, 1 stopped, 2 a command line not understood, **3 an update that ran but left a step incomplete** (the runs log says `incomplete`; `nog update` again finishes it).
 
 With `NOG_ASKPASS=1` in the environment, every `sudo` nog runs gets `-A`, and the AUR helper gets `--sudoflags -A`: the system's own password window asks (set `SUDO_ASKPASS`, e.g. KDE's `ksshaskpass`), never a terminal a program is drawing on. nogForge sets it.
 
@@ -761,11 +770,11 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v2.1.0** (built, waits on Javier's run) — unattended updates: `nog update --yes`, and an update that doesn't finish says so in its exit status.
+> **v2.1.0** — released 2026-10-23: unattended updates. `nog update --yes` for the installer, a timer or a script; an update that doesn't finish says so in its exit status; long AUR builds ask for the password once; perl and python wait for the packages rebuilt for their new version.
 >
-> **v2.0.0** — the crown release: one tool for every source. The command surface across the repositories, the AUR, Flatpak and Snap (`search`, `list`, `info`, `reinstall`, `tier`, `lock`, `status`, `history`, all with `--json`), maintenance across every source (`nog clean`), and the linchpin rule for glibc and gcc-libs ([#7](https://github.com/jetomev/nog/issues/7) complete, [#5](https://github.com/jetomev/nog/issues/5)). **v1.9.0 shipped 2026-10-14** — the install chain is whole: `nog install` looks in the repositories, then the AUR, then Flatpak, then Snap, and removes what it installed (C3); a removal says what else goes and who still uses it, with a Keep ([#49](https://github.com/jetomev/nog/issues/49)); `--yes` for scripts ([#32](https://github.com/jetomev/nog/issues/32)).
+> **v2.0.0** — the crown release: one tool for every source. The command surface across the repositories, the AUR, Flatpak and Snap (`search`, `list`, `info`, `reinstall`, `tier`, `lock`, `status`, `history`, all with `--json`), maintenance across every source (`nog clean`), and the linchpin rule for glibc and gcc-libs ([#7](https://github.com/jetomev/nog/issues/7) complete, [#5](https://github.com/jetomev/nog/issues/5)).
 
-### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — built 2026-10-22/23, waits on Javier's run
+### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — released 2026-10-23 (Javier's run: 34 checks; F-27 fixed in rc2)
 
 - [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
 - [x] Nobody at the keyboard and no `--yes`: the cause said before anything changes (was "Cancelled")
@@ -778,7 +787,8 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [x] From the VM, proving `--sudoloop`: when sudo had forgotten the password, yay's keep-awake loop asked for it in the middle of yay's own menu — **nog now asks sudo itself, alone, right before the helper starts** (F-27 [#63](https://github.com/jetomev/nog/issues/63))
 - [x] Javier's answers: the record of the last completed update is **one for the whole computer** (`/var/lib/nog/last-update`); nog's own tier list **trimmed to generic packages** (PipeWire, WirePlumber, NetworkManager), the desktop and its apps being a distribution's choice
 - [x] Javier's run of rc1: 25/25 ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md))
-- [ ] Javier's re-run on rc2 (§5 of the matrix); tag, GitHub Release, AUR after it
+- [x] Javier's re-run on rc2: §5 4/4; tag `v2.1.0` (signed) and the GitHub Release, 23 Oct
+- [ ] AUR 2.1.0-1, after his install of the locally built package
 
 ### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — released 2026-10-16 (GitHub + AUR, after Javier's bench: 54/54)
 
