@@ -51,6 +51,9 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] `scripts/vm-run-210b.sh`: the control (2.0.0) and rc2 at a keyboard, snapd + nogforge built; S3 watcher: `yay --sudoloop -S …`, one password for the whole update; the long-build (>5 min) case not provable in the VM (snapd builds in 45 s)
 - [ ] `scripts/make-rc-package.sh 1` → Javier's run of `testing/20261023 - Test Matrix for nog v2-1-0.md`; then tag, GitHub Release, AUR (`pkgdesc` with the "where it runs" words at the same bump); close #56–#60
 
+## Later · 1.x (after KognogOS 1.0)
+- [ ] **`nog lock` by version** (Javier, 2026-10-23: the 2.0.0 follow-ups → 1.x): lock a package at the version it has, so a new one waits; today `nog lock` is by name only
+
 ## 2026-10-19 · Open
 - [ ] **F-20 #56** · `nog update` has no `--yes`: an unattended update (a VM bench, a script, nogForge) can only be driven by `yes | nog update`, which also says yes to the Unknown-package prompts. Found in the VM during mindForge 0.1.9-1's clean-chroot build. Shape in the issue: same contract as `install --yes`, Unknown packages kept back and listed, never auto-promoted. — **built in 2.1.0 (2026-10-22/23, see above); closes when 2.1.0 is released**
 
