@@ -110,7 +110,7 @@ Every release artifact carries the dual credit line:
    - `gh release create vX.Y.Z --title "..." --notes-file <body>` with the four files (`nog-X.Y.Z.tar.gz`, `.asc`, `SHA256SUMS`, `.asc`)
 9. **The AUR recipe, built locally, not pushed:**
    - In `~/Programs/aur-nog-remote/`: `pkgver`, `pkgrel=1`, `sha256sums` from the release's SHA256SUMS
-   - Pre-flight, all read-only: the sha256 against the downloaded tarball · `gpg --verify` the `.asc` · `makepkg --printsrcinfo | diff - .SRCINFO`
+   - Pre-flight, all read-only: the sha256 against the downloaded tarball · `gpg --verify` the `.asc` · `makepkg --printsrcinfo | diff - .SRCINFO` · `pkgdesc` at most 255 **bytes** (`printf %s "$(source PKGBUILD; echo "$pkgdesc")" | wc -c`; the AUR hook refused 2.1.0's 290-byte one)
    - `makepkg -f` (downloads the published files, runs `check()`); never `-si`
    - The commit carries `PKGBUILD` + `.SRCINFO` only (the AUR checks every commit in a push)
 10. **Javier's local test, then the AUR push (one push per proven version):**
