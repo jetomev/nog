@@ -79,8 +79,8 @@ From `nog-210-before`, a real `nog update --keep proton-ge-custom-bin` at a keyb
 |---|---|---|---|---|
 | 5.1 | `nog install ~/Programs/nog/dist-rc/nog-2.1.0rc2-1-x86_64.pkg.tar.zst` | `nog --version` says 2.1.0; pacman says `/etc/nog/tier-pins.toml installed as /etc/nog/tier-pins.toml.pacnew` (this desktop runs KognogOS's list since 10-22, and pacman keeps an edited file: the trimmed default lands beside it, unused) | PASS | 10-23; 2.1.0rc2-1 installed, the .pacnew warning shown, nog 2.1.0 (pacman -Q and the .pacnew checked) |
 | 5.2 | `nog history --days 1` | the reboot advice reads top to bottom: "IMPORTANT: It is highly recommended to reboot the system!" first (F-26) | PASS | 10-23 19:32; IMPORTANT first, "mesa was updated this run." last; the update decisions in written order too. Spotted on the way: the dry runs' status/history cases had written into the real runs log; dry-run-200.sh now reads a copy |
-| 5.3 | `nog update` → y | subversion (Ready since 4.8) and whatever else is Ready; one password; Done | | |
-| 5.4 | `ls -l /var/lib/nog/last-update` | a file owned by root, dated 5.3's time: the record for the whole computer (pkg-140) | | |
+| 5.3 | `nog update` → y | subversion (Ready since 4.8) and whatever else is Ready; one password; Done | PASS | 10-23 20:05; subversion 1.14.5-6 in, one password, Done; perl's hook now names 1 package (apparmor, its rebuild ready tomorrow) |
+| 5.4 | `ls -l /var/lib/nog/last-update` | a file owned by root, dated 5.3's time: the record for the whole computer (pkg-140) | PASS | checked by Claude on the machine: `-rw-r--r-- root root 0 2026-10-23 20:06:25 /var/lib/nog/last-update`; rc1's per-user record (15:16) stays, older, unused while the newer counts |
 
 ## Findings
 

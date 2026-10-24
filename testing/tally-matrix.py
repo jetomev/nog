@@ -23,15 +23,19 @@ def tally(path):
     result_col = None
     rows = []
     for line in open(path, encoding="utf-8"):
-        m = re.match(r"^## (§\d+)", line)
+        m = re.match(r"^## (§\d+[a-z]?)", line)
         if m:
             section = m.group(1)
         if re.match(r"^\|\s*#\s*\|", line):
             header = [c.strip().lower() for c in re.split(r"(?<!\\)\|", line)]
             result_col = header.index("result") if "result" in header else None
             continue
-        m = re.match(r"^\|\s*(\d+\.\d+)\s*\|", line)
+        # 3b.1 counts too (2026-10-23: a §3b section's five rows, one of them a FAIL, were
+        # skipped without a word because the id had a letter in it)
+        m = re.match(r"^\|\s*(\d+[a-z]?\.\d+[a-z]?)\s*\|", line)
         if not m:
+            if re.match(r"^\|\s*\d+\w*\.\d+", line):
+                raise SystemExit(f"{path}: a check row this script cannot read: {line.strip()[:80]}")
             continue
         check = m.group(1)
         # Split on unescaped pipes only: a check's text may contain a literal \|
@@ -74,7 +78,7 @@ def main():
     counts = collections.Counter(v for _, _, v in rows)
 
     print("Per section:")
-    for s in sorted(by_section, key=lambda x: int(x.strip("§"))):
+    for s in sorted(by_section, key=lambda x: (int(re.match(r"§(\d+)", x).group(1)), x)):
         print(f"  {s:<5} {by_section[s]:>3}")
     print()
     print(f"{len(rows)} checks")
