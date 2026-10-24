@@ -788,7 +788,7 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - [x] Javier's answers: the record of the last completed update is **one for the whole computer** (`/var/lib/nog/last-update`); nog's own tier list **trimmed to generic packages** (PipeWire, WirePlumber, NetworkManager), the desktop and its apps being a distribution's choice
 - [x] Javier's run of rc1: 25/25 ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md))
 - [x] Javier's re-run on rc2: §5 4/4; tag `v2.1.0` (signed) and the GitHub Release, 23 Oct
-- [ ] AUR 2.1.0-1, after his install of the locally built package
+- [x] AUR 2.1.0-1 (`d522a38`), after his install of the locally built package; #56–#63 closed
 
 ### v2.0.0 — the crown release: one tool for every source (C4 + C5 + C7: [#7](https://github.com/jetomev/nog/issues/7); [#5](https://github.com/jetomev/nog/issues/5)) — released 2026-10-16 (GitHub + AUR, after Javier's bench: 54/54)
 
