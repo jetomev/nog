@@ -50,3 +50,7 @@ nogForge shows what nog decides and never decides itself, so nog's machine outpu
 
 ## Names and words
 `nog` (always lowercase), `nogForge`, KognogOS, the Forge Suite. Buckets: Ready, Held, Unknown. Verbs: promote, keep, lock, clean. Sources: the repositories, the AUR, Flatpak, Snap. Messages follow the house style (blank line around every notice, the heading says what happened, small actions show only what changes). Credit what nog builds on; never compare nog with other tools.
+
+## Rules with their words (moved from memory, 2026-11-09)
+- **Explicit commands do what was asked** (Javier, 2026-10-03): "if I ask in pacman to install a package, it just install the package. nog has to do the same, not update the system." In practice: tier protection belongs to the passive path (`nog update`).
+- **Every message is designed** (Javier, 2026-10-02): "We never through message without thinking on the form, please, alway one newline before the message, one after only, and formatting also is key for people to realize there is a message" · "Let's be sure on every nog run there is a thank you and a log, it doesn't matter what nog subcommand was run. Its start with the not version and run requested, and finishes with thanks and log info, always. consistency makes the difference in communication with the user." · on a small install showing the whole report: "Hard no from this point moving forward."
