@@ -427,6 +427,13 @@ pub struct SonameData {
     /// CURRENT series' module folder (`usr/lib/perl5/5.42/`). Filled only when a
     /// pending update moves that interpreter to a new series; see `interpreter_moves`.
     pub module_dir_owners: HashMap<String, Vec<String>>,
+    /// v2.1.1 (F-30, #67): candidate -> `%DEPENDS%` of the version that would be
+    /// installed. What the reverse soname rule reads for a declared need.
+    pub new_depends: HashMap<String, Vec<String>>,
+    /// v2.1.1 (F-30, #67): candidate -> build date of the version that would be
+    /// installed. Tells a rebuild made after a new soname existed from one made
+    /// before it, for the undeclared need.
+    pub new_built: HashMap<String, u64>,
 }
 
 /// Every soname some pending candidate would stop providing.
@@ -604,6 +611,131 @@ pub fn soname_coupling_demotions(
     out
 }
 
+/// Is this an exact versioned entry (`libcrypto.so=4-64`, `java-runtime=21`)?
+/// Ranges are left out for the reason `is_soname` gives.
+fn is_versioned(entry: &str) -> bool {
+    entry.contains('=') && !entry.contains('<') && !entry.contains('>')
+}
+
+/// A soname entry split into its library and its word size:
+/// `libcrypto.so=3-64` -> (`libcrypto.so`, `64`). The word size is what keeps
+/// a 32-bit bump from ever standing in for a 64-bit one.
+fn soname_lib_and_arch(entry: &str) -> Option<(&str, &str)> {
+    let (base, ver) = entry.split_once('=')?;
+    let (_, arch) = ver.rsplit_once('-')?;
+    Some((base, arch))
+}
+
+/// Couple a Ready package to the held package that alone supplies a library
+/// its new version needs (F-30, #67): the soname rule turned around.
+///
+/// Seen on 2026-11-10: `openssl` 3.6.5 -> 4.1.0 was held (coupled to `kmod`
+/// by the soname rule), while Arch's rebuilds against OpenSSL 4 had cleared
+/// their own windows and sat in Ready. `curl` 8.23.0-2 declares
+/// `libcrypto.so=4-64`, which only the held openssl 4.1.0 provides, so pacman
+/// refused the whole transaction. The soname rule asks whether a Ready package
+/// drops something still needed; nothing asked whether one needs something
+/// not yet there.
+///
+/// Two ways a need is known:
+///
+/// * **Declared**: an exact versioned entry in the candidate's new
+///   `%DEPENDS%`. Exact, straight from the metadata, and what pacman itself
+///   refuses on.
+/// * **Undeclared**: `git`, `krb5`, `libssh2` were rebuilt for OpenSSL 4 too
+///   and say only `openssl`, or nothing. pacman would let them through and
+///   they would land linking `libcrypto.so.4` beside a `.so.3`: ssh and git
+///   broken at run time, which is worse than a refused update. So when a held
+///   package **bumps** a soname (drops `libcrypto.so=3-64`, adds
+///   `libcrypto.so=4-64`), every Ready candidate that uses the old one today
+///   (declared, or linked per the #16 scan) and whose new build is no older
+///   than the library's first new build is taken to need the new one. The
+///   linchpin rule's reasoning (#5): built after it existed, probably linked
+///   to it. It errs toward a few days' wait, never toward a broken system.
+///
+/// Either way, a need that something staying or something moving will still
+/// provide holds nothing; only a need that a held candidate alone supplies
+/// couples, to that candidate, which lends its countdown.
+pub fn needs_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    data: &SonameData,
+) -> Vec<(String, String)> {
+    if ready.is_empty() || held.is_empty() || data.installed_provides.is_empty() {
+        return Vec::new();
+    }
+    let moving: HashSet<&str> = ready.iter().map(|p| p.name.as_str()).collect();
+
+    // Will anything not held provide `need` after this run?
+    let provided = |need: &str| {
+        data.installed_provides.iter().any(|(p, list)| {
+            !moving.contains(p.as_str()) && list.iter().any(|e| e == need)
+        }) || ready.iter().any(|r| {
+            data.new_provides.get(&r.name).is_some_and(|l| l.iter().any(|e| e == need))
+        })
+    };
+
+    // The soname bumps held packages carry: old -> (new, library). The first
+    // new build of each library dates when anything could link the new one;
+    // `lib32-openssl` was built later than `openssl`, and the 32-bit
+    // rebuilds were made against the same release.
+    let mut bumps: Vec<(&str, &str)> = Vec::new();
+    let mut first_built: HashMap<&str, u64> = HashMap::new();
+    for h in held {
+        let before = soname_set(data.installed_provides.get(&h.name));
+        let after = soname_set(data.new_provides.get(&h.name));
+        for old in before.difference(&after) {
+            let Some((lib, arch)) = soname_lib_and_arch(old) else { continue };
+            let Some(new) = after
+                .iter()
+                .find(|n| soname_lib_and_arch(n) == Some((lib, arch)))
+            else {
+                continue;
+            };
+            bumps.push((old, new));
+            if let Some(b) = data.new_built.get(&h.name) {
+                first_built.entry(lib).and_modify(|t| *t = (*t).min(*b)).or_insert(*b);
+            }
+        }
+    }
+
+    let mut out: Vec<(String, String)> = Vec::new();
+    for cand in ready {
+        let declared = data
+            .new_depends
+            .get(&cand.name)
+            .into_iter()
+            .flatten()
+            .map(|s| s.as_str())
+            .filter(|s| is_versioned(s));
+        let uses = |old: &str| {
+            data.installed_depends.get(&cand.name).is_some_and(|l| l.iter().any(|e| e == old))
+                || data.linked_by.get(old).is_some_and(|l| l.iter().any(|p| p == &cand.name))
+        };
+        let undeclared = bumps.iter().filter_map(|(old, new)| {
+            let lib = soname_lib_and_arch(old)?.0;
+            let since = *first_built.get(lib)?;
+            let built = *data.new_built.get(&cand.name)?;
+            (built >= since && uses(old)).then_some(*new)
+        });
+
+        for need in declared.chain(undeclared) {
+            if provided(need) {
+                continue;
+            }
+            let suppliers: Vec<&CouplingPkg> = held
+                .iter()
+                .filter(|h| data.new_provides.get(&h.name).is_some_and(|l| l.iter().any(|e| e == need)))
+                .collect();
+            if let Some(h) = longest_held(&suppliers) {
+                out.push((cand.name.clone(), h.name.clone()));
+                break; // one note per candidate, as the soname rule
+            }
+        }
+    }
+    out
+}
+
 /// v2.1.0 (F-25, #61): the interpreters whose compiled modules install into a
 /// folder named for the interpreter's version series — `usr/lib/perl5/5.42/`,
 /// `usr/lib/python3.14/` — with how many version components make the series.
@@ -685,6 +817,7 @@ pub fn coupling_demotions(
         .chain(pkgbase_coupling_demotions(ready, held))
         .chain(cohort_coupling_demotions(ready, held))
         .chain(soname_coupling_demotions(ready, held, soname))
+        .chain(needs_coupling_demotions(ready, held, soname))
         .chain(module_dir_coupling_demotions(ready, held, soname))
     {
         if claimed.insert(name.clone()) {
@@ -883,6 +1016,7 @@ mod tests {
             pkgbase: None,
             version: version.map(|v| v.to_string()),
             provides: Vec::new(),
+            depends: Vec::new(),
             repo: None,
         });
         m
@@ -1707,4 +1841,210 @@ mod tests {
         assert_eq!(module_dir_coupling_demotions(&ready, &held, &d), vec![("python".to_string(), "python-requests".to_string())]);
     }
 
+    // ---- F-30 (#67): the reverse soname rule --------------------------------
+    //
+    // The 2026-11-10 desktop, as `nog update --json` saw it: openssl 4.1.0-1 and
+    // lib32-openssl 1:4.1.0-2 held 18 days (kmod still links libcrypto.so.3),
+    // Arch's OpenSSL 4 rebuilds Ready. Build dates are the real ones.
+
+    const OPENSSL4_BUILT: u64 = 1792835125;
+
+    fn openssl_desktop() -> (Vec<CouplingPkg>, Vec<CouplingPkg>, SonameData) {
+        let mut data = sd(
+            &[
+                ("openssl", &["libcrypto.so=3-64", "libssl.so=3-64"], &[]),
+                ("lib32-openssl", &["libcrypto.so=3-32", "libssl.so=3-32"], &["openssl"]),
+                ("kmod", &["libkmod.so=2-64"], &["openssl"]),
+                ("curl", &["libcurl.so=4-64"], &["openssl", "libcrypto.so=3-64", "libssl.so=3-64"]),
+                ("sudo", &[], &["openssl", "libcrypto.so=3-64", "libssl.so=3-64"]),
+                ("lib32-curl", &["libcurl.so=4-32"], &["lib32-openssl", "libcrypto.so=3-32", "libssl.so=3-32"]),
+                ("git", &[], &["curl", "openssl"]),
+                ("krb5", &["libkrb5.so=3-64"], &["openssl"]),
+                ("lib32-krb5", &["libkrb5.so=3-32"], &["lib32-openssl"]),
+                ("qca-qt6", &[], &["qt6-base"]),
+                ("libbpf", &["libbpf.so=1-64"], &["libelf"]),
+            ],
+            &[
+                ("openssl", &["libcrypto.so=4-64", "libssl.so=4-64"]),
+                ("lib32-openssl", &["libcrypto.so=4-32", "libssl.so=4-32"]),
+                ("curl", &["libcurl.so=4-64"]),
+                ("sudo", &[]),
+                ("lib32-curl", &["libcurl.so=4-32"]),
+                ("git", &[]),
+                ("krb5", &["libkrb5.so=3-64"]),
+                ("lib32-krb5", &["libkrb5.so=3-32"]),
+                ("qca-qt6", &[]),
+                ("libbpf", &["libbpf.so=1-64"]),
+            ],
+        );
+        let deps = |n: &str, d: &[&str]| (n.to_string(), d.iter().map(|s| s.to_string()).collect());
+        data.new_depends = [
+            deps("curl", &["openssl", "libcrypto.so=4-64", "libssl.so=4-64"]),
+            deps("sudo", &["openssl", "libcrypto.so=4-64", "libssl.so=4-64"]),
+            deps("lib32-curl", &["lib32-openssl", "libcrypto.so=4-32", "libssl.so=4-32"]),
+            deps("git", &["curl", "openssl"]),
+            deps("krb5", &["openssl"]),
+            deps("lib32-krb5", &["lib32-openssl"]),
+            deps("qca-qt6", &["qt6-base"]),
+            deps("libbpf", &["libelf"]),
+        ]
+        .into_iter()
+        .collect();
+        data.new_built = [
+            ("openssl", OPENSSL4_BUILT),
+            ("lib32-openssl", 1793651187),
+            ("curl", 1792846868),
+            ("sudo", 1792850456),
+            ("lib32-curl", 1793653757),
+            ("git", 1793009959),
+            ("krb5", 1792851019),
+            ("lib32-krb5", 1793655523),
+            ("qca-qt6", 1793814123),
+            ("libbpf", 1791726446), // built before OpenSSL 4 existed
+        ]
+        .into_iter()
+        .map(|(n, t)| (n.to_string(), t))
+        .collect();
+        // The #16 scan: who links the sonames openssl drops, today.
+        let linked = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        data.linked_by.insert("libcrypto.so=3-64".into(), linked(&["curl", "git", "kmod", "krb5", "libbpf", "qca-qt6", "sudo"]));
+        data.linked_by.insert("libcrypto.so=3-32".into(), linked(&["lib32-curl", "lib32-krb5"]));
+
+        let ready = vec![
+            pkg("curl", "8.23.0-1", "8.23.0-2", None, 0),
+            pkg("sudo", "1.9.17.p2-6", "1.9.17.p2-7", None, 0),
+            pkg("lib32-curl", "8.23.0-1", "8.23.0-2", None, 0),
+            pkg("git", "2.56.0-1", "2.56.0-2", None, 0),
+            pkg("krb5", "1.22.2-1", "1.22.2-2", None, 0),
+            pkg("lib32-krb5", "1.22.2-1", "1.22.2-2", None, 0),
+            pkg("qca-qt6", "2.3.12-1", "2.3.12-2", None, 0),
+            pkg("libbpf", "1.7.0-1", "1.8.0-1", None, 0),
+        ];
+        let held = vec![
+            pkg("kmod", "34.2-1", "34.3-2", None, 18),
+            pkg("openssl", "3.6.5-1", "4.1.0-1", None, 18),
+            pkg("lib32-openssl", "1:3.6.5-1", "1:4.1.0-2", None, 18),
+        ];
+        (ready, held, data)
+    }
+
+    #[test]
+    fn the_old_rules_let_the_openssl_4_rebuilds_through() {
+        // The failing direction: every rule nog had before F-30, on today's
+        // data, leaves all eight Ready, which is the transaction pacman refused.
+        let (ready, held, data) = openssl_desktop();
+        let old_rules: Vec<_> = lib32_coupling_demotions(
+            &ready.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+            &held.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+        )
+        .into_iter()
+        .chain(pkgbase_coupling_demotions(&ready, &held))
+        .chain(cohort_coupling_demotions(&ready, &held))
+        .chain(soname_coupling_demotions(&ready, &held, &data))
+        .chain(module_dir_coupling_demotions(&ready, &held, &data))
+        .collect();
+        assert!(old_rules.is_empty(), "the old rules already held {old_rules:?}");
+    }
+
+    #[test]
+    fn the_openssl_4_rebuilds_wait_for_openssl() {
+        let (ready, held, data) = openssl_desktop();
+        let mut d = coupling_demotions(&ready, &held, &data);
+        d.sort();
+        assert_eq!(
+            d,
+            vec![
+                ("curl".to_string(), "openssl".to_string()),       // declared =4-64
+                ("git".into(), "openssl".into()),                  // links .so.3, built after
+                ("krb5".into(), "openssl".into()),
+                ("lib32-curl".into(), "lib32-openssl".into()),     // declared =4-32
+                ("lib32-krb5".into(), "lib32-openssl".into()),     // the 32-bit scan
+                ("qca-qt6".into(), "openssl".into()),
+                ("sudo".into(), "openssl".into()),
+            ],
+            "libbpf, built before OpenSSL 4 existed, is the only one left Ready"
+        );
+    }
+
+    #[test]
+    fn a_declared_need_alone_is_enough() {
+        // No scan, no dates: the metadata by itself holds curl.
+        let (ready, held, mut data) = openssl_desktop();
+        data.linked_by.clear();
+        data.new_built.clear();
+        let names = demoted_names(needs_coupling_demotions(&ready, &held, &data));
+        assert_eq!(names, vec!["curl", "lib32-curl", "sudo"]);
+    }
+
+    #[test]
+    fn nothing_extra_is_held_when_the_provider_is_ready() {
+        // openssl's own hold is over: everything moves together.
+        let (mut ready, held, data) = openssl_desktop();
+        ready.push(pkg("openssl", "3.6.5-1", "4.1.0-1", None, 0));
+        ready.push(pkg("lib32-openssl", "1:3.6.5-1", "1:4.1.0-2", None, 0));
+        let held: Vec<CouplingPkg> = held.into_iter().filter(|h| h.name == "kmod").collect();
+        assert!(needs_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_need_something_else_still_provides_holds_nothing() {
+        // An installed package that stays already provides the new soname
+        // (a compatibility build, say): the rebuilds have what they need.
+        let (ready, held, mut data) = openssl_desktop();
+        data.installed_provides.insert(
+            "openssl-next".into(),
+            vec!["libcrypto.so=4-64".into(), "libssl.so=4-64".into()],
+        );
+        let names = demoted_names(needs_coupling_demotions(&ready, &held, &data));
+        assert_eq!(names, vec!["lib32-curl", "lib32-krb5"], "only the 32-bit side still waits");
+    }
+
+    #[test]
+    fn a_held_package_that_drops_a_soname_without_a_new_one_infers_nothing() {
+        // No bump, only a drop: nothing can have been built against a newer
+        // one, so the undeclared half stays quiet (the forward rule owns this).
+        let (ready, held, mut data) = openssl_desktop();
+        data.new_provides.insert("openssl".into(), vec![]);
+        data.new_provides.insert("lib32-openssl".into(), vec![]);
+        assert!(needs_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_32_bit_bump_never_stands_in_for_a_64_bit_one() {
+        // Only lib32-openssl is held. git links the 64-bit libcrypto.so.3,
+        // which nothing held is bumping, so git moves.
+        let (ready, held, data) = openssl_desktop();
+        let held: Vec<CouplingPkg> = held.into_iter().filter(|h| h.name == "lib32-openssl").collect();
+        let names = demoted_names(needs_coupling_demotions(&ready, &held, &data));
+        assert_eq!(names, vec!["lib32-curl", "lib32-krb5"]);
+    }
+
+    #[test]
+    fn the_reverse_rule_chains_through_the_fixpoint() {
+        // A library held by the new rule can in turn be needed: `foo` needs
+        // `libcurl.so=5-64`, which only curl's new build would bring, once curl
+        // is held for openssl.
+        let (mut ready, mut held, mut data) = openssl_desktop();
+        data.installed_provides.insert("curl".into(), vec!["libcurl.so=4-64".into()]);
+        data.new_provides.insert("curl".into(), vec!["libcurl.so=5-64".into()]);
+        data.installed_provides.insert("foo".into(), vec![]);
+        data.new_depends.insert("foo".into(), vec!["libcurl.so=5-64".into()]);
+        ready.push(pkg("foo", "1-1", "1-2", None, 0));
+
+        let mut passes = 0;
+        loop {
+            let d = coupling_demotions(&ready, &held, &data);
+            if d.is_empty() {
+                break;
+            }
+            passes += 1;
+            assert!(passes < 16);
+            let names: HashSet<&str> = d.iter().map(|(n, _)| n.as_str()).collect();
+            let (out, keep): (Vec<_>, Vec<_>) = ready.drain(..).partition(|p| names.contains(p.name.as_str()));
+            ready = keep;
+            held.extend(out.into_iter().map(|mut p| { p.remaining = 18; p }));
+        }
+        assert!(held.iter().any(|h| h.name == "foo"), "foo waits for curl");
+        assert_eq!(ready.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["libbpf"]);
+    }
 }

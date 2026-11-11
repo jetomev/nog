@@ -2021,6 +2021,7 @@ fn run_update(realign: bool) -> UpdateEnd {
                     pkgbase: None,
                     version: None,
                     provides: Vec::new(),
+                    depends: Vec::new(),
                     repo: None,
                 });
             }
@@ -2035,6 +2036,7 @@ fn run_update(realign: bool) -> UpdateEnd {
             pkgbase: None,
             version: None,
             provides: Vec::new(),
+            depends: Vec::new(),
             repo: None,
         });
     }
@@ -2046,6 +2048,7 @@ fn run_update(realign: bool) -> UpdateEnd {
             pkgbase: None,
             version: None,
             provides: Vec::new(),
+            depends: Vec::new(),
             repo: None,
         });
     }
@@ -2299,8 +2302,9 @@ fn run_update(realign: bool) -> UpdateEnd {
     // broken system (when it cannot: the Qt6 stack shares no pkgbase and carries
     // no version constraint, and splitting it took a desktop to a black screen).
     //
-    // Four rules now apply — lib32 pairs, pkgbase siblings, version cohorts, and
-    // (v1.3.1, issue #13) dropped sonames; see `holds::coupling_demotions`. Runs
+    // The rules — lib32 pairs, pkgbase siblings, version cohorts, (v1.3.1,
+    // issue #13) dropped sonames, (v2.1.1, F-30 #67) needed sonames only a held
+    // package supplies, and interpreter folders; see `holds::coupling_demotions`. Runs
     // last, so it sees the post-realign buckets and feeds the ignore list below.
     //
     // The fourth rule exists because the first three all match on *names*, and
@@ -2353,6 +2357,19 @@ fn run_update(realign: bool) -> UpdateEnd {
                 installed_depends: installed
                     .into_iter()
                     .map(|(n, d)| (n, d.depends))
+                    .collect(),
+                // v2.1.1 (F-30, #67): what each pending version needs, and when
+                // it was built, for the reverse soname rule.
+                new_depends: packages
+                    .iter()
+                    .map(|(n, d)| (n.clone(), d.depends.clone()))
+                    .collect(),
+                // Repository builds only: an AUR package is built here, against
+                // whatever is installed, so its date says nothing about linking.
+                new_built: packages
+                    .iter()
+                    .filter(|(_, d)| d.repo.is_some())
+                    .map(|(n, d)| (n.clone(), d.builddate))
                     .collect(),
                 ..Default::default()
             };
@@ -4067,7 +4084,7 @@ mod output_tests {
     fn every_source_has_a_word_and_aur_is_never_blank() {
         let mut pk: HashMap<String, sync_db::PackageDesc> = HashMap::new();
         pk.insert("snapd".into(), sync_db::PackageDesc {
-            builddate: 0, pkgbase: None, version: None, provides: Vec::new(), repo: Some("extra".into()),
+            builddate: 0, pkgbase: None, version: None, provides: Vec::new(), depends: Vec::new(), repo: Some("extra".into()),
         });
         assert_eq!(source_label(&upd("snapd", Source::Pacman), &pk), "extra");
         assert_eq!(source_label(&upd("snapd", Source::Snap), &pk), "Snap", "the #20 trap: same name, other source");
@@ -4164,7 +4181,7 @@ mod output_tests {
 
     fn desc(repo: &str, version: &str, provides: &[&str]) -> sync_db::PackageDesc {
         sync_db::PackageDesc { builddate: 0, pkgbase: None, version: Some(version.into()),
-            provides: provides.iter().map(|s| s.to_string()).collect(), repo: Some(repo.into()) }
+            provides: provides.iter().map(|s| s.to_string()).collect(), depends: Vec::new(), repo: Some(repo.into()) }
     }
 
     #[test]

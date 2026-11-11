@@ -418,6 +418,7 @@ mod tests {
                 pkgbase: Some(base.to_string()),
                 version: None,
                 provides: Vec::new(),
+                depends: Vec::new(),
                 repo: None,
             });
         }

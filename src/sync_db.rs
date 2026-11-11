@@ -67,6 +67,10 @@ pub struct PackageDesc {
     /// against what the pending version will provide. Empty when the field is
     /// absent, which is the common case: most packages provide nothing.
     pub provides: Vec<String>,
+    /// v2.1.1 (F-30, #67): the `%DEPENDS%` field, verbatim. The reverse soname
+    /// rule reads it to see what a pending version will NEED (`curl` 8.23.0-2
+    /// needs `libcrypto.so=4-64`), which only a held package may supply.
+    pub depends: Vec<String>,
     /// v1.5.4 (#28): the repository this entry was read from (`core`,
     /// `extra`, `chaotic-aur`, …). The first enabled repository that carries
     /// a name wins, the same order pacman resolves in. `None` for entries
@@ -407,11 +411,11 @@ fn read_repo(db_path: &Path) -> Result<HashMap<String, PackageDesc>, String> {
 ///
 /// Format is a series of `%KEY%` lines followed by one or more value lines,
 /// separated by blank lines. We read `%NAME%`, `%BUILDDATE%`, `%BASE%`,
-/// `%VERSION%` and `%PROVIDES%`.
+/// `%VERSION%`, `%PROVIDES%` and `%DEPENDS%`.
 ///
-/// `%PROVIDES%` is the only **multi-value** field of the five: a package can
-/// provide any number of sonames, so its branch consumes lines until a blank
-/// one rather than taking a single value.
+/// `%PROVIDES%` and `%DEPENDS%` are the **multi-value** fields: a package can
+/// provide or need any number of sonames, so their branches consume lines
+/// until a blank one rather than taking a single value.
 ///
 /// Returns `None` if `%NAME%` or `%BUILDDATE%` is missing (we need both for
 /// any useful classification). `%BASE%` and `%VERSION%` are optional —
@@ -423,6 +427,7 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
     let mut pkgbase: Option<String> = None;
     let mut version: Option<String> = None;
     let mut provides: Vec<String> = Vec::new();
+    let mut depends: Vec<String> = Vec::new();
 
     let mut lines = contents.lines();
     while let Some(line) = lines.next() {
@@ -456,6 +461,15 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
                     provides.push(trimmed.to_string());
                 }
             }
+            "%DEPENDS%" => {
+                for v in lines.by_ref() {
+                    let trimmed = v.trim();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    depends.push(trimmed.to_string());
+                }
+            }
             "%BASE%" => {
                 if let Some(v) = lines.next() {
                     let trimmed = v.trim();
@@ -470,7 +484,7 @@ fn parse_desc(contents: &str) -> Option<(String, PackageDesc)> {
 
     match (name, date) {
         (Some(n), Some(d)) => {
-            Some((n, PackageDesc { builddate: d, pkgbase, version, provides, repo: None }))
+            Some((n, PackageDesc { builddate: d, pkgbase, version, provides, depends, repo: None }))
         }
         _ => None,
     }
@@ -526,5 +540,15 @@ lib32-brotli
     fn parse_desc_requires_name_and_builddate() {
         assert!(parse_desc("%NAME%\nonly-name\n").is_none());
         assert!(parse_desc("%BUILDDATE%\n1000\n").is_none());
+    }
+
+    #[test]
+    fn parse_desc_reads_depends_without_swallowing_the_next_field() {
+        // curl 8.23.0-2 as the core database carries it (F-30, #67).
+        let contents = "%NAME%\ncurl\n\n%VERSION%\n8.23.0-2\n\n%DEPENDS%\nopenssl\nlibcrypto.so=4-64\nlibssl.so=4-64\n\n%PROVIDES%\nlibcurl.so=4-64\n\n%BUILDDATE%\n1792846868\n";
+        let (_, desc) = parse_desc(contents).expect("desc should parse");
+        assert_eq!(desc.depends, vec!["openssl", "libcrypto.so=4-64", "libssl.so=4-64"]);
+        assert_eq!(desc.provides, vec!["libcurl.so=4-64"]);
+        assert_eq!(desc.builddate, 1792846868);
     }
 }
