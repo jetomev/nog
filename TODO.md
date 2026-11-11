@@ -25,7 +25,7 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **F-30 #67**: openssl 4.1.0 held (kmod), Arch's OpenSSL 4 rebuilds Ready; curl/sudo/openssh need `libcrypto.so=4-64` → pacman would refuse the whole update. Fix: `holds::needs_coupling_demotions` in the coupling chain (declared need + undeclared via a held soname bump and build dates); sync_db reads `%DEPENDS%`. Tests 304 → 313, warnings 6. `scripts/dry-run-211.sh` OK: the seven Held, coupled to openssl; 62 moved in all
 - [x] Docs + version 2.1.1 everywhere, changelog, matrix `testing/20261110 - Test Matrix for nog v2-1-1.md`
 - [x] Tag v2.1.1 (signed), GitHub Release Latest (reproducible tar `ee47265d…` + SHA256SUMS, both .asc), AUR recipe committed locally in `aur-nog-remote` and built in `~/Programs/aur-nog/build-211/` (313 tests in check()), NOT pushed
-- [ ] **Javier**: install the local package, matrix §3 (before Saturday 11-14, 9 AM); then Claude §4 with the installed binary
+- [ ] **Javier**: install the local package — `nog install ~/Programs/aur-nog/build-211/nog-2.1.1-1-x86_64.pkg.tar.zst`, then `nog --version`, then `nog update` answering n (matrix §3, its "Resume here" block has every step; before Saturday 11-14, 9 AM); then Claude §4 with the installed binary
 - [ ] On his pass: AUR push, close #67; kognogos-dev gets 2.1.1 before its round
 
 ## Found 2026-10-30 — hypeForge's Sway package
