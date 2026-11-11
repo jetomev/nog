@@ -21,6 +21,13 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **v1.6.0 for nogForge — built 3 Oct (09:00–09:25), as 1.6.0-rc.1, NOT released, NOT committed (GPG passphrase expired; commit when Javier unlocks it)**: `nog list --json` (protection in words: Tier 1 / base set / needed by), `nog search --json` (repos + AUR via helper), `nog update --json` (same code as a real update, stops before any question; stdout = one JSON document, the rest to stderr; no banner, no run-history line), `--keep a,b` (held before the coupling rules — checked: ldb takes libwbclient + smbclient with it), `NOG_ASKPASS=1` → every sudo gets -A, helper gets `--sudoflags -A`. Tests 229 → 234, warnings 6 → 6. `scripts/make-rc-package.sh` → `dist-rc/nog-1.6.0rc1-1-x86_64.pkg.tar.zst` (package check ran every test). Next: Javier's run (nogForge matrix §6.1), then the release: README + man page for the new options, version 1.6.0 everywhere, CHANGELOG, tag, GitHub, AUR, close/advance #7.
 
 - [ ] **To watch (3 Oct, not a bug yet):** #27's fix works — linux-lts (first seen Jul 28) and mkinitcpio (Aug 12) are past their 30-day window and wait only on the 7-day safety rule (newest builds Oct 1 → ready Oct 8). But if new builds keep arriving less than 7 days apart, the safety wait could slip again (a small cousin of #27). Check after Oct 8 whether both went in at the next update.
+## 2026-11-10 · v2.1.1 — the reverse soname rule (before the 11-14 monthly round)
+- [x] **F-30 #67**: openssl 4.1.0 held (kmod), Arch's OpenSSL 4 rebuilds Ready; curl/sudo/openssh need `libcrypto.so=4-64` → pacman would refuse the whole update. Fix: `holds::needs_coupling_demotions` in the coupling chain (declared need + undeclared via a held soname bump and build dates); sync_db reads `%DEPENDS%`. Tests 304 → 313, warnings 6. `scripts/dry-run-211.sh` OK: the seven Held, coupled to openssl; 62 moved in all
+- [x] Docs + version 2.1.1 everywhere, changelog, matrix `testing/20261110 - Test Matrix for nog v2-1-1.md`
+- [ ] Tag v2.1.1, GitHub Release, AUR recipe built locally (`makepkg -f`), NOT pushed
+- [ ] **Javier**: install the local package, matrix §3 (before Saturday 11-14, 9 AM); then Claude §4 with the installed binary
+- [ ] On his pass: AUR push, close #67; kognogos-dev gets 2.1.1 before its round
+
 ## Found 2026-10-30 — hypeForge's Sway package
 - [ ] **F-28 (#64): a package held by another package's exact dependency reads as "you answered no, or it hit a problem"** — `sway-hypeforge` pins `sway=1:1.12` on purpose (hypeForge D-128); nog should say Sway is held by it until the rebuild, in `install`, `update` and unattended updates
 

@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "October 2026" "nog v2.1.0" "User Commands"
+.TH NOG 1 "November 2026" "nog v2.1.1" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -938,6 +938,22 @@ moves nothing. Found on 2026-10-23: perl went 5.42 \(-> 5.44 while apparmor
 and subversion, already rebuilt for it, were held one more day. The way
 through is \fBnog update --promote perl\fR, which brings the held partners
 along.
+.SS Libraries only a held package brings (v2.1.1, F-30, issue #67)
+The soname rule turned around. A Ready package whose new version needs an
+exact library version (\fBlibcrypto.so=4-64\fR) or another exact versioned
+provide that nothing staying or moving will supply, and that a held package's
+new version does, waits with that package (\fB"18 days \(bu coupled to
+openssl"\fR); otherwise pacman refuses the whole transaction. Packages
+rebuilt for the new library that do not declare it (git, krb5 and libssh2
+name only \fBopenssl\fR) are caught too: when a held package moves a library
+to a new version (\fBlibcrypto.so\fR 3 \(-> 4), every Ready repository package
+that uses the old one today (declared, or read from its programs) and was
+built after the library's first new build waits with it, because it was
+probably linked against the new one. It errs toward a wait: a package that
+ships its own copy of the old library may wait needlessly. Found on
+2026-11-10: openssl 4 held for kmod, curl, sudo and openssh asking for
+\fBlibcrypto.so=4-64\fR. The way through is \fBnog update --promote
+openssl\fR, which brings the held partners along.
 .SS Groups (advanced)
 The optional
 .B [groups]

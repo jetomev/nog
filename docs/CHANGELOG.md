@@ -2,6 +2,16 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v2.1.1 — November 2026
+
+**A package that needs a library only a held package brings now waits for it** (F-30 [#67](https://github.com/jetomev/nog/issues/67)). Found on the KognogOS test desktop on 2026-11-10, ahead of the monthly update round.
+
+- **openssl's case.** openssl 4.1.0 was held: kmod, still inside its window, uses the OpenSSL 3 library, and the soname rule (v1.3.1) rightly keeps the two together. But Arch had rebuilt a large part of the repositories against OpenSSL 4, and those rebuilds had cleared their own windows. curl, sudo and openssh say outright that they need `libcrypto.so=4-64`, which only the held openssl brings, so pacman refused the whole update and nothing installed. The soname rule looked one way only, at a Ready package taking away a library something still needs. Now it looks the other way too: a Ready package whose new version needs a library only a held package will bring waits with that package (`18 days · coupled to openssl`), and they clear together.
+- **The rebuilds that don't say so are caught too.** git, krb5 and libssh2 were rebuilt for OpenSSL 4 as well, but name only `openssl`. pacman would have let them through, and they would have landed needing a library that is not there: ssh and git broken, which is worse than a refused update. So when a held package moves a library to a new version (`libcrypto.so` 3 → 4), every Ready package that uses the old one today (declared, or read from its programs since v1.4.2) and was built after the new library existed waits with it. The linchpin rule's reasoning (v2.0.0): built after it, probably linked to it. It errs toward a few days' wait, never toward a broken system. On the test desktop that day: 62 packages wait with openssl (python, Qt, nodejs, ssh, git and the NVIDIA driver among them, the driver probably needlessly: it ships its own OpenSSL 3 plugin), 175 go in.
+- The 32-bit side follows the same rules (`lib32-openssl`, `libcrypto.so=4-32`), and a package held this way can hold the next one in turn (the coupling rules repeat until nothing moves).
+
+Tests: 304 → 313 (the new ones seen failing with the rule switched off). Warnings unchanged at 6. The check on the desktop, read only, the installed 2.1.0 beside the new build: [scripts/dry-run-211.sh](scripts/dry-run-211.sh).
+
 ### v2.1.0 — October 2026
 
 **Unattended updates** ([#56](https://github.com/jetomev/nog/issues/56) · F-21 [#57](https://github.com/jetomev/nog/issues/57) · F-22 [#58](https://github.com/jetomev/nog/issues/58) · F-23 [#59](https://github.com/jetomev/nog/issues/59)). The KognogOS installer and welcome app, a timer or a script can now run an update with nobody at the keyboard, and know how it ended.

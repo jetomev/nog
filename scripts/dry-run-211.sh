@@ -7,7 +7,8 @@
 #       installed nog and Held, coupled to openssl, with the new one
 #   R2  what else the new rule holds, listed by name, so the cost is seen, not guessed
 #
-#   scripts/dry-run-211.sh
+#   scripts/dry-run-211.sh                      (the build vs the installed nog)
+#   NOG_NEW=/usr/bin/nog NOG_OLD=<2.1.0> scripts/dry-run-211.sh   (after installing 2.1.1)
 #
 # Logs to logs/dry-run-211-<time>.log (+ -latest link); the last line says OK.
 set -uo pipefail
@@ -17,7 +18,7 @@ log="logs/dry-run-211-$(date +%Y%m%d-%H%M%S).log"
 ln -sfn "$(basename "$log")" logs/dry-run-211-latest.log
 exec > >(tee "$log") 2>&1
 
-NEW="$PWD/target/release/nog"
+NEW="${NOG_NEW:-$PWD/target/release/nog}"
 OLD="${NOG_OLD:-/usr/bin/nog}"
 REAL_STATE="$HOME/.local/state/nog"
 export HOME="$(mktemp -d)"          # nog's own records stay out of the real home

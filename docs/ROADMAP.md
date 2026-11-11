@@ -2,6 +2,13 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
+### v2.1.1 — the reverse soname rule (F-30 [#67](https://github.com/jetomev/nog/issues/67)) — tagged 2026-11-10; the AUR after Javier's local test
+
+- [x] A Ready package whose new version needs a library (or an exact versioned provide) that only a held package will bring waits with it, coupled and on the same countdown; the declared need from the package data, the undeclared one from a held library's version bump plus who uses the old one and was built after the new
+- [x] nog reads the package databases' `%DEPENDS%` (it read only `%PROVIDES%`)
+- [x] 304 → 313 tests (each new end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-211.sh` OK (curl, git, krb5, libssh2, openssh, sudo, qca-qt6 Ready → Held, coupled to openssl; 62 moved in all, none the other way)
+- [ ] Javier installs the locally built package and runs the matrix ([testing/](testing/20261110%20-%20Test%20Matrix%20for%20nog%20v2-1-1.md)); AUR 2.1.1-1 only on his pass; #67 closed then
+
 ### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — released 2026-10-23 (Javier's run: 34 checks; F-27 fixed in rc2)
 
 - [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
