@@ -2305,7 +2305,8 @@ fn run_update(realign: bool) -> UpdateEnd {
     // The rules — lib32 pairs, pkgbase siblings, version cohorts, (v1.3.1,
     // issue #13) dropped sonames, (v2.1.1, F-30 #67) needed sonames only a held
     // package supplies, (v2.1.2, F-31 #68) new packages pulled in that take over a
-    // held package's libraries, and interpreter folders; see `holds::coupling_demotions`. Runs
+    // held package's libraries, (v2.1.3, F-32 #69) libraries a package ships without
+    // declaring them, and interpreter folders; see `holds::coupling_demotions`. Runs
     // last, so it sees the post-realign buckets and feeds the ignore list below.
     //
     // The fourth rule exists because the first three all match on *names*, and
@@ -2385,10 +2386,35 @@ fn run_update(realign: bool) -> UpdateEnd {
                 .map(|(u, _, _)| u.name.as_str())
                 .chain(held.iter().map(|(u, _, _, _)| u.name.as_str()))
                 .collect();
-            let dropped = holds::dropped_sonames(&data, &pending);
+            let mut dropped = holds::dropped_sonames(&data, &pending);
+
+            // v2.1.3 (F-32, #69): a package that declares no sonames (simdjson)
+            // can still take a library version away. Its library files today, for
+            // every pending update whose upstream version changes; the undeclared
+            // ones join the scan so their users are known.
+            let changing: Vec<&str> = ready
+                .iter()
+                .map(|(u, _, _)| u)
+                .chain(held.iter().map(|(u, _, _, _)| u))
+                .filter(|u| u.old_version.rsplit_once('-').map(|(v, _)| v)
+                    != u.new_version.rsplit_once('-').map(|(v, _)| v))
+                .map(|u| u.name.as_str())
+                .collect();
+            data.shipped_libs = local_db::library_files(&changing);
+            let mut undeclared: Vec<String> = data
+                .shipped_libs
+                .iter()
+                .flat_map(|(p, libs)| {
+                    holds::undeclared_libs(libs, data.installed_provides.get(p).map(Vec::as_slice).unwrap_or(&[]))
+                })
+                .filter(|l| !dropped.contains(l))
+                .collect();
+            undeclared.sort();
+            undeclared.dedup();
+            dropped.extend(undeclared);
             if !dropped.is_empty() {
                 println!(
-                    "{}Checking installed programs for {} library version(s) this update removes...{}",
+                    "{}Checking installed programs for {} library version(s) this update removes or may replace...{}",
                     C_SUBTEXT,
                     dropped.len(),
                     C_RESET

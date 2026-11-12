@@ -434,6 +434,10 @@ pub struct SonameData {
     /// installed. Tells a rebuild made after a new soname existed from one made
     /// before it, for the undeclared need.
     pub new_built: HashMap<String, u64>,
+    /// v2.1.3 (F-32, #69): candidate -> versioned libraries it ships today
+    /// (`libsimdjson.so=34-64`), read from its file list, for candidates whose
+    /// upstream version changes. What the undeclared soname rule reads.
+    pub shipped_libs: HashMap<String, Vec<String>>,
 }
 
 /// Every soname some pending candidate would stop providing.
@@ -859,6 +863,76 @@ pub fn pulled_in_coupling_demotions(
     out
 }
 
+/// Pure. Of the libraries a package ships today, those it does not declare: no
+/// `%PROVIDES%` entry for the same library at the same word size. A declared
+/// library is the soname rule's (#13), which reads the new version's provides;
+/// only for an undeclared one is there nothing to compare against.
+pub fn undeclared_libs(shipped: &[String], declared: &[String]) -> Vec<String> {
+    shipped
+        .iter()
+        .filter(|s| {
+            let Some(key) = soname_lib_and_arch(s) else { return false };
+            !declared.iter().any(|d| soname_lib_and_arch(d) == Some(key))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Couple a Ready library package that declares no sonames to the held
+/// package rebuilt for its new version (F-32, #69).
+///
+/// Seen on 2026-11-11, Javier's run of 2.1.2: simdjson 1:5.0.5 -> 2:5.1.1
+/// went in (Ready) and replaced `libsimdjson.so.34` with `.so.36`, while
+/// nodejs, its only user, was held with openssl. `node` stopped starting:
+/// *"libsimdjson.so.34: cannot open shared object file"*. The soname rule
+/// (#13) compares the provides of the installed and the new version, and
+/// simdjson declares none, so it saw no library go; the sync database does
+/// not list files, so the new `.so` number is not knowable in advance.
+///
+/// What is knowable: the library files the package ships today (its file
+/// list), who links them (the #16 scan), and build dates. A Ready package
+/// whose upstream version changes, shipping a library it does not declare,
+/// waits for a held package that links that library today and whose new
+/// build is no older than the library's: rebuilt after it, so most likely
+/// rebuilt for it (nodejs 26.13.1 was built a week after simdjson 5.1.1).
+/// A user with no update pending, or one built before, holds nothing: Arch
+/// rebuilds every user of a library whose number changes. It errs toward a
+/// wait when the number did not change, never toward a broken program.
+pub fn undeclared_soname_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    data: &SonameData,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for cand in ready {
+        let Some(libs) = data.shipped_libs.get(&cand.name) else { continue };
+        if upstream(&cand.old_version) == upstream(&cand.new_version) {
+            continue;
+        }
+        let declared = data.installed_provides.get(&cand.name).cloned().unwrap_or_default();
+        let libs = undeclared_libs(libs, &declared);
+        let Some(built) = data.new_built.get(&cand.name) else { continue };
+        let users: Vec<&CouplingPkg> = held
+            .iter()
+            .filter(|h| h.name != cand.name)
+            .filter(|h| data.new_built.get(&h.name).is_some_and(|b| b >= built))
+            .filter(|h| {
+                libs.iter().any(|l| data.linked_by.get(l).is_some_and(|by| by.contains(&h.name)))
+            })
+            .collect();
+        if let Some(h) = longest_held(&users) {
+            out.push((cand.name.clone(), h.name.clone()));
+        }
+    }
+    out
+}
+
+/// A pacman version without its pkgrel, the epoch kept: `1:5.0.5-1` ->
+/// `1:5.0.5`. A rebuild (pkgrel only) never changes what a library is called.
+fn upstream(version: &str) -> &str {
+    version.rsplit_once('-').map(|(v, _)| v).unwrap_or(version)
+}
+
 /// v2.1.0 (F-25, #61): the interpreters whose compiled modules install into a
 /// folder named for the interpreter's version series — `usr/lib/perl5/5.42/`,
 /// `usr/lib/python3.14/` — with how many version components make the series.
@@ -942,6 +1016,7 @@ pub fn coupling_demotions(
         .chain(soname_coupling_demotions(ready, held, soname))
         .chain(needs_coupling_demotions(ready, held, soname))
         .chain(pulled_in_coupling_demotions(ready, held, soname))
+        .chain(undeclared_soname_demotions(ready, held, soname))
         .chain(module_dir_coupling_demotions(ready, held, soname))
     {
         if claimed.insert(name.clone()) {
@@ -2283,5 +2358,104 @@ mod tests {
         data.new_depends.insert("dotnet-crypto".into(), vec!["openssl-3".into()]);
         assert!(pulled_in_coupling_demotions(&ready, &held, &data)
             .contains(&("dotnet-runtime".to_string(), "openssl".to_string())));
+    }
+
+    /// Javier's 2.1.2 run, 2026-11-11 20:34: simdjson (no sonames declared)
+    /// Ready on its way to `.so.36`, nodejs, its only user, held with openssl.
+    fn simdjson_desktop() -> (Vec<CouplingPkg>, Vec<CouplingPkg>, SonameData) {
+        let (mut ready, mut held, mut data) = openssl_3_desktop();
+        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        data.installed_provides.insert("simdjson".into(), v(&[]));
+        data.installed_provides.insert("nodejs".into(), v(&[]));
+        data.installed_depends.insert("simdjson".into(), v(&["libgcc", "libstdc++"]));
+        data.installed_depends.insert("nodejs".into(), v(&["openssl", "simdjson", "zlib"]));
+        data.new_provides.insert("simdjson".into(), v(&[]));
+        data.new_provides.insert("nodejs".into(), v(&[]));
+        data.new_depends.insert("simdjson".into(), v(&["libgcc", "libstdc++"]));
+        data.new_depends.insert("nodejs".into(), v(&["openssl", "simdjson", "zlib"]));
+        data.new_built.insert("simdjson".into(), 1793810820);
+        data.new_built.insert("nodejs".into(), 1794421552);
+        data.shipped_libs.insert("simdjson".into(), v(&["libsimdjson.so=34-64", "libsimdjson.so=34.0.0-64"]));
+        data.linked_by.insert("libsimdjson.so=34-64".into(), v(&["nodejs"]));
+        ready.push(pkg("simdjson", "1:5.0.5-1", "2:5.1.1-1", None, 0));
+        held.push(pkg("nodejs", "26.12.1-1", "26.13.1-1", None, 17));
+        (ready, held, data)
+    }
+
+    #[test]
+    fn the_2_1_2_rules_let_simdjson_through() {
+        // The failing direction: every rule 2.1.2 had leaves simdjson Ready,
+        // and node lost libsimdjson.so.34.
+        let (ready, held, data) = simdjson_desktop();
+        let old: Vec<(String, String)> = pkgbase_coupling_demotions(&ready, &held)
+            .into_iter()
+            .chain(cohort_coupling_demotions(&ready, &held))
+            .chain(soname_coupling_demotions(&ready, &held, &data))
+            .chain(needs_coupling_demotions(&ready, &held, &data))
+            .chain(pulled_in_coupling_demotions(&ready, &held, &data))
+            .chain(module_dir_coupling_demotions(&ready, &held, &data))
+            .collect();
+        assert!(!old.iter().any(|(n, _)| n == "simdjson"), "{old:?}");
+    }
+
+    #[test]
+    fn simdjson_waits_for_nodejs() {
+        let (mut ready, mut held, data) = simdjson_desktop();
+        let why = settle(&mut ready, &mut held, &data);
+        assert_eq!(why.get("simdjson").map(String::as_str), Some("nodejs"));
+        assert_eq!(ready.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["libbpf"]);
+    }
+
+    #[test]
+    fn a_rebuild_of_the_same_version_holds_nothing() {
+        let (mut ready, held, data) = simdjson_desktop();
+        let s = ready.iter_mut().find(|p| p.name == "simdjson").unwrap();
+        s.old_version = "2:5.1.1-1".into();
+        s.new_version = "2:5.1.1-2".into();
+        assert!(undeclared_soname_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_user_built_before_the_library_holds_nothing() {
+        let (ready, held, mut data) = simdjson_desktop();
+        data.new_built.insert("nodejs".into(), 1793810819);
+        assert!(undeclared_soname_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_user_moving_in_the_same_run_holds_nothing() {
+        let (mut ready, mut held, data) = simdjson_desktop();
+        let n = held.iter().position(|h| h.name == "nodejs").unwrap();
+        ready.push(held.remove(n));
+        assert!(undeclared_soname_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_declared_library_is_left_to_the_soname_rule() {
+        let (ready, held, mut data) = simdjson_desktop();
+        data.installed_provides.insert("simdjson".into(), vec!["libsimdjson.so=34-64".into()]);
+        assert!(undeclared_soname_demotions(&ready, &held, &data).is_empty());
+        assert_eq!(
+            undeclared_libs(&["libsimdjson.so=34-64".into(), "libfoo.so=1-32".into()], &["libsimdjson.so=34-64".into()]),
+            vec!["libfoo.so=1-32".to_string()]
+        );
+    }
+
+    #[test]
+    fn libmupdf_waits_for_zathura_pdf_mupdf() {
+        // The second break the same night: zathura's PDF plugin linked
+        // libmupdf.so.28.5; libmupdf 1.28.6 (no sonames declared) took it.
+        let (mut ready, mut held, mut data) = simdjson_desktop();
+        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        data.installed_provides.insert("libmupdf".into(), v(&[]));
+        data.installed_provides.insert("zathura-pdf-mupdf".into(), v(&[]));
+        data.shipped_libs.insert("libmupdf".into(), v(&["libmupdf.so=28.5-64", "libmupdfcpp.so=28.5-64"]));
+        data.linked_by.insert("libmupdf.so=28.5-64".into(), v(&["zathura-pdf-mupdf"]));
+        data.new_built.insert("libmupdf".into(), 1794353233);
+        data.new_built.insert("zathura-pdf-mupdf".into(), 1794353942);
+        ready.push(pkg("libmupdf", "1.28.5-2", "1.28.6-1", None, 0));
+        held.push(pkg("zathura-pdf-mupdf", "2026.07.18-6", "2026.07.18-7", None, 5));
+        let why = settle(&mut ready, &mut held, &data);
+        assert_eq!(why.get("libmupdf").map(String::as_str), Some("zathura-pdf-mupdf"));
     }
 }

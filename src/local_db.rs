@@ -272,6 +272,64 @@ fn load_file_lists() -> HashMap<String, Vec<String>> {
     out
 }
 
+/// v2.1.3 (F-32, #69): the library versions each of `pkgs` ships today, read
+/// from its file list and written as soname provides (`usr/lib/libsimdjson.so.34`
+/// -> `libsimdjson.so=34-64`). For packages that do not declare their sonames
+/// (simdjson declares none), this is the only way to know what a pending
+/// update may take away. Reads only the named packages' lists.
+pub fn library_files(pkgs: &[&str]) -> HashMap<String, Vec<String>> {
+    let wanted: std::collections::HashSet<&str> = pkgs.iter().copied().collect();
+    let mut out = HashMap::new();
+    if wanted.is_empty() {
+        return out;
+    }
+    let Ok(entries) = fs::read_dir(LOCAL_DB_DIR) else { return out };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Ok(desc) = fs::read_to_string(dir.join("desc")) else { continue };
+        let Some((name, _)) = parse_desc(&desc) else { continue };
+        if !wanted.contains(name.as_str()) {
+            continue;
+        }
+        let Ok(files) = fs::read_to_string(dir.join("files")) else { continue };
+        let libs = shipped_sonames(&parse_files(&files));
+        if !libs.is_empty() {
+            out.insert(name, libs);
+        }
+    }
+    out
+}
+
+/// Pure. Versioned shared libraries on the loader's default path, as soname
+/// provides: `usr/lib/libfoo.so.3` -> `libfoo.so=3-64`, `usr/lib32/libfoo.so.3`
+/// -> `libfoo.so=3-32`. Every versioned name is kept (`.so.36` and `.so.36.0.0`
+/// alike): only the one a program names in `DT_NEEDED` will ever match.
+pub fn shipped_sonames(files: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = files
+        .iter()
+        .filter_map(|f| {
+            let (rest, bits) = if let Some(r) = f.strip_prefix("usr/lib/") {
+                (r, "64")
+            } else if let Some(r) = f.strip_prefix("usr/lib32/") {
+                (r, "32")
+            } else {
+                return None;
+            };
+            if rest.contains('/') {
+                return None;
+            }
+            let (base, ver) = rest.split_once(".so.")?;
+            if ver.is_empty() || !ver.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                return None;
+            }
+            Some(format!("{}.so={}-{}", base, ver, bits))
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// The `%FILES%` block of a local `files` entry: one path per line until a
 /// blank line or the next key (`%BACKUP%` follows it).
 fn parse_files(contents: &str) -> Vec<String> {
@@ -504,4 +562,20 @@ libbluray.so=3-64
         eprintln!("owners of usr/lib/perl5/5.42/: {:?}", o.get("usr/lib/perl5/5.42/"));
     }
 
+    #[test]
+    fn shipped_sonames_reads_the_library_files() {
+        let files: Vec<String> = [
+            "usr/", "usr/lib/", "usr/lib/libsimdjson.so", "usr/lib/libsimdjson.so.34",
+            "usr/lib/libsimdjson.so.34.0.0", "usr/lib/cmake/simdjson/x.cmake",
+            "usr/lib32/libfoo.so.2", "usr/lib/python3.14/libbar.so.1", "usr/share/libbaz.so.9",
+            "usr/lib/libweird.so.1abc",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            shipped_sonames(&files),
+            vec!["libfoo.so=2-32", "libsimdjson.so=34-64", "libsimdjson.so=34.0.0-64"]
+        );
+    }
 }
