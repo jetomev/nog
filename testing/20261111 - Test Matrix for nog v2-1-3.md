@@ -46,21 +46,21 @@ A finding during his test goes into the same unpublished 2.1.3 (rebuild, re-test
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 3.1 | `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.2 → 2.1.3); no `.sig` question | | |
-| 3.2 | `nog --version` | `nog 2.1.3` | | |
-| 3.3 | `nog unlock simdjson libmupdf` | both locks gone | | |
-| 3.4 | `nog remove litehtml0.9 litehtml0.9-debug` | only those two removed | | |
-| 3.5 | `nog update`, answer **n** | simdjson Held `coupled to nodejs`; libmupdf Held `coupled to zathura-pdf-mupdf`; gumbo-parser Ready; answering n changes nothing | | |
-| 3.6 | `nog update`, answer **y** | the run finishes (`Done · update`), no "conflicting files" | | |
-| 3.7 | `node --version` | `v26.12.1` | | |
-| 3.8 | `ldd /usr/lib/zathura/libpdf-mupdf.so \| grep "not found"` | prints nothing | | |
+| 3.1 | `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.2 → 2.1.3); no `.sig` question | **PASS** | 2.1.3 installed (`nog-2.1.3-1` in the local database) |
+| 3.2 | `nog --version` | `nog 2.1.3` | **PASS** | his run's banner reads `nog v2.1.3` |
+| 3.3 | `nog unlock simdjson libmupdf` | both locks gone | **PASS** | 21:11; run twice more later, nothing left to unlock |
+| 3.4 | `nog remove litehtml0.9 litehtml0.9-debug` | only those two removed | **PASS** | 21:47, only those two removed |
+| 3.5 | `nog update`, answer **n** | simdjson Held `coupled to nodejs`; libmupdf Held `coupled to zathura-pdf-mupdf`; gumbo-parser Ready; answering n changes nothing | **PASS** | 21:49: Ready had only gumbo-parser 0.13.2-1 → 0.14.1-1 (32 days past window); simdjson Held `17 days · coupled to nodejs`; nodejs and dotnet Held with openssl. libmupdf read `5 days remaining`, not `coupled to zathura-pdf-mupdf`: its 1.28.6 was still inside its own window, so it was never Ready and the coupling rules (which act on Ready packages) had nothing to do. Held either way; noted, not failed |
+| 3.6 | `nog update`, answer **y** | the run finishes (`Done · update`), no "conflicting files" | **PASS** | log `20261111-214941 update.log`: only gumbo-parser upgraded, no conflicting files, `Done · update`, exit 0 |
+| 3.7 | `node --version` | `v26.12.1` | **PASS** | `v26.12.1` |
+| 3.8 | `ldd /usr/lib/zathura/libpdf-mupdf.so \| grep "not found"` | prints nothing | **PASS** | 0 missing; `libgumbo.so.4` present |
 
 ## §4 · Claude, after Javier's install
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | the damage check over his 3.6 run (old packages from the cache, every installed ELF) | no program or plugin asks for a removed library file | | |
-| 4.2 | the same check after Saturday's round | the same | | |
+| 4.1 | the damage check over his 3.6 run (old packages from the cache, every installed ELF) | no program or plugin asks for a removed library file | **PASS** | the run removed `libgumbo.so.3` and `.so.3.0.0` only; no program or plugin asks for either (`logs/damage-20261111-2149-run.log`) |
+| 4.2 | the same check after Saturday's round | the same | **DEFERRED** | Saturday 2026-11-14, after the round |
 
 ## Findings
 
