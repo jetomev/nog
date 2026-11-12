@@ -42,7 +42,7 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **Javier's 2.1.3 retry PASSED** (21:11–21:50, log `20261111-214941 update.log`): unlock, orphan litehtml0.9 removed, only gumbo-parser upgraded, no conflicting files, `node` v26.12.1, zathura plugin 0 missing; damage check clean (`logs/damage-20261111-2149-run.log`). Sheet: 19 checks, 18 PASS, 1 DEFERRED (Saturday's round). libmupdf read `5 days remaining` (inside its own window, never Ready): noted, not failed
 - [ ] **F-33 #70** for a later version: say when a `blocked by` package is an orphan nothing uses, with the way out
 - [x] **AUR 2.1.3-1 LIVE** — Javier pushed `734d00e` at 21:55 (Claude's push was refused by its own safety check: a relayed yes is not his); the package page reads `nog 2.1.3-1` (the info API lagged). #67 #68 #69 closed with the story; #70 open. Vault: `Nog/2026-11-11 - nog 2.1.3 on the AUR, three holes closed in one night` (hubs + links rebuilt). README/ROADMAP say released
-- [ ] **kognogos.org card** committed in homelab `cc39178`; Claude's send refused (production deploy) → Javier runs `bash ~/Programs/homelab/scripts/publish-site.sh`
+- [x] **kognogos.org card live** — homelab `cc39178`, published by Javier with `scripts/publish-site.sh` at 22:00 (OK; backup `~/site-backups/index.html.bak-20261111-220021`)
 - [ ] **kognogos-dev 2.1.0 → 2.1.3 before Saturday's round** — Javier: `ssh -t kognogos-dev nog install nog` (yay builds 2.1.3 from the AUR; an explicit install is not held by nog's window), then `ssh kognogos-dev nog --version`
 - [ ] Saturday 2026-11-14 after the round: the damage check (sheet 4.2)
 
