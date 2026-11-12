@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "November 2026" "nog v2.1.2" "User Commands"
+.TH NOG 1 "November 2026" "nog v2.1.3" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -967,6 +967,20 @@ pkgbase siblings with it. Found on 2026-11-11: \fBdotnet-runtime\fR needing
 in the package databases, so a takeover sharing no library version with the
 held package is not seen. The way through is \fBnog update --promote
 openssl\fR.
+.SS Libraries a package does not declare (v2.1.3, F-32, issue #69)
+Some library packages list no library versions in their package data
+(\fBsimdjson\fR, \fBlibmupdf\fR), so the soname rule cannot see them take one
+away. For every pending update whose upstream version changes, nog reads the
+library files the package ships today, and which installed programs link
+them. A Ready package shipping such a library waits for a held package that
+links it and whose new version was built after the library's new version
+(rebuilt for it). A rebuild with the same version, a user with no update
+pending, a user built earlier, or a user moving in the same run holds
+nothing. It errs toward a wait: a library that kept its number can wait for
+nothing until its user's hold ends. Found on 2026-11-11: simdjson
+\fB.so.34\fR \(-> \fB.so.36\fR went in while nodejs was held, and
+\fBnode\fR would not start; libmupdf did the same to zathura's PDF plugin.
+The way through is \fBnog update --promote nodejs\fR.
 .SS Groups (advanced)
 The optional
 .B [groups]

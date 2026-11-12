@@ -2,6 +2,19 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v2.1.3 — November 2026
+
+**A library that doesn't declare its versions now waits for the held program rebuilt for it** (F-32 [#69](https://github.com/jetomev/nog/issues/69)). Found in the maintainer's own run of the locally built 2.1.2 on 2026-11-11, before it went to the AUR.
+
+- **What broke.** The run finished cleanly, but simdjson went from `libsimdjson.so.34` to `.so.36` while nodejs, rebuilt for the new one but held with openssl, still needed `.so.34`: `node` would not start. libmupdf did the same to zathura's PDF plugin. nog's soname rule (v1.3.1) exists for exactly this, but it reads the library versions a package declares, and these two declare none.
+- **The new rule.** For every pending update whose upstream version changes, nog reads the library files the package ships today and which installed programs link them. A Ready package shipping a library it doesn't declare waits for a held program that links it and whose new version was built after the library's (`coupled to nodejs`). A rebuild of the same version, a program with no update pending, one built earlier, or one moving in the same run hold nothing.
+- **What it costs.** It errs toward a wait. Replayed over that night's real run: 7 of 180 Ready packages would have waited, both real breaks among them; the other 5 kept their library number and would have waited for nothing until their users' holds ended.
+- **Repairing a system hit before 2.1.3** is in the README's Troubleshooting: the old library back from pacman's cache, `nog lock` until the program's update arrives.
+
+Tests: 319 → 327 (the end-to-end one seen failing with the rule switched off). Warnings unchanged at 6.
+
+**2.1.1 and 2.1.2 never went to the AUR**: the AUR moves from 2.1.0 to 2.1.3 in one step, with all three fixes.
+
 ### v2.1.2 — November 2026
 
 **A package that would bring in a new package taking over a held package's files now waits for it** (F-31 [#68](https://github.com/jetomev/nog/issues/68)). Found in the maintainer's own run of the locally built 2.1.1 on 2026-11-11, before it went to the AUR.

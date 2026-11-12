@@ -2,11 +2,17 @@
 
 *The README carries the upcoming work and the two most recent releases; everything older lives here, newest-first (the [locked convention](../README.md#roadmap)).*
 
-### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; the AUR after Javier's local test
+### v2.1.3 — libraries a package does not declare (F-32 [#69](https://github.com/jetomev/nog/issues/69)) — tagged 2026-11-11; the AUR after Javier's local test
+
+- [x] For every pending update whose upstream version changes, the library files it ships today join the linkage scan; a Ready one shipping an undeclared library waits for a held package that links it and was rebuilt after it
+- [x] 319 → 327 tests (the end-to-end one seen failing with the rule off), warnings 6; replayed over Javier's real 20:34 run (`scripts/replay-f32.py`): 7 of 180 Ready held, both real breaks among them (simdjson → nodejs, libmupdf → zathura-pdf-mupdf), 5 that kept their number would have waited needlessly
+- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-3.md)); AUR 2.1.3-1 only on his pass; #67, #68 and #69 closed then
+
+### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; never on the AUR: Javier's run found F-32, shipped in 2.1.3
 
 - [x] A Ready package whose new version brings in a package not installed yet, one providing a library version a held package owns today and drops, waits with the held package; its pkgbase siblings follow
 - [x] 313 → 319 tests (the end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-212.sh` OK (dotnet-runtime and dotnet-host Ready → Held; 2 moved, none the other way; pacman's view worked out from the databases: nothing new for the Ready set takes a held package's files, while the old list pulls `openssl-3` in)
-- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-2.md)); AUR 2.1.2-1 only on his pass; #67 and #68 closed then
+- [x] Javier installed the locally built package and ran it (2026-11-11 20:34): no conflicting files, the update finished; but simdjson and libmupdf, which declare no library versions, left node and zathura's PDF plugin without theirs (F-32) → 2.1.3; 2.1.2 never goes to the AUR
 
 ### v2.1.1 — the reverse soname rule (F-30 [#67](https://github.com/jetomev/nog/issues/67)) — tagged 2026-11-10; never on the AUR: Javier's test found F-31, shipped in 2.1.2
 

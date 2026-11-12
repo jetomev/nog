@@ -9,7 +9,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 2.1.2](https://img.shields.io/badge/Version-2.1.2-purple.svg)
+![Version: 2.1.3](https://img.shields.io/badge/Version-2.1.3-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -51,6 +51,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Linchpins** *(v2.0.0, [#5](https://github.com/jetomev/nog/issues/5))* — when `glibc` or `gcc-libs` has a held update that changes its series (2.44 → 2.45, which brings new `GLIBC_2.45` symbol versions), the fast-lane packages built after that new build are held with it (*"12 days · built after the new glibc, moves with it"*), because they were probably linked against it and would fail at runtime. A same-series rebuild moves nothing. The way out is to promote the linchpin, never to downgrade the fast lane
 - **Libraries only a held package brings** *(v2.1.1, [#67](https://github.com/jetomev/nog/issues/67))* — the soname rule turned around. A Ready package whose new version needs a library only a held package will bring (curl needing `libcrypto.so=4-64` while openssl 4 is held) waits with it (*"18 days · coupled to openssl"*). Packages rebuilt for the new library that do not declare it are caught too: when a held package moves a library to a new version, whatever uses the old one today and was built after the new one existed waits with it
 - **New packages that take a held package's files** *(v2.1.2, [#68](https://github.com/jetomev/nog/issues/68))* — a Ready package whose new version brings in a package not installed yet, one that carries a library version a held package still owns (`dotnet-runtime` pulling in `openssl-3` while openssl 3.6.5 is held), waits with the held package. Both owning the same files is something pacman refuses outright
+- **Libraries a package does not declare** *(v2.1.3, [#69](https://github.com/jetomev/nog/issues/69))* — some library packages list no library versions at all (simdjson, libmupdf). nog reads the library files they ship today and who links them; a Ready one whose held user was rebuilt for its new version waits with that user, so `node` is never left asking for `libsimdjson.so.34`
 - **Interpreters and their module folders** *(v2.1.0, [#61](https://github.com/jetomev/nog/issues/61))* — perl and python install compiled modules into a folder named for their version (`/usr/lib/perl5/5.42/`). When one of them changes series, it waits for every installed package with files in the old folder (*"1 day · coupled to apparmor"*), or reads `blocked by` a package with no rebuild yet. Arch states this link only in the paths, so nog reads the file lists, and only when such a move is pending
 - **One install command for every source** *(v1.9.0)* — `nog install <name>` looks in the repositories, then the AUR, then Flatpak, then Snap, and the table says which one answered before anything is downloaded or built. A Flatpak is matched exactly (the app ID, its last word, or the app's name — *gimp*, *spotify*); when several apps answer to a name nog numbers them and asks which one. `flatpak/<app-id>` and `snap/<name>` name the source. A backend that isn't set up is offered, once, to a person at the keyboard — never installed unasked
 - **What nog installs, nog removes** *(v1.9.0)* — `nog remove` recognises an installed Flatpak or snap by name and hands it to its own tool
@@ -153,7 +154,7 @@ Every member of a group inherits the highest tier any member has. You can use th
 
 The driver modules themselves don't need grouping. Once the kernel and headers agree, their rebuilds succeed on their own.
 
-Some links nog finds on its own, without a group: packages built from one recipe, a `lib32-` package and its 64-bit half, a library version another package still needs, *(v2.1.1)* a library version only a held package will bring, *(v2.1.2)* a new package that would take over a held package's library files, glibc's series *(v2.0.0)*, and *(v2.1.0)* perl or python moving to a new version: they wait for every installed package with modules in the old version's folder (`/usr/lib/perl5/5.42/`), so nothing is left where the new interpreter never looks.
+Some links nog finds on its own, without a group: packages built from one recipe, a `lib32-` package and its 64-bit half, a library version another package still needs, *(v2.1.1)* a library version only a held package will bring, *(v2.1.2)* a new package that would take over a held package's library files, *(v2.1.3)* a library a package ships without declaring it, glibc's series *(v2.0.0)*, and *(v2.1.0)* perl or python moving to a new version: they wait for every installed package with modules in the old version's folder (`/usr/lib/perl5/5.42/`), so nothing is left where the new interpreter never looks.
 
 ---
 
@@ -443,7 +444,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "2.1.2"
+version = "2.1.3"
 log_level = "info"
 
 [paths]
@@ -546,7 +547,7 @@ nog/
 |   |-- maint.rs          # What each source leaves behind: orphans, build trees, the choice  (v2.0.0)
 |   |-- history.rs        # Reads nog's own CSV logs  (v2.0.0)
 |   |-- tiers.rs          # Tier classification, including auto-coupling and [groups]
-|   |-- holds.rs          # Hold evaluation, the coupling rules, the linchpin rule (#5, v2.0.0), interpreters (#61, v2.1.0), needed libraries (#67, v2.1.1), packages pulled in (#68, v2.1.2), the foreign fence
+|   |-- holds.rs          # Hold evaluation, the coupling rules, the linchpin rule (#5, v2.0.0), interpreters (#61, v2.1.0), needed libraries (#67, v2.1.1), packages pulled in (#68, v2.1.2), undeclared libraries (#69, v2.1.3), the foreign fence
 |   |-- sightings.rs      # When each update was first seen, so holds always end  (v1.5.2)
 |   |-- cache.rs          # nog clean: pacman's version order, per-tier cache retention  (v1.5.5)
 |   |-- local_db.rs       # Reads pacman's local database: dependency graph (v1.3.1), who links what (v1.4.2)
@@ -775,6 +776,20 @@ library version in common can still get through; if you see this error on
 v2.1.2, please file a bug with the two package names. To move everything now:
 `nog update --promote openssl`.
 
+### After an update: `error while loading shared libraries: <lib>.so.N: cannot open shared object file`
+
+A program that nog held needs an older version of a library that went in. Seen on
+2026-11-11: simdjson moved from `libsimdjson.so.34` to `.so.36` while nodejs
+(rebuilt for it, but held with openssl) still needed `.so.34`, so `node` would not
+start; libmupdf did the same to zathura's PDF plugin. Both libraries list no
+library versions in their package data, so nog's soname rule could not see them.
+
+**As of v2.1.3, nog reads the library files such a package ships** and holds it
+with the held program rebuilt for its new version (`coupled to nodejs`). To repair
+a system hit before that: put the old library back from pacman's cache with
+`nog install /var/cache/pacman/pkg/<lib>-<old version>-x86_64.pkg.tar.zst`, then
+`nog lock <lib>` until the program's own update arrives, and `nog unlock <lib>` after.
+
 ### pacman's log shows only one ignored package
 
 After an incident you may check `/var/log/pacman.log` and find:
@@ -802,26 +817,25 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v2.1.2** — 2026-11-11: a package that would bring in a new package taking over a held package's files waits for it ([#68](https://github.com/jetomev/nog/issues/68), found in the maintainer's own test of 2.1.1). The AUR goes from 2.1.0 straight to 2.1.2.
+> **v2.1.3** — 2026-11-11: a library that doesn't declare its versions (simdjson, libmupdf) waits for the held program rebuilt for it ([#69](https://github.com/jetomev/nog/issues/69), found in the maintainer's own run of 2.1.2). The AUR goes from 2.1.0 straight to 2.1.3, with 2.1.1's and 2.1.2's fixes.
 >
-> **v2.1.1** — 2026-11-10: a package that needs a library only a held package brings waits for it, so a held openssl no longer makes pacman refuse the whole update ([#67](https://github.com/jetomev/nog/issues/67)). On GitHub only.
+> **v2.1.2** — 2026-11-11: a package that would bring in a new package taking over a held package's files waits for it ([#68](https://github.com/jetomev/nog/issues/68)). On GitHub only.
 
-### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; the AUR after Javier's local test
+### v2.1.3 — libraries a package does not declare (F-32 [#69](https://github.com/jetomev/nog/issues/69)) — tagged 2026-11-11; the AUR after Javier's local test
+
+- [x] For every pending update whose upstream version changes, the library files it ships today join the linkage scan; a Ready one shipping an undeclared library waits for a held package that links it and was rebuilt after it
+- [x] 319 → 327 tests (the end-to-end one seen failing with the rule off), warnings 6; replayed over Javier's real 20:34 run (`scripts/replay-f32.py`): 7 of 180 Ready held, both real breaks among them (simdjson → nodejs, libmupdf → zathura-pdf-mupdf), 5 that kept their number would have waited needlessly
+- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-3.md)); AUR 2.1.3-1 only on his pass; #67, #68 and #69 closed then
+
+### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; never on the AUR: Javier's run found F-32, shipped in 2.1.3
 
 - [x] A Ready package whose new version brings in a package not installed yet, one providing a library version a held package owns today and drops, waits with the held package; its pkgbase siblings follow
 - [x] 313 → 319 tests (the end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-212.sh` OK (dotnet-runtime and dotnet-host Ready → Held; 2 moved, none the other way; pacman's view worked out from the databases: nothing new for the Ready set takes a held package's files, while the old list pulls `openssl-3` in)
-- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-2.md)); AUR 2.1.2-1 only on his pass; #67 and #68 closed then
-
-### v2.1.1 — the reverse soname rule (F-30 [#67](https://github.com/jetomev/nog/issues/67)) — tagged 2026-11-10; never on the AUR: Javier's test found F-31, shipped in 2.1.2
-
-- [x] A Ready package whose new version needs a library (or an exact versioned provide) that only a held package will bring waits with it, coupled and on the same countdown; the declared need from the package data, the undeclared one from a held library's version bump plus who uses the old one and was built after the new
-- [x] nog reads the package databases' `%DEPENDS%` (it read only `%PROVIDES%`)
-- [x] 304 → 313 tests (each new end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-211.sh` OK (curl, git, krb5, libssh2, openssh, sudo, qca-qt6 Ready → Held, coupled to openssl; 62 moved in all, none the other way)
-- [x] Javier installed the locally built package and ran it (2026-11-11 20:02): the openssl clash gone, but pacman refused on `openssl-3`'s files (F-31) → 2.1.2; 2.1.1 never goes to the AUR
+- [x] Javier installed the locally built package and ran it (2026-11-11 20:34): no conflicting files, the update finished; but simdjson and libmupdf, which declare no library versions, left node and zathura's PDF plugin without theirs (F-32) → 2.1.3; 2.1.2 never goes to the AUR
 
 ### Later
 
-- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. Since v2.1.1 ([#67](https://github.com/jetomev/nog/issues/67)) the other direction too: a Ready package that *needs* a library, or an exact versioned provide, that only a held package will bring waits for it. Since v2.1.2 ([#68](https://github.com/jetomev/nog/issues/68)) also a new package pulled in that would take over a held package's library files. What remains is the versioned `=` dependency on a package's own name and version, where the declaration is exact rather than a provide.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. Since v2.1.1 ([#67](https://github.com/jetomev/nog/issues/67)) the other direction too: a Ready package that *needs* a library, or an exact versioned provide, that only a held package will bring waits for it. Since v2.1.2 ([#68](https://github.com/jetomev/nog/issues/68)) also a new package pulled in that would take over a held package's library files, and since v2.1.3 ([#69](https://github.com/jetomev/nog/issues/69)) a library a package ships without declaring it. What remains is the versioned `=` dependency on a package's own name and version, where the declaration is exact rather than a provide.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog rollback` — undo a recent update using pacman's cache
 - [ ] A Chaotic-AUR binary package
@@ -842,6 +856,19 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v2.1.3 — November 2026
+
+**A library that doesn't declare its versions now waits for the held program rebuilt for it** (F-32 [#69](https://github.com/jetomev/nog/issues/69)). Found in the maintainer's own run of the locally built 2.1.2 on 2026-11-11, before it went to the AUR.
+
+- **What broke.** The run finished cleanly, but simdjson went from `libsimdjson.so.34` to `.so.36` while nodejs, rebuilt for the new one but held with openssl, still needed `.so.34`: `node` would not start. libmupdf did the same to zathura's PDF plugin. nog's soname rule (v1.3.1) exists for exactly this, but it reads the library versions a package declares, and these two declare none.
+- **The new rule.** For every pending update whose upstream version changes, nog reads the library files the package ships today and which installed programs link them. A Ready package shipping a library it doesn't declare waits for a held program that links it and whose new version was built after the library's (`coupled to nodejs`). A rebuild of the same version, a program with no update pending, one built earlier, or one moving in the same run hold nothing.
+- **What it costs.** It errs toward a wait. Replayed over that night's real run: 7 of 180 Ready packages would have waited, both real breaks among them; the other 5 kept their library number and would have waited for nothing until their users' holds ended.
+- **Repairing a system hit before 2.1.3** is in the README's Troubleshooting: the old library back from pacman's cache, `nog lock` until the program's update arrives.
+
+Tests: 319 → 327 (the end-to-end one seen failing with the rule switched off). Warnings unchanged at 6.
+
+**2.1.1 and 2.1.2 never went to the AUR**: the AUR moves from 2.1.0 to 2.1.3 in one step, with all three fixes.
+
 ### v2.1.2 — November 2026
 
 **A package that would bring in a new package taking over a held package's files now waits for it** (F-31 [#68](https://github.com/jetomev/nog/issues/68)). Found in the maintainer's own run of the locally built 2.1.1 on 2026-11-11, before it went to the AUR.
@@ -853,16 +880,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 Tests: 313 → 319 (the end-to-end one seen failing with the rule switched off). Warnings unchanged at 6. On the test desktop that day: dotnet-runtime and dotnet-host move to Held, nothing else changes. The check, read only: [scripts/dry-run-212.sh](scripts/dry-run-212.sh), which also works out pacman's view from the databases on its own.
 
 **2.1.1 never went to the AUR**: the AUR moves from 2.1.0 to 2.1.2 in one step, with both fixes.
-
-### v2.1.1 — November 2026
-
-**A package that needs a library only a held package brings now waits for it** (F-30 [#67](https://github.com/jetomev/nog/issues/67)). Found on the KognogOS test desktop on 2026-11-10, ahead of the monthly update round.
-
-- **openssl's case.** openssl 4.1.0 was held: kmod, still inside its window, uses the OpenSSL 3 library, and the soname rule (v1.3.1) rightly keeps the two together. But Arch had rebuilt a large part of the repositories against OpenSSL 4, and those rebuilds had cleared their own windows. curl, sudo and openssh say outright that they need `libcrypto.so=4-64`, which only the held openssl brings, so pacman refused the whole update and nothing installed. The soname rule looked one way only, at a Ready package taking away a library something still needs. Now it looks the other way too: a Ready package whose new version needs a library only a held package will bring waits with that package (`18 days · coupled to openssl`), and they clear together.
-- **The rebuilds that don't say so are caught too.** git, krb5 and libssh2 were rebuilt for OpenSSL 4 as well, but name only `openssl`. pacman would have let them through, and they would have landed needing a library that is not there: ssh and git broken, which is worse than a refused update. So when a held package moves a library to a new version (`libcrypto.so` 3 → 4), every Ready package that uses the old one today (declared, or read from its programs since v1.4.2) and was built after the new library existed waits with it. The linchpin rule's reasoning (v2.0.0): built after it, probably linked to it. It errs toward a few days' wait, never toward a broken system. On the test desktop that day: 62 packages wait with openssl (python, Qt, nodejs, ssh, git and the NVIDIA driver among them, the driver probably needlessly: it ships its own OpenSSL 3 plugin), 175 go in.
-- The 32-bit side follows the same rules (`lib32-openssl`, `libcrypto.so=4-32`), and a package held this way can hold the next one in turn (the coupling rules repeat until nothing moves).
-
-Tests: 304 → 313 (the new ones seen failing with the rule switched off). Warnings unchanged at 6. The check on the desktop, read only, the installed 2.1.0 beside the new build: [scripts/dry-run-211.sh](scripts/dry-run-211.sh).
 
 *The complete history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md).*
 

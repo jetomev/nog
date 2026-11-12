@@ -30,31 +30,22 @@
 
 ## §3 · Javier, this desktop — step by step
 
-**Resume here (written 2026-11-11).** The package is built by makepkg from the published GitHub release in `~/Programs/aur-nog/build-212/` (the tests ran inside the build; its checksum and signature checked). Nothing else waits on Claude before this. Hand Javier one step at a time, in plain words: what it does, the one command, what he should see, then wait for his pasted output. Deadline: before the monthly round, **Saturday 2026-11-14, 9 AM**.
-
-1. Install: `nog install ~/Programs/aur-nog/build-212/nog-2.1.2-1-x86_64.pkg.tar.zst` — nog asks his password (pacman underneath) and swaps 2.1.1 for 2.1.2, nothing else.
-2. Version: `nog --version` → `nog 2.1.2`.
-3. Look first: `nog update`, answer **n** at "Begin the handoff?". dotnet-runtime and dotnet-host are now in the Held table.
-4. The real retry, when he says go (tonight, or Saturday's round is this step): `nog update`, answer **y**. pacman's step runs to the end with no "conflicting files".
-5. Then Claude runs §4, fills the Result columns, tallies with `tally-matrix.py`.
-6. Only on his pass: the AUR push of **2.1.2-1** from `~/Programs/aur-nog-remote/` (one push: the 2.1.1 commit there is folded into it, never pushed; ssh agent per `~/.claude/rules/aur.md`; pre-flight pkgdesc ≤ 255 bytes) → close #67 and #68 with the story → kognogos-dev gets 2.1.2 before its round (his command, prepared by Claude) → kognogos.org card + Vault note.
-
-A finding during his test goes into the same unpublished 2.1.2 (rebuild, re-test), never a second AUR push.
+**Resume here → [the 2.1.3 sheet](20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-3.md).** Javier's run of 2.1.2 (2026-11-11 20:34) found F-32 (#69): node and zathura's PDF plugin lost their library. 2.1.2 stays on GitHub only and never goes to the AUR; the fix is 2.1.3, and its sheet carries the install and retry steps.
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 3.1 | `nog install ~/Programs/aur-nog/build-212/nog-2.1.2-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.1 → 2.1.2); no `.sig` question | | |
-| 3.2 | `nog --version` | `nog 2.1.2` | | |
-| 3.3 | `nog update`, answer **n** at "Begin the handoff?" | the Held table has dotnet-runtime `coupled to openssl` and dotnet-host `coupled to dotnet-runtime`, beside openssl and its set; answering n changes nothing | | |
-| 3.4 | `nog update`, answer **y** (his call when: tonight, or Saturday's round) | pacman's step finishes; no `conflicting files`; the Ready packages installed, the Held ones untouched | | |
+| 3.1 | `nog install ~/Programs/aur-nog/build-212/nog-2.1.2-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.1 → 2.1.2); no `.sig` question | **PASS** | 20:34, `20261111-203423 install nog-2.1.2-1-x86_64.pkg.tar.zst.log` |
+| 3.2 | `nog --version` | `nog 2.1.2` | **PASS** | his run's banner reads `nog v2.1.2` |
+| 3.3 | `nog update`, answer **n** at "Begin the handoff?" | the Held table has dotnet-runtime `coupled to openssl` and dotnet-host `coupled to dotnet-runtime`, beside openssl and its set; answering n changes nothing | **N/A** | he went straight to the real run (3.4); its tables show both, held as written |
+| 3.4 | `nog update`, answer **y** (his call when: tonight, or Saturday's round) | pacman's step finishes; no `conflicting files`; the Ready packages installed, the Held ones untouched | **FAIL** | 20:34–20:42, exit 0, no conflicting files, openssl still 3.6.5, openssl-3 not installed. But simdjson (Ready, declares no sonames) took `libsimdjson.so.34` from held nodejs, and libmupdf took `libmupdf.so.28.5` from held zathura-pdf-mupdf: `node` would not start → **F-32** (`logs/damage-20261111-2034-run.log`) |
 
 ## §4 · Claude, after Javier's install
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `NOG_NEW=/usr/bin/nog NOG_OLD=/usr/bin/nog scripts/dry-run-212.sh` (before 3.4) | the installed nog holds the seven and the dotnet pair; R4 nothing new; OK | | |
-| 4.2 | after 3.4: his run's log | `nog: … done`, exit 0; openssl still 3.6.5, openssl-3 not installed | | |
+| 4.1 | `NOG_NEW=/usr/bin/nog NOG_OLD=/usr/bin/nog scripts/dry-run-212.sh` (before 3.4) | the installed nog holds the seven and the dotnet pair; R4 nothing new; OK | **N/A** | 3.4 ran before it; 4.2 reads the run itself |
+| 4.2 | after 3.4: his run's log | `nog: … done`, exit 0; openssl still 3.6.5, openssl-3 not installed | **PASS** | `Done · update`, exit 0; `openssl-3.6.5-1` installed, no `openssl-3`, dotnet-runtime still 10.0.13 |
 
 ## Findings
 
-*(none yet)*
+- **F-32 ([#69](https://github.com/jetomev/nog/issues/69))**, row 3.4: simdjson 1:5.0.5 → 2:5.1.1 and libmupdf 1.28.5 → 1.28.6, Ready, declare no sonames, so the soname rule (#13) never saw `libsimdjson.so.34` and `libmupdf.so.28.5` go; their users nodejs and zathura-pdf-mupdf (rebuilt for the new versions) were held. A full check of every program against every removed library file found exactly those two. Fixed in **2.1.3** (`holds::undeclared_soname_demotions`); 2.1.2 never goes to the AUR.
