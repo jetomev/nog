@@ -817,15 +817,15 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v2.1.3** — 2026-11-11: a library that doesn't declare its versions (simdjson, libmupdf) waits for the held program rebuilt for it ([#69](https://github.com/jetomev/nog/issues/69), found in the maintainer's own run of 2.1.2). The AUR goes from 2.1.0 straight to 2.1.3, with 2.1.1's and 2.1.2's fixes.
+> **v2.1.3** — 2026-11-11: a library that doesn't declare its versions (simdjson, libmupdf) waits for the held program rebuilt for it ([#69](https://github.com/jetomev/nog/issues/69), found in the maintainer's own run of 2.1.2). Released on the AUR the same night, from 2.1.0 straight to 2.1.3, with 2.1.1's and 2.1.2's fixes.
 >
 > **v2.1.2** — 2026-11-11: a package that would bring in a new package taking over a held package's files waits for it ([#68](https://github.com/jetomev/nog/issues/68)). On GitHub only.
 
-### v2.1.3 — libraries a package does not declare (F-32 [#69](https://github.com/jetomev/nog/issues/69)) — tagged 2026-11-11; the AUR after Javier's local test
+### v2.1.3 — libraries a package does not declare (F-32 [#69](https://github.com/jetomev/nog/issues/69)) — released 2026-11-11 (GitHub + AUR, after Javier's run)
 
 - [x] For every pending update whose upstream version changes, the library files it ships today join the linkage scan; a Ready one shipping an undeclared library waits for a held package that links it and was rebuilt after it
 - [x] 319 → 327 tests (the end-to-end one seen failing with the rule off), warnings 6; replayed over Javier's real 20:34 run (`scripts/replay-f32.py`): 7 of 180 Ready held, both real breaks among them (simdjson → nodejs, libmupdf → zathura-pdf-mupdf), 5 that kept their number would have waited needlessly
-- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-3.md)); AUR 2.1.3-1 only on his pass; #67, #68 and #69 closed then
+- [x] Javier installed the locally built package and retried ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-3.md), 2026-11-11 21:11–21:50: 18 PASS, 1 deferred to the monthly round); **AUR 2.1.3-1 pushed 21:55**; #67, #68, #69 closed ([#70](https://github.com/jetomev/nog/issues/70), F-33, open for a later version)
 
 ### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; never on the AUR: Javier's run found F-32, shipped in 2.1.3
 
