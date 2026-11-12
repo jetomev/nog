@@ -9,7 +9,7 @@
 ![Base: Arch Linux](https://img.shields.io/badge/Base-Arch%20Linux-1793d1.svg)
 ![Language: Rust](https://img.shields.io/badge/Language-Rust-dea584.svg)
 ![Status: Stable](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
-![Version: 2.1.1](https://img.shields.io/badge/Version-2.1.1-purple.svg)
+![Version: 2.1.2](https://img.shields.io/badge/Version-2.1.2-purple.svg)
 [![AUR](https://img.shields.io/aur/version/nog?color=1793d1&cacheSeconds=1801)](https://aur.archlinux.org/packages/nog)
 
 > 🛡 **Security** — every release is GPG-signed and every commit is GitHub-Verified. **[Where We Stand](https://github.com/jetomev/KognogOS/blob/main/docs/where-we-stand.md)** covers our response to the 2026 AUR supply-chain attacks and how to check us yourself.
@@ -50,6 +50,7 @@ nog is a wrapper around pacman, not a replacement. Same commands, same flags, sa
 - **Locks** *(v2.0.0)* — `nog lock <pkg>` keeps a package at its installed version until `nog unlock <pkg>`: `nog update` lists it as held, *"locked by you"*, pacman is told to ignore it, and `--promote` never pulls it in. Written to `/etc/nog/locks.toml`, so every user of the computer and nogForge see the same locks
 - **Linchpins** *(v2.0.0, [#5](https://github.com/jetomev/nog/issues/5))* — when `glibc` or `gcc-libs` has a held update that changes its series (2.44 → 2.45, which brings new `GLIBC_2.45` symbol versions), the fast-lane packages built after that new build are held with it (*"12 days · built after the new glibc, moves with it"*), because they were probably linked against it and would fail at runtime. A same-series rebuild moves nothing. The way out is to promote the linchpin, never to downgrade the fast lane
 - **Libraries only a held package brings** *(v2.1.1, [#67](https://github.com/jetomev/nog/issues/67))* — the soname rule turned around. A Ready package whose new version needs a library only a held package will bring (curl needing `libcrypto.so=4-64` while openssl 4 is held) waits with it (*"18 days · coupled to openssl"*). Packages rebuilt for the new library that do not declare it are caught too: when a held package moves a library to a new version, whatever uses the old one today and was built after the new one existed waits with it
+- **New packages that take a held package's files** *(v2.1.2, [#68](https://github.com/jetomev/nog/issues/68))* — a Ready package whose new version brings in a package not installed yet, one that carries a library version a held package still owns (`dotnet-runtime` pulling in `openssl-3` while openssl 3.6.5 is held), waits with the held package. Both owning the same files is something pacman refuses outright
 - **Interpreters and their module folders** *(v2.1.0, [#61](https://github.com/jetomev/nog/issues/61))* — perl and python install compiled modules into a folder named for their version (`/usr/lib/perl5/5.42/`). When one of them changes series, it waits for every installed package with files in the old folder (*"1 day · coupled to apparmor"*), or reads `blocked by` a package with no rebuild yet. Arch states this link only in the paths, so nog reads the file lists, and only when such a move is pending
 - **One install command for every source** *(v1.9.0)* — `nog install <name>` looks in the repositories, then the AUR, then Flatpak, then Snap, and the table says which one answered before anything is downloaded or built. A Flatpak is matched exactly (the app ID, its last word, or the app's name — *gimp*, *spotify*); when several apps answer to a name nog numbers them and asks which one. `flatpak/<app-id>` and `snap/<name>` name the source. A backend that isn't set up is offered, once, to a person at the keyboard — never installed unasked
 - **What nog installs, nog removes** *(v1.9.0)* — `nog remove` recognises an installed Flatpak or snap by name and hands it to its own tool
@@ -152,7 +153,7 @@ Every member of a group inherits the highest tier any member has. You can use th
 
 The driver modules themselves don't need grouping. Once the kernel and headers agree, their rebuilds succeed on their own.
 
-Some links nog finds on its own, without a group: packages built from one recipe, a `lib32-` package and its 64-bit half, a library version another package still needs, *(v2.1.1)* a library version only a held package will bring, glibc's series *(v2.0.0)*, and *(v2.1.0)* perl or python moving to a new version: they wait for every installed package with modules in the old version's folder (`/usr/lib/perl5/5.42/`), so nothing is left where the new interpreter never looks.
+Some links nog finds on its own, without a group: packages built from one recipe, a `lib32-` package and its 64-bit half, a library version another package still needs, *(v2.1.1)* a library version only a held package will bring, *(v2.1.2)* a new package that would take over a held package's library files, glibc's series *(v2.0.0)*, and *(v2.1.0)* perl or python moving to a new version: they wait for every installed package with modules in the old version's folder (`/usr/lib/perl5/5.42/`), so nothing is left where the new interpreter never looks.
 
 ---
 
@@ -442,7 +443,7 @@ General settings, and **the authoritative hold durations**.
 
 ```toml
 [general]
-version = "2.1.1"
+version = "2.1.2"
 log_level = "info"
 
 [paths]
@@ -545,7 +546,7 @@ nog/
 |   |-- maint.rs          # What each source leaves behind: orphans, build trees, the choice  (v2.0.0)
 |   |-- history.rs        # Reads nog's own CSV logs  (v2.0.0)
 |   |-- tiers.rs          # Tier classification, including auto-coupling and [groups]
-|   |-- holds.rs          # Hold evaluation, the coupling rules, the linchpin rule (#5, v2.0.0), interpreters (#61, v2.1.0), needed libraries (#67, v2.1.1), the foreign fence
+|   |-- holds.rs          # Hold evaluation, the coupling rules, the linchpin rule (#5, v2.0.0), interpreters (#61, v2.1.0), needed libraries (#67, v2.1.1), packages pulled in (#68, v2.1.2), the foreign fence
 |   |-- sightings.rs      # When each update was first seen, so holds always end  (v1.5.2)
 |   |-- cache.rs          # nog clean: pacman's version order, per-tier cache retention  (v1.5.5)
 |   |-- local_db.rs       # Reads pacman's local database: dependency graph (v1.3.1), who links what (v1.4.2)
@@ -758,6 +759,22 @@ also the rebuilds that link the new library without saying so. To move
 everything now instead of waiting, promote the held package, and its partners
 come along: `nog update --promote openssl`. Never install `<A>` alone.
 
+### `failed to commit transaction (conflicting files)` · `<new>: /usr/lib/<lib>.so.N exists in filesystem (owned by <held>)`
+
+pacman refuses the whole transaction and nothing installs. A Ready package's new
+version needs a package you don't have yet (`<new>`), pacman brings it in, and
+that package carries files that a package nog is still holding owns today. Seen
+on 2026-11-11: `dotnet-runtime` needed `openssl-3`, the compat package with the
+OpenSSL 3 libraries, while openssl 3.6.5 (still owning them) was held on its way
+to 4.1.0.
+
+**As of v2.1.2, nog holds the Ready package with the held one** (`coupled to
+openssl`), and its siblings from the same recipe. nog compares library versions
+only (the file lists are not in the package databases), so a takeover with no
+library version in common can still get through; if you see this error on
+v2.1.2, please file a bug with the two package names. To move everything now:
+`nog update --promote openssl`.
+
 ### pacman's log shows only one ignored package
 
 After an incident you may check `/var/log/pacman.log` and find:
@@ -785,38 +802,26 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Roadmap
 
-> **v2.1.1** — 2026-11-10: a package that needs a library only a held package brings waits for it, so a held openssl no longer makes pacman refuse the whole update ([#67](https://github.com/jetomev/nog/issues/67)).
+> **v2.1.2** — 2026-11-11: a package that would bring in a new package taking over a held package's files waits for it ([#68](https://github.com/jetomev/nog/issues/68), found in the maintainer's own test of 2.1.1). The AUR goes from 2.1.0 straight to 2.1.2.
 >
-> **v2.1.0** — released 2026-10-23: unattended updates. `nog update --yes` for the installer, a timer or a script; an update that doesn't finish says so in its exit status; long AUR builds ask for the password once; perl and python wait for the packages rebuilt for their new version.
+> **v2.1.1** — 2026-11-10: a package that needs a library only a held package brings waits for it, so a held openssl no longer makes pacman refuse the whole update ([#67](https://github.com/jetomev/nog/issues/67)). On GitHub only.
 
-### v2.1.1 — the reverse soname rule (F-30 [#67](https://github.com/jetomev/nog/issues/67)) — tagged 2026-11-10; the AUR after Javier's local test
+### v2.1.2 — new packages that take a held package's files (F-31 [#68](https://github.com/jetomev/nog/issues/68)) — tagged 2026-11-11; the AUR after Javier's local test
+
+- [x] A Ready package whose new version brings in a package not installed yet, one providing a library version a held package owns today and drops, waits with the held package; its pkgbase siblings follow
+- [x] 313 → 319 tests (the end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-212.sh` OK (dotnet-runtime and dotnet-host Ready → Held; 2 moved, none the other way; pacman's view worked out from the databases: nothing new for the Ready set takes a held package's files, while the old list pulls `openssl-3` in)
+- [ ] Javier installs the locally built package and retries ([testing/](testing/20261111%20-%20Test%20Matrix%20for%20nog%20v2-1-2.md)); AUR 2.1.2-1 only on his pass; #67 and #68 closed then
+
+### v2.1.1 — the reverse soname rule (F-30 [#67](https://github.com/jetomev/nog/issues/67)) — tagged 2026-11-10; never on the AUR: Javier's test found F-31, shipped in 2.1.2
 
 - [x] A Ready package whose new version needs a library (or an exact versioned provide) that only a held package will bring waits with it, coupled and on the same countdown; the declared need from the package data, the undeclared one from a held library's version bump plus who uses the old one and was built after the new
 - [x] nog reads the package databases' `%DEPENDS%` (it read only `%PROVIDES%`)
 - [x] 304 → 313 tests (each new end-to-end one seen failing with the rule off), warnings 6; the desktop, read only: `scripts/dry-run-211.sh` OK (curl, git, krb5, libssh2, openssh, sudo, qca-qt6 Ready → Held, coupled to openssl; 62 moved in all, none the other way)
-- [ ] Javier installs the locally built package and runs the matrix ([testing/](testing/20261110%20-%20Test%20Matrix%20for%20nog%20v2-1-1.md)); AUR 2.1.1-1 only on his pass; #67 closed then
-
-### v2.1.0 — unattended updates ([#56](https://github.com/jetomev/nog/issues/56), [#57](https://github.com/jetomev/nog/issues/57), [#58](https://github.com/jetomev/nog/issues/58), [#59](https://github.com/jetomev/nog/issues/59), [#60](https://github.com/jetomev/nog/issues/60), [#61](https://github.com/jetomev/nog/issues/61), [#62](https://github.com/jetomev/nog/issues/62), [#63](https://github.com/jetomev/nog/issues/63)) — released 2026-10-23 (Javier's run: 34 checks; F-27 fixed in rc2)
-
-- [x] `nog update --yes` (F-20 #56): the handoff answered, pacman's question too; Unknown packages kept back and listed, never decided; with nobody at the keyboard the AUR's build review waits for a person; a failed later step takes the default and stops
-- [x] Nobody at the keyboard and no `--yes`: the cause said before anything changes (was "Cancelled")
-- [x] Long AUR builds keep sudo awake (`--sudoloop`); a password nobody typed in time is named as the cause (F-21 #57, from a real update on 2026-10-22)
-- [x] An update that leaves a step incomplete exits **3** and its runs line says **incomplete** (F-22 #58); the man page gains EXIT STATUS
-- [x] `--yes` with nobody at the keyboard asks sudo up front, and says how to set it up if a password would be needed (F-23 #59)
-- [x] Error messages say the exit status once (F-24 [#60](https://github.com/jetomev/nog/issues/60)): "exited with status 1", not "exited with status exit status: 1"
-- [x] 285 → 304 tests (each new one seen failing, but one written with its code: the folder reader, proven on the live machine instead), warnings 6; the KognogOS VM: `scripts/vm-run-210.sh` 4/4 PASS on 2026-10-23 (Y1 nobody at the keyboard → Not updating, 147 pending unchanged; Y2 sudo would ask → Not updating, unchanged; Y3 a pacman-only sudo rule → 41 updated, the AUR kept back with a hint, exit 0; Y4 a failing flatpak step → "no (--yes takes the default)", exit 3, runs line incomplete); the desktop: `scripts/dry-run-210.sh` OK
-- [x] **From Javier's run of rc1** (2026-10-23, 25/25): perl moved to a new version while apparmor and subversion, rebuilt for it, were still held — **interpreters now wait for the packages using their old module folder** (F-25 [#61](https://github.com/jetomev/nog/issues/61)); `nog history` printed a run's reboot advice upside down (F-26 [#62](https://github.com/jetomev/nog/issues/62))
-- [x] From the VM, proving `--sudoloop`: when sudo had forgotten the password, yay's keep-awake loop asked for it in the middle of yay's own menu — **nog now asks sudo itself, alone, right before the helper starts** (F-27 [#63](https://github.com/jetomev/nog/issues/63))
-- [x] Javier's answers: the record of the last completed update is **one for the whole computer** (`/var/lib/nog/last-update`); nog's own tier list **trimmed to generic packages** (PipeWire, WirePlumber, NetworkManager), the desktop and its apps being a distribution's choice
-- [x] Javier's run of rc1: 25/25 ([testing/](testing/20261023%20-%20Test%20Matrix%20for%20nog%20v2-1-0.md))
-- [x] Javier's re-run on rc2: §5 4/4; tag `v2.1.0` (signed) and the GitHub Release, 23 Oct
-- [x] AUR 2.1.0-1 (`d522a38`), after his install of the locally built package; #56–#63 closed
-
-**Validated 2026-09-29: nog works with paru** ([#12](https://github.com/jetomev/nog/issues/12)). With yay removed, `helper = "auto"` fell back to paru, a full update plan dated its AUR package correctly, and nog installed an AUR package through paru's build path. Record: [testing/](testing/20260929%20-%20Test%20Results%20for%20nog%20v1-5-1-paru.md).
+- [x] Javier installed the locally built package and ran it (2026-11-11 20:02): the openssl clash gone, but pacman refused on `openssl-3`'s files (F-31) → 2.1.2; 2.1.1 never goes to the AUR
 
 ### Later
 
-- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. Since v2.1.1 ([#67](https://github.com/jetomev/nog/issues/67)) the other direction too: a Ready package that *needs* a library, or an exact versioned provide, that only a held package will bring waits for it. What remains is the versioned `=` dependency on a package's own name and version, where the declaration is exact rather than a provide.
+- [ ] **Automatic dependency coupling** — read the exact-version dependencies out of the sync DB and hold those pairs together, rather than inferring them. An audit found 736 such pairs across the repos. v1.2.1 covers the ones that share a pkgbase, which is most of them; this would close the rest and let the version-cohort heuristic step back to handling only families that declare nothing at all. **The soname half of this shipped in v1.3.1** ([#13](https://github.com/jetomev/nog/issues/13)) — a Ready package that would stop providing a library something installed still needs is now held — and since v1.4.2 ([#16](https://github.com/jetomev/nog/issues/16)) "still needs" is read from the programs themselves, not only their declarations. Since v2.1.1 ([#67](https://github.com/jetomev/nog/issues/67)) the other direction too: a Ready package that *needs* a library, or an exact versioned provide, that only a held package will bring waits for it. Since v2.1.2 ([#68](https://github.com/jetomev/nog/issues/68)) also a new package pulled in that would take over a held package's library files. What remains is the versioned `=` dependency on a package's own name and version, where the declaration is exact rather than a provide.
 - [ ] **First-run setup** — on your first `nog update`, ask whether Tier 1 should auto-release after 30 days or wait for your explicit approval each time.
 - [ ] `nog rollback` — undo a recent update using pacman's cache
 - [ ] A Chaotic-AUR binary package
@@ -837,6 +842,18 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 
 ## Changelog
 
+### v2.1.2 — November 2026
+
+**A package that would bring in a new package taking over a held package's files now waits for it** (F-31 [#68](https://github.com/jetomev/nog/issues/68)). Found in the maintainer's own run of the locally built 2.1.1 on 2026-11-11, before it went to the AUR.
+
+- **openssl's case, part two.** 2.1.1 held openssl 4.1.0 and everything rebuilt for it together, and that part worked. But Arch's move to OpenSSL 4 also added `openssl-3`, a new compat package carrying the OpenSSL 3 libraries for programs not rebuilt yet, and `dotnet-runtime` (Ready) now needs it by name. pacman installed it alongside the held openssl 3.6.5, which still owns `libcrypto.so.3` and `libssl.so.3`, and refused the whole update: *"conflicting files … exists in filesystem (owned by openssl)"*. Nothing installed.
+- **The new rule.** For each Ready package, nog follows the dependencies nothing installed answers to the packages pacman would install new, and theirs in turn. If one of them provides a library version that a held package provides today and will drop, the files move only when the held package does, so the Ready package waits with it (`coupled to openssl`), and its siblings from the same recipe (`dotnet-host`) with it.
+- **Its limit, said plainly.** The package databases don't list files, so nog compares library versions. A new package taking over files with no library version in common would still get through; the error and what to do are in Troubleshooting.
+
+Tests: 313 → 319 (the end-to-end one seen failing with the rule switched off). Warnings unchanged at 6. On the test desktop that day: dotnet-runtime and dotnet-host move to Held, nothing else changes. The check, read only: [scripts/dry-run-212.sh](scripts/dry-run-212.sh), which also works out pacman's view from the databases on its own.
+
+**2.1.1 never went to the AUR**: the AUR moves from 2.1.0 to 2.1.2 in one step, with both fixes.
+
 ### v2.1.1 — November 2026
 
 **A package that needs a library only a held package brings now waits for it** (F-30 [#67](https://github.com/jetomev/nog/issues/67)). Found on the KognogOS test desktop on 2026-11-10, ahead of the monthly update round.
@@ -846,25 +863,6 @@ The kill-switch file failed to parse, usually after a hand-edit. nog fails **clo
 - The 32-bit side follows the same rules (`lib32-openssl`, `libcrypto.so=4-32`), and a package held this way can hold the next one in turn (the coupling rules repeat until nothing moves).
 
 Tests: 304 → 313 (the new ones seen failing with the rule switched off). Warnings unchanged at 6. The check on the desktop, read only, the installed 2.1.0 beside the new build: [scripts/dry-run-211.sh](scripts/dry-run-211.sh).
-
-### v2.1.0 — October 2026
-
-**Unattended updates** ([#56](https://github.com/jetomev/nog/issues/56) · F-21 [#57](https://github.com/jetomev/nog/issues/57) · F-22 [#58](https://github.com/jetomev/nog/issues/58) · F-23 [#59](https://github.com/jetomev/nog/issues/59)). The KognogOS installer and welcome app, a timer or a script can now run an update with nobody at the keyboard, and know how it ended.
-
-- **`nog update --yes`**: nog answers its own question and pacman's. The Ready packages go in. **Unknown** packages are kept back and listed: each has no usable build date, so updating it is a decision, and `--yes` never makes it (`yes | nog update` used to). With nobody at the keyboard, the AUR's build review waits for a person: those packages stay Ready, with a hint. When a later step fails, `--yes` takes the question's default and stops there.
-- **Nobody at the keyboard, said as the cause**: without `--yes`, nog says so before anything changes, instead of reading end-of-input as "no" and printing "Cancelled". With `--yes`, nog first checks that sudo can run pacman without a password, and if not, says how to set that up.
-- **Long AUR builds keep sudo awake** (`--sudoloop`, in yay and paru alike). On 2026-10-22 a seven-minute snapd build ended at a password prompt nobody was there to answer; now the password is asked once, when the step starts. When a password does time out, nog says that was the cause.
-- **An unfinished update says so where programs read it**: exit status **3**, and **incomplete** in the day's runs log (it was 0 and "done", and nogForge showed a green "done"). The man page gains an EXIT STATUS section.
-
-- **Error messages say the exit status once** (F-24 [#60](https://github.com/jetomev/nog/issues/60)): seven messages read "exited with status exit status: 1"; now "exited with status 1", or the signal that stopped the program.
-
-- **perl and python wait for the packages built for their new version** (F-25 [#61](https://github.com/jetomev/nog/issues/61), found in Javier's run): on 2026-10-23 perl went 5.42 → 5.44 while apparmor and subversion, already rebuilt for 5.44, were held a day longer, so their perl modules sat where the new perl never looks. Arch says this only in the folder names, so nog now reads who has files in the interpreter's old folder, only when such a move is pending, and the interpreter waits with them (`coupled to apparmor`, or `blocked by` a package with no rebuild yet). A new rule in the coupling chain.
-- **`nog history` keeps a run's lines in order** (F-26 [#62](https://github.com/jetomev/nog/issues/62)): newest run first, each run's own lines as written. A six-line reboot advice used to print upside down, and `nog status` showed its last line as the headline.
-- **The password is asked alone, before an AUR build starts** (F-27 [#63](https://github.com/jetomev/nog/issues/63), found in the KognogOS VM): when a long pacman step outlasted sudo's memory of the password, yay's keep-awake loop asked for it in the middle of yay's own menu, two programs reading the keyboard at once. nog now runs `sudo -v` itself right before the helper: a fresh ticket asks nothing, an expired one asks on its own line, and the loop keeps it fresh after. If sudo is not given the password, the build does not start and nog says so.
-- **One record of the last completed update for the whole computer**, `/var/lib/nog/last-update` (Javier's call): an update by any user, or through nogForge, counts for everyone. Written while sudo still remembers the password, so it never asks; where sudo may run pacman only (a timer's rule), the per-user record is the fallback.
-- **nog's own tier list is generic** (Javier's call): Tier 2 holds PipeWire, WirePlumber and NetworkManager. The desktop and its apps (Plasma, SDDM, Firefox, Dolphin, Konsole, Kate, grubForge, Alacritty, fish, alacrittyForge) are a distribution's or your choice; KognogOS ships its own, fuller list. pacman keeps an edited `/etc/nog/tier-pins.toml` as it is.
-
-Tests: 285 → 304 (each new one seen failing on purpose, except the folder reader's, written with its code and proven against this desktop's real file lists). Warnings unchanged at 6.
 
 *The complete history lives in [docs/CHANGELOG.md](docs/CHANGELOG.md).*
 

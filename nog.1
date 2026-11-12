@@ -1,6 +1,6 @@
 .\" nog.1 — nog man page
 .\" GNU GPL v3 — see LICENSE
-.TH NOG 1 "November 2026" "nog v2.1.1" "User Commands"
+.TH NOG 1 "November 2026" "nog v2.1.2" "User Commands"
 .
 .SH NAME
 nog \- tier-aware package manager for KognogOS
@@ -954,6 +954,19 @@ ships its own copy of the old library may wait needlessly. Found on
 2026-11-10: openssl 4 held for kmod, curl, sudo and openssh asking for
 \fBlibcrypto.so=4-64\fR. The way through is \fBnog update --promote
 openssl\fR, which brings the held partners along.
+.SS New packages that take a held package's files (v2.1.2, F-31, issue #68)
+A Ready package whose new version needs a package that is not installed
+makes pacman install that one too. When the new package provides a library
+version a held package provides today and will drop (\fBopenssl-3\fR, the
+compat package carrying \fBlibcrypto.so.3\fR, while \fBopenssl\fR 3.6.5
+still owns those files and is held on its way to 4.1.0), the two would own
+the same files and pacman refuses the whole transaction. So the Ready package
+waits with the held one (\fB"17 days \(bu coupled to openssl"\fR), and its
+pkgbase siblings with it. Found on 2026-11-11: \fBdotnet-runtime\fR needing
+\fBopenssl-3\fR. Only library versions are compared: the file lists are not
+in the package databases, so a takeover sharing no library version with the
+held package is not seen. The way through is \fBnog update --promote
+openssl\fR.
 .SS Groups (advanced)
 The optional
 .B [groups]

@@ -25,8 +25,15 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 - [x] **F-30 #67**: openssl 4.1.0 held (kmod), Arch's OpenSSL 4 rebuilds Ready; curl/sudo/openssh need `libcrypto.so=4-64` → pacman would refuse the whole update. Fix: `holds::needs_coupling_demotions` in the coupling chain (declared need + undeclared via a held soname bump and build dates); sync_db reads `%DEPENDS%`. Tests 304 → 313, warnings 6. `scripts/dry-run-211.sh` OK: the seven Held, coupled to openssl; 62 moved in all
 - [x] Docs + version 2.1.1 everywhere, changelog, matrix `testing/20261110 - Test Matrix for nog v2-1-1.md`
 - [x] Tag v2.1.1 (signed), GitHub Release Latest (reproducible tar `ee47265d…` + SHA256SUMS, both .asc), AUR recipe committed locally in `aur-nog-remote` and built in `~/Programs/aur-nog/build-211/` (313 tests in check()), NOT pushed
-- [ ] **Javier**: install the local package — `nog install ~/Programs/aur-nog/build-211/nog-2.1.1-1-x86_64.pkg.tar.zst`, then `nog --version`, then `nog update` answering n (matrix §3, its "Resume here" block has every step; before Saturday 11-14, 9 AM); then Claude §4 with the installed binary
-- [ ] On his pass: AUR push, close #67; kognogos-dev gets 2.1.1 before its round
+- [x] **Javier**: installed 2.1.1 and ran it (2026-11-11 20:02): the openssl clash gone, but pacman refused on `openssl-3`'s files → **F-31 #68**, fixed in 2.1.2; 2.1.1 never goes to the AUR
+- [x] §4 checked with the installed 2.1.1: the seven held (dry-run-212 R1)
+
+## 2026-11-11 · v2.1.2 — new packages that take a held package's files (Javier's 2.1.1 run)
+- [x] **F-31 #68**: `dotnet-runtime` (Ready) needs the new `openssl-3` compat package; pacman put it beside the held openssl 3.6.5 and refused on `libcrypto.so.3`/`libssl.so.3`. Fix: `holds::pulled_in_coupling_demotions` (new packages pulled in, followed transitively; a soname a held package owns and drops → couple to it; pkgbase siblings follow). Tests 313 → 319, warnings 6. `scripts/dry-run-212.sh` OK: the dotnet pair Held, 2 moved; R4 (pacman's view from the databases) nothing new takes held files, and it FAILS on 2.1.1's list
+- [x] Docs + version 2.1.2 everywhere, changelog, matrix `testing/20261111 - Test Matrix for nog v2-1-2.md` (its §3 "Resume here" box has every step)
+- [ ] Tag v2.1.2, GitHub Release, AUR recipe built locally in `~/Programs/aur-nog/build-212/` — NOT pushed
+- [ ] **Javier**: `nog install ~/Programs/aur-nog/build-212/nog-2.1.2-1-x86_64.pkg.tar.zst`, `nog --version`, `nog update` answering n, then the real retry answering y (matrix §3; before Saturday 11-14, 9 AM); then Claude §4
+- [ ] On his pass: ONE AUR push of 2.1.2-1 (the unpushed 2.1.1 commit in aur-nog-remote folded in), close #67 + #68; kognogos-dev gets 2.1.2 before its round
 
 ## Found 2026-10-30 — hypeForge's Sway package
 - [ ] **F-28 (#64): a package held by another package's exact dependency reads as "you answered no, or it hit a problem"** — `sway-hypeforge` pins `sway=1:1.12` on purpose (hypeForge D-128); nog should say Sway is held by it until the rebuild, in `install`, `update` and unattended updates

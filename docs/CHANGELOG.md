@@ -2,6 +2,18 @@
 
 *The README carries the two most recent entries; the complete history lives here, newest-first.*
 
+### v2.1.2 — November 2026
+
+**A package that would bring in a new package taking over a held package's files now waits for it** (F-31 [#68](https://github.com/jetomev/nog/issues/68)). Found in the maintainer's own run of the locally built 2.1.1 on 2026-11-11, before it went to the AUR.
+
+- **openssl's case, part two.** 2.1.1 held openssl 4.1.0 and everything rebuilt for it together, and that part worked. But Arch's move to OpenSSL 4 also added `openssl-3`, a new compat package carrying the OpenSSL 3 libraries for programs not rebuilt yet, and `dotnet-runtime` (Ready) now needs it by name. pacman installed it alongside the held openssl 3.6.5, which still owns `libcrypto.so.3` and `libssl.so.3`, and refused the whole update: *"conflicting files … exists in filesystem (owned by openssl)"*. Nothing installed.
+- **The new rule.** For each Ready package, nog follows the dependencies nothing installed answers to the packages pacman would install new, and theirs in turn. If one of them provides a library version that a held package provides today and will drop, the files move only when the held package does, so the Ready package waits with it (`coupled to openssl`), and its siblings from the same recipe (`dotnet-host`) with it.
+- **Its limit, said plainly.** The package databases don't list files, so nog compares library versions. A new package taking over files with no library version in common would still get through; the error and what to do are in Troubleshooting.
+
+Tests: 313 → 319 (the end-to-end one seen failing with the rule switched off). Warnings unchanged at 6. On the test desktop that day: dotnet-runtime and dotnet-host move to Held, nothing else changes. The check, read only: [scripts/dry-run-212.sh](scripts/dry-run-212.sh), which also works out pacman's view from the databases on its own.
+
+**2.1.1 never went to the AUR**: the AUR moves from 2.1.0 to 2.1.2 in one step, with both fixes.
+
 ### v2.1.1 — November 2026
 
 **A package that needs a library only a held package brings now waits for it** (F-30 [#67](https://github.com/jetomev/nog/issues/67)). Found on the KognogOS test desktop on 2026-11-10, ahead of the monthly update round.
