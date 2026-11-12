@@ -31,7 +31,7 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 ## 2026-11-11 · v2.1.2 — new packages that take a held package's files (Javier's 2.1.1 run)
 - [x] **F-31 #68**: `dotnet-runtime` (Ready) needs the new `openssl-3` compat package; pacman put it beside the held openssl 3.6.5 and refused on `libcrypto.so.3`/`libssl.so.3`. Fix: `holds::pulled_in_coupling_demotions` (new packages pulled in, followed transitively; a soname a held package owns and drops → couple to it; pkgbase siblings follow). Tests 313 → 319, warnings 6. `scripts/dry-run-212.sh` OK: the dotnet pair Held, 2 moved; R4 (pacman's view from the databases) nothing new takes held files, and it FAILS on 2.1.1's list
 - [x] Docs + version 2.1.2 everywhere, changelog, matrix `testing/20261111 - Test Matrix for nog v2-1-2.md` (its §3 "Resume here" box has every step)
-- [ ] Tag v2.1.2, GitHub Release, AUR recipe built locally in `~/Programs/aur-nog/build-212/` — NOT pushed
+- [x] Tag v2.1.2 (signed), GitHub Release Latest (reproducible tar `117abae4…` + SHA256SUMS, both .asc; 2.1.1's notes marked superseded), AUR recipe 2.1.2-1 committed locally in `aur-nog-remote` as ONE commit (the unpushed 2.1.1 one folded in; ahead 1, NOT pushed), built in `~/Programs/aur-nog/build-212/` (319 tests in check(); sha + gpg Passed); the packaged binary passes dry-run-212
 - [ ] **Javier**: `nog install ~/Programs/aur-nog/build-212/nog-2.1.2-1-x86_64.pkg.tar.zst`, `nog --version`, `nog update` answering n, then the real retry answering y (matrix §3; before Saturday 11-14, 9 AM); then Claude §4
 - [ ] On his pass: ONE AUR push of 2.1.2-1 (the unpushed 2.1.1 commit in aur-nog-remote folded in), close #67 + #68; kognogos-dev gets 2.1.2 before its round
 
