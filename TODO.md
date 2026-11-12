@@ -37,7 +37,7 @@ nog is the package updater for KognogOS. It holds new packages back for a waitin
 ## 2026-11-11 · v2.1.3 — libraries a package does not declare (Javier's 2.1.2 run)
 - [x] **F-32 #69**: simdjson (no sonames declared) 1:5.0.5 → 2:5.1.1 went in, took `libsimdjson.so.34` from held nodejs (`node` dead); libmupdf did the same to zathura-pdf-mupdf. Fix: `local_db::library_files` + `holds::undeclared_soname_demotions` (Ready + upstream change + undeclared lib + a held linker built after it). Tests 319 → 327, warnings 6. Damage check of the real run: exactly those two. `scripts/replay-f32.py` over the real run: 7 of 180 held, both breaks + 5 needless
 - [x] Docs + version 2.1.3 everywhere, changelog, matrix `testing/20261111 - Test Matrix for nog v2-1-3.md` (its §3 "Resume here" box has every step)
-- [ ] Tag v2.1.3, GitHub Release, AUR recipe built locally in `~/Programs/aur-nog/build-213/` — NOT pushed
+- [x] Tag v2.1.3 (signed), GitHub Release Latest (reproducible tar `81241c85…` + SHA256SUMS, both .asc; 2.1.2's notes marked superseded), AUR recipe 2.1.3-1 committed locally as ONE commit (2.1.1/2.1.2 never pushed, folded in; ahead 1, NOT pushed), built in `~/Programs/aur-nog/build-213/` (327 tests in check(); sha + gpg Passed)
 - [ ] **Javier** (after the Council's repair: simdjson + libmupdf back from the cache, locked): `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst`, `nog --version`, `nog unlock simdjson` + `libmupdf`, `nog update` answering n, `node --version` (matrix §3; before Saturday 11-14, 9 AM); then Claude §4
 - [ ] On his pass: ONE AUR push of 2.1.3-1 (the unpushed 2.1.2 commit in aur-nog-remote folded in), close #67 + #68 + #69; kognogos-dev gets 2.1.3 before its round
 
