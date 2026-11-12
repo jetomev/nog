@@ -27,14 +27,20 @@
 
 ## §3 · Javier, this desktop — step by step
 
-**Resume here (written 2026-11-11).** The package is built by makepkg from the published GitHub release in `~/Programs/aur-nog/build-213/` (the tests ran inside the build; its checksum and signature checked). Tonight's repair comes first and is the Council's (simdjson 1:5.0.5-1 and libmupdf 1.28.5-2 back from pacman's cache with `nog install`, each `nog lock`ed). Hand Javier one step at a time, in plain words: what it does, the one command, what he should see, then wait for his pasted output. Deadline: before the monthly round, **Saturday 2026-11-14, 9 AM**.
+**Resume here (updated 2026-11-11, 21:15).** The package is built by makepkg from the published GitHub release in `~/Programs/aur-nog/build-213/` (the tests ran inside the build; its checksum and signature checked). Javier said yes to the AUR at 20:47; the push of **2.1.3-1** waits only on this retry passing. State before it (the Council's repair, 20:56): simdjson 1:5.0.5 back from the cache and `nog lock`ed, node works; libmupdf 1.28.5-2 back (not locked). zathura's PDF plugin is still broken for another reason, gumbo (F-33, [#70](https://github.com/jetomev/nog/issues/70)): `libgumbo.so.4` comes with gumbo-parser 0.14.1, which nog has held for 38 days as `blocked by litehtml0.9`, an orphan nothing on this computer uses. Step 4 removes it, so the update in step 6 brings gumbo-parser too.
+
+Hand Javier one step at a time, in plain words: what it does, the one command, what he should see, then wait for his pasted output. Deadline: before the monthly round, **Saturday 2026-11-14, 9 AM**.
 
 1. Install: `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` — swaps 2.1.2 for 2.1.3, nothing else.
 2. Version: `nog --version` → `nog 2.1.3`.
-3. The live test of the new rule: `nog unlock simdjson`, then `nog update`, answer **n**. simdjson shows in the Held table, `coupled to nodejs`. nog now does what the lock did, so the lock can stay off. Same for libmupdf (`coupled to zathura-pdf-mupdf`).
-4. `node --version` prints a version (the repair holds).
-5. Then Claude runs §4, fills the Result columns, tallies with `tally-matrix.py`.
-6. Only on his pass: the AUR push of **2.1.3-1** from `~/Programs/aur-nog-remote/` (one push: the 2.1.2 commit there is folded into it, never pushed; ssh agent per `~/.claude/rules/aur.md`; pre-flight pkgdesc ≤ 255 bytes) → close #67, #68 and #69 with the story → kognogos-dev gets 2.1.3 before its round (his command, prepared by Claude) → kognogos.org card + Vault note.
+3. `nog unlock simdjson` — nog's new rule now does what the lock did.
+4. `nog remove litehtml0.9 litehtml0.9-debug` — the orphan (nothing needs it, no program links it); only those two go.
+5. Look first: `nog update`, answer **n**. Held: simdjson `coupled to nodejs`, libmupdf `coupled to zathura-pdf-mupdf`. Ready: gumbo-parser 0.13.2-1 → 0.14.1-1.
+6. The real run: `nog update`, answer **y**. Finishes, no "conflicting files".
+7. `node --version` prints `v26.12.1`.
+8. `ldd /usr/lib/zathura/libpdf-mupdf.so | grep "not found"` prints nothing (zathura reads PDFs again).
+9. Then Claude runs §4: the damage check over his run (every program and plugin against every library file it removed), fills the Result columns, tallies with `tally-matrix.py`.
+10. Only on his pass: the AUR push of **2.1.3-1** from `~/Programs/aur-nog-remote/` (one push: 2.1.1 and 2.1.2 were never pushed and are folded in; ssh agent per `~/.claude/rules/aur.md`; pre-flight pkgdesc ≤ 255 bytes) → close #67, #68 and #69 with the story → kognogos-dev gets 2.1.3 before its round (his command, prepared by Claude) → kognogos.org card + Vault note. #70 stays open (a later version).
 
 A finding during his test goes into the same unpublished 2.1.3 (rebuild, re-test), never a second AUR push.
 
@@ -42,15 +48,19 @@ A finding during his test goes into the same unpublished 2.1.3 (rebuild, re-test
 |---|---|---|---|---|
 | 3.1 | `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.2 → 2.1.3); no `.sig` question | | |
 | 3.2 | `nog --version` | `nog 2.1.3` | | |
-| 3.3 | `nog unlock simdjson`, `nog unlock libmupdf`, then `nog update`, answer **n** | simdjson Held `coupled to nodejs`, libmupdf Held `coupled to zathura-pdf-mupdf`; answering n changes nothing | | |
-| 3.4 | `node --version` | a version number, no "cannot open shared object file" | | |
+| 3.3 | `nog unlock simdjson` | the lock is gone | | |
+| 3.4 | `nog remove litehtml0.9 litehtml0.9-debug` | only those two removed | | |
+| 3.5 | `nog update`, answer **n** | simdjson Held `coupled to nodejs`; libmupdf Held `coupled to zathura-pdf-mupdf`; gumbo-parser Ready; answering n changes nothing | | |
+| 3.6 | `nog update`, answer **y** | the run finishes (`Done · update`), no "conflicting files" | | |
+| 3.7 | `node --version` | `v26.12.1` | | |
+| 3.8 | `ldd /usr/lib/zathura/libpdf-mupdf.so \| grep "not found"` | prints nothing | | |
 
 ## §4 · Claude, after Javier's install
 
 | # | Check | Expected | Result | Notes |
 |---|---|---|---|---|
-| 4.1 | `NOG_NEW=/usr/bin/nog NOG_OLD=/usr/bin/nog scripts/dry-run-213.sh` | R2b simdjson Held, coupled to nodejs; OK | | |
-| 4.2 | the damage check re-run over Saturday's round | no program asks for a removed library file | | |
+| 4.1 | the damage check over his 3.6 run (old packages from the cache, every installed ELF) | no program or plugin asks for a removed library file | | |
+| 4.2 | the same check after Saturday's round | the same | | |
 
 ## Findings
 
