@@ -27,13 +27,13 @@
 
 ## §3 · Javier, this desktop — step by step
 
-**Resume here (updated 2026-11-11, 21:15).** The package is built by makepkg from the published GitHub release in `~/Programs/aur-nog/build-213/` (the tests ran inside the build; its checksum and signature checked). Javier said yes to the AUR at 20:47; the push of **2.1.3-1** waits only on this retry passing. State before it (the Council's repair, 20:56): simdjson 1:5.0.5 back from the cache and `nog lock`ed, node works; libmupdf 1.28.5-2 back (not locked). zathura's PDF plugin is still broken for another reason, gumbo (F-33, [#70](https://github.com/jetomev/nog/issues/70)): `libgumbo.so.4` comes with gumbo-parser 0.14.1, which nog has held for 38 days as `blocked by litehtml0.9`, an orphan nothing on this computer uses. Step 4 removes it, so the update in step 6 brings gumbo-parser too.
+**Resume here (updated 2026-11-11, 21:15).** The package is built by makepkg from the published GitHub release in `~/Programs/aur-nog/build-213/` (the tests ran inside the build; its checksum and signature checked). Javier said yes to the AUR at 20:47; the push of **2.1.3-1** waits only on this retry passing. State before it (the Council's repair, 20:56): simdjson 1:5.0.5 back from the cache and `nog lock`ed, node works; libmupdf 1.28.5-2 back and `nog lock`ed (20:57). zathura's PDF plugin is still broken for another reason, gumbo (F-33, [#70](https://github.com/jetomev/nog/issues/70)): `libgumbo.so.4` comes with gumbo-parser 0.14.1, which nog has held for 38 days as `blocked by litehtml0.9`, an orphan nothing on this computer uses. Step 4 removes it, so the update in step 6 brings gumbo-parser too.
 
 Hand Javier one step at a time, in plain words: what it does, the one command, what he should see, then wait for his pasted output. Deadline: before the monthly round, **Saturday 2026-11-14, 9 AM**.
 
 1. Install: `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` — swaps 2.1.2 for 2.1.3, nothing else.
 2. Version: `nog --version` → `nog 2.1.3`.
-3. `nog unlock simdjson` — nog's new rule now does what the lock did.
+3. `nog unlock simdjson libmupdf` — nog's new rule now does what the two locks did.
 4. `nog remove litehtml0.9 litehtml0.9-debug` — the orphan (nothing needs it, no program links it); only those two go.
 5. Look first: `nog update`, answer **n**. Held: simdjson `coupled to nodejs`, libmupdf `coupled to zathura-pdf-mupdf`. Ready: gumbo-parser 0.13.2-1 → 0.14.1-1.
 6. The real run: `nog update`, answer **y**. Finishes, no "conflicting files".
@@ -48,7 +48,7 @@ A finding during his test goes into the same unpublished 2.1.3 (rebuild, re-test
 |---|---|---|---|---|
 | 3.1 | `nog install ~/Programs/aur-nog/build-213/nog-2.1.3-1-x86_64.pkg.tar.zst` | asks his password, then only nog changes (2.1.2 → 2.1.3); no `.sig` question | | |
 | 3.2 | `nog --version` | `nog 2.1.3` | | |
-| 3.3 | `nog unlock simdjson` | the lock is gone | | |
+| 3.3 | `nog unlock simdjson libmupdf` | both locks gone | | |
 | 3.4 | `nog remove litehtml0.9 litehtml0.9-debug` | only those two removed | | |
 | 3.5 | `nog update`, answer **n** | simdjson Held `coupled to nodejs`; libmupdf Held `coupled to zathura-pdf-mupdf`; gumbo-parser Ready; answering n changes nothing | | |
 | 3.6 | `nog update`, answer **y** | the run finishes (`Done · update`), no "conflicting files" | | |
