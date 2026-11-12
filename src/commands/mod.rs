@@ -2304,7 +2304,8 @@ fn run_update(realign: bool) -> UpdateEnd {
     //
     // The rules — lib32 pairs, pkgbase siblings, version cohorts, (v1.3.1,
     // issue #13) dropped sonames, (v2.1.1, F-30 #67) needed sonames only a held
-    // package supplies, and interpreter folders; see `holds::coupling_demotions`. Runs
+    // package supplies, (v2.1.2, F-31 #68) new packages pulled in that take over a
+    // held package's libraries, and interpreter folders; see `holds::coupling_demotions`. Runs
     // last, so it sees the post-realign buckets and feeds the ignore list below.
     //
     // The fourth rule exists because the first three all match on *names*, and

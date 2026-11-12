@@ -736,6 +736,129 @@ pub fn needs_coupling_demotions(
     out
 }
 
+/// The name a dependency entry asks for, its version constraint dropped:
+/// `openssl-3`, `libcrypto.so=4-64` -> `libcrypto.so`, `glibc>=2.44` -> `glibc`.
+fn dep_name(entry: &str) -> &str {
+    entry.split(['<', '>', '=']).next().unwrap_or(entry)
+}
+
+/// Couple a Ready package to the held package whose files a package it pulls
+/// in would take over (F-31, #68).
+///
+/// Seen on 2026-11-11, Javier's run of 2.1.1: openssl 3.6.5 -> 4.1.0 held,
+/// and with it everything rebuilt for OpenSSL 4. But Arch also rebuilt
+/// `dotnet-runtime` to need `openssl-3`, a brand-new compat package carrying
+/// the OpenSSL 3 libraries. `dotnet-runtime` was Ready, so pacman pulled
+/// `openssl-3` in, and refused everything:
+///
+/// ```text
+/// openssl-3: /usr/lib/libcrypto.so.3 exists in filesystem (owned by openssl)
+/// ```
+///
+/// Those files move from `openssl` to `openssl-3` only when openssl itself
+/// moves to 4.1.0, which no longer ships them. No rule saw it: the need is a
+/// package name, not a soname, and the package is not installed at all.
+///
+/// The files are not in the sync database, so the sign read is the provides:
+/// a package the update would install new (a dependency nothing installed
+/// satisfies, followed through its own dependencies) that provides a soname a
+/// held package's installed version provides and its new one drops is that
+/// library's new home. It can only arrive in the same run as the held package
+/// that leaves, so the Ready package pulling it in waits for that one and
+/// shares its countdown. Its pkgbase siblings (`dotnet-host`) follow through
+/// the fixpoint.
+pub fn pulled_in_coupling_demotions(
+    ready: &[CouplingPkg],
+    held: &[CouplingPkg],
+    data: &SonameData,
+) -> Vec<(String, String)> {
+    if ready.is_empty() || held.is_empty() || data.installed_provides.is_empty() {
+        return Vec::new();
+    }
+
+    // What each held package leaves behind, by soname.
+    let dropped: Vec<(&CouplingPkg, HashSet<&str>)> = held
+        .iter()
+        .filter_map(|h| {
+            let before = soname_set(data.installed_provides.get(&h.name));
+            let after = soname_set(data.new_provides.get(&h.name));
+            let gone: HashSet<&str> = before.difference(&after).copied().collect();
+            (!gone.is_empty()).then_some((h, gone))
+        })
+        .collect();
+    if dropped.is_empty() {
+        return Vec::new();
+    }
+
+    // Does something installed already answer this dependency? Then pacman
+    // pulls nothing new for it.
+    let satisfied = |entry: &str| {
+        let name = dep_name(entry);
+        let exact = is_versioned(entry);
+        data.installed_provides.contains_key(name) && !exact
+            || data.installed_provides.values().flatten().any(|e| {
+                if exact { e == entry } else { dep_name(e) == name }
+            })
+    };
+    // The packages pacman would install new for this dependency: the one of
+    // that name, or failing that whatever provides it.
+    fn pulled_for<'a>(data: &'a SonameData, entry: &str) -> Vec<&'a str> {
+        let name = dep_name(entry);
+        if let Some((k, _)) = data.new_provides.get_key_value(name) {
+            if !data.installed_provides.contains_key(name) {
+                return vec![k.as_str()];
+            }
+        }
+        data.new_provides
+            .iter()
+            .filter(|(p, list)| {
+                !data.installed_provides.contains_key(p.as_str())
+                    && list.iter().any(|e| if is_versioned(entry) { e == entry } else { dep_name(e) == name })
+            })
+            .map(|(p, _)| p.as_str())
+            .collect()
+    }
+
+    let mut out: Vec<(String, String)> = Vec::new();
+    for cand in ready {
+        // Everything this candidate's new version would bring in, followed
+        // through the new packages' own dependencies.
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut queue: Vec<&str> = data
+            .new_depends
+            .get(&cand.name)
+            .into_iter()
+            .flatten()
+            .filter(|e| !satisfied(e))
+            .flat_map(|e| pulled_for(data, e))
+            .collect();
+        let mut takers: Vec<&CouplingPkg> = Vec::new();
+        while let Some(n) = queue.pop() {
+            if !seen.insert(n) || seen.len() > 64 {
+                continue;
+            }
+            let provides = soname_set(data.new_provides.get(n));
+            for (h, gone) in &dropped {
+                if !provides.is_disjoint(gone) {
+                    takers.push(h);
+                }
+            }
+            queue.extend(
+                data.new_depends
+                    .get(n)
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| !satisfied(e))
+                    .flat_map(|e| pulled_for(data, e)),
+            );
+        }
+        if let Some(h) = longest_held(&takers) {
+            out.push((cand.name.clone(), h.name.clone()));
+        }
+    }
+    out
+}
+
 /// v2.1.0 (F-25, #61): the interpreters whose compiled modules install into a
 /// folder named for the interpreter's version series — `usr/lib/perl5/5.42/`,
 /// `usr/lib/python3.14/` — with how many version components make the series.
@@ -818,6 +941,7 @@ pub fn coupling_demotions(
         .chain(cohort_coupling_demotions(ready, held))
         .chain(soname_coupling_demotions(ready, held, soname))
         .chain(needs_coupling_demotions(ready, held, soname))
+        .chain(pulled_in_coupling_demotions(ready, held, soname))
         .chain(module_dir_coupling_demotions(ready, held, soname))
     {
         if claimed.insert(name.clone()) {
@@ -2046,5 +2170,118 @@ mod tests {
         }
         assert!(held.iter().any(|h| h.name == "foo"), "foo waits for curl");
         assert_eq!(ready.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["libbpf"]);
+    }
+
+    /// Javier's 2.1.1 run, 2026-11-11 20:02: the openssl desktop plus the
+    /// dotnet pair and Arch's new `openssl-3` compat package, from the real
+    /// sync and local databases.
+    fn openssl_3_desktop() -> (Vec<CouplingPkg>, Vec<CouplingPkg>, SonameData) {
+        let (mut ready, held, mut data) = openssl_desktop();
+        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        data.installed_provides.insert("dotnet-host".into(), v(&[]));
+        data.installed_provides.insert("dotnet-runtime".into(), v(&["dotnet-runtime=10.0", "dotnet-runtime-10.0"]));
+        data.installed_depends.insert("dotnet-host".into(), v(&["glibc", "libgcc", "libstdc++"]));
+        data.installed_depends.insert(
+            "dotnet-runtime".into(),
+            v(&["dotnet-host", "glibc", "icu", "krb5", "libgcc", "libstdc++", "libunwind", "zlib", "openssl"]),
+        );
+        data.new_provides.insert("dotnet-host".into(), v(&[]));
+        data.new_provides.insert("dotnet-runtime".into(), v(&["dotnet-runtime=10.0", "dotnet-runtime-10.0"]));
+        data.new_provides.insert("openssl-3".into(), v(&["libcrypto.so=3-64", "libssl.so=3-64"]));
+        data.new_depends.insert("dotnet-host".into(), v(&["glibc", "libgcc", "libstdc++"]));
+        data.new_depends.insert(
+            "dotnet-runtime".into(),
+            v(&["dotnet-host", "glibc", "icu", "krb5", "libgcc", "libstdc++", "libunwind", "zlib", "openssl-3"]),
+        );
+        data.new_depends.insert("openssl-3".into(), v(&["brotli", "glibc", "zlib", "zstd"]));
+        data.new_built.insert("dotnet-host".into(), 1794033591);
+        data.new_built.insert("dotnet-runtime".into(), 1794033591);
+        data.new_built.insert("openssl-3".into(), 1793476754);
+        let core = Some("dotnet-core");
+        ready.push(pkg("dotnet-host", "10.0.13.sdk113-1", "10.0.14.sdk114-2", core, 0));
+        ready.push(pkg("dotnet-runtime", "10.0.13.sdk113-1", "10.0.14.sdk114-2", core, 0));
+        (ready, held, data)
+    }
+
+    /// The fixpoint as `commands::update` runs it; returns what stays Ready.
+    fn settle(ready: &mut Vec<CouplingPkg>, held: &mut Vec<CouplingPkg>, data: &SonameData) -> HashMap<String, String> {
+        let mut why: HashMap<String, String> = HashMap::new();
+        let mut passes = 0;
+        loop {
+            let d = coupling_demotions(ready, held, data);
+            if d.is_empty() {
+                break;
+            }
+            passes += 1;
+            assert!(passes < 16);
+            let names: HashSet<&str> = d.iter().map(|(n, _)| n.as_str()).collect();
+            let (out, keep): (Vec<_>, Vec<_>) = ready.drain(..).partition(|p| names.contains(p.name.as_str()));
+            *ready = keep;
+            held.extend(out.into_iter().map(|mut p| { p.remaining = 18; p }));
+            why.extend(d);
+        }
+        why
+    }
+
+    #[test]
+    fn the_2_1_1_rules_let_dotnet_pull_openssl_3_in() {
+        // The failing direction: every rule 2.1.1 had leaves dotnet Ready, and
+        // pacman refused the run on openssl-3's files.
+        let (ready, held, data) = openssl_3_desktop();
+        let old: Vec<(String, String)> = pkgbase_coupling_demotions(&ready, &held)
+            .into_iter()
+            .chain(cohort_coupling_demotions(&ready, &held))
+            .chain(soname_coupling_demotions(&ready, &held, &data))
+            .chain(needs_coupling_demotions(&ready, &held, &data))
+            .chain(module_dir_coupling_demotions(&ready, &held, &data))
+            .collect();
+        assert!(!old.iter().any(|(n, _)| n.starts_with("dotnet")), "{old:?}");
+    }
+
+    #[test]
+    fn dotnet_waits_for_openssl_and_dotnet_host_follows() {
+        let (mut ready, mut held, data) = openssl_3_desktop();
+        assert!(pulled_in_coupling_demotions(&ready, &held, &data)
+            .contains(&("dotnet-runtime".to_string(), "openssl".to_string())));
+        let why = settle(&mut ready, &mut held, &data);
+        assert_eq!(why.get("dotnet-runtime").map(String::as_str), Some("openssl"));
+        assert_eq!(why.get("dotnet-host").map(String::as_str), Some("dotnet-runtime"), "the pkgbase rule");
+        assert_eq!(ready.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["libbpf"]);
+    }
+
+    #[test]
+    fn nothing_is_pulled_in_when_openssl_is_ready() {
+        // openssl moving in the same run frees the files: openssl-3 may come.
+        let (mut ready, mut held, data) = openssl_3_desktop();
+        let moved: Vec<CouplingPkg> = held.drain(..).collect();
+        ready.extend(moved.into_iter().map(|mut p| { p.remaining = 0; p }));
+        assert!(pulled_in_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_new_package_taking_nothing_from_a_held_one_holds_nothing() {
+        let (ready, held, mut data) = openssl_3_desktop();
+        data.new_provides.insert("openssl-3".into(), vec!["libfoo.so=1-64".into()]);
+        assert!(pulled_in_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn a_dependency_already_installed_pulls_nothing() {
+        let (ready, held, mut data) = openssl_3_desktop();
+        data.installed_provides.insert("openssl-3".into(), vec![]);
+        assert!(pulled_in_coupling_demotions(&ready, &held, &data).is_empty());
+    }
+
+    #[test]
+    fn the_takeover_is_found_through_another_new_package() {
+        // dotnet-runtime -> dotnet-crypto (new) -> openssl-3 (new).
+        let (ready, held, mut data) = openssl_3_desktop();
+        let deps = data.new_depends.get_mut("dotnet-runtime").unwrap();
+        deps.retain(|d| d != "openssl-3");
+        deps.push("dotnet-crypto".into());
+        data.new_provides.insert("dotnet-crypto".into(), vec![]);
+        data.new_depends.insert("dotnet-crypto".into(), vec!["openssl-3".into()]);
+        assert!(pulled_in_coupling_demotions(&ready, &held, &data)
+            .contains(&("dotnet-runtime".to_string(), "openssl".to_string())));
     }
 }
